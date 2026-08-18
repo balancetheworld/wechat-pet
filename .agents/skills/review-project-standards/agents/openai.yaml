@@ -1,0 +1,4 @@
+interface:
+  display_name: "项目规范检查"
+  short_description: "分别检查当日改动与整体项目，并按风险讲解问题根因和最小整改方式"
+  default_prompt: "使用 $review-project-standards 检查今天的改动和整个项目，并按严重程度给出整改建议。"
