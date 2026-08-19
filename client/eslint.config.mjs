@@ -7,8 +7,7 @@ export default antfu(
     formatters: false,
   },
   {
-    name: 'client/ignores',
-    ignores: ['node_modules/**', 'dist/**', '.taro/**', '.temp/**', 'coverage/**'],
+    ignores: ['**/node_modules/**', '**/dist/**', '**/.taro/**', '**/.temp/**', '**/coverage/**'],
   },
   {
     name: 'client/globals-and-rules',

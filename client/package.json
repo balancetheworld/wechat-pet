@@ -40,9 +40,6 @@
     "dev:jd": "npm run build:jd -- --watch",
     "dev:harmony-hybrid": "npm run build:harmony-hybrid -- --watch"
   },
-  "lint-staged": {
-    "*.{js,mjs,ts,tsx}": "eslint --fix"
-  },
   "dependencies": {
     "@babel/runtime": "^7.24.4",
     "@tarojs/components": "4.2.1",
@@ -96,5 +93,8 @@
     "tsconfig-paths-webpack-plugin": "^4.1.0",
     "typescript": "^5.4.5",
     "webpack": "5.91.0"
+  },
+  "lint-staged": {
+    "*.{js,mjs,ts,tsx,json}": "eslint --fix"
   }
 }
