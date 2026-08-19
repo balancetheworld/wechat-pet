@@ -17,6 +17,11 @@ server/bin
 *.db
 *.sqlite
 *.log
+coverage/
+coverage.out
+*.coverprofile
+*.prof
+*.test
 .DS_Store
 .idea/
 .vscode/

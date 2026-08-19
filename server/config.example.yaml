@@ -1,0 +1,15 @@
+app_env: development
+http_addr: ':8080'
+database_driver: postgres
+database_dsn: postgres://invalid:invalid@127.0.0.1:5432/invalid?sslmode=disable
+jwt_secret: invalid-development-secret
+jwt_expire_minutes: 60
+wechat_app_id: wx-invalid-app-id
+wechat_app_secret: invalid-wechat-app-secret
+storage_driver: local
+local_upload_dir: data/uploads
+cos_secret_id: invalid-cos-secret-id
+cos_secret_key: invalid-cos-secret-key
+cos_bucket: invalid-cos-bucket
+redis_addr: 127.0.0.1:6379
+ai_enabled: false

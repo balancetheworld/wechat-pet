@@ -3,10 +3,7 @@ SHELL := /bin/sh
 GO := go
 GOFMT := gofmt
 APP := api
-MIGRATE := migrate
-MIGRATIONS_DIR ?= db/migrations
 MIGRATE_STEPS ?= 1
-DATABASE_URL ?=
 GO_FILES := $(shell find . -type d -name vendor -prune -o -type f -name '*.go' -print)
 
 .PHONY: run build binary fmt fmt-check vet test check migrate-up migrate-down
@@ -42,9 +39,7 @@ test:
 check: fmt-check vet test build
 
 migrate-up:
-	@test -n "$(DATABASE_URL)" || { echo "DATABASE_URL is required"; exit 1; }
-	$(MIGRATE) -path "$(MIGRATIONS_DIR)" -database "$(DATABASE_URL)" up
+	./scripts/migrate-up.sh
 
 migrate-down:
-	@test -n "$(DATABASE_URL)" || { echo "DATABASE_URL is required"; exit 1; }
-	$(MIGRATE) -path "$(MIGRATIONS_DIR)" -database "$(DATABASE_URL)" down $(MIGRATE_STEPS)
+	./scripts/migrate-down.sh "$(MIGRATE_STEPS)"
