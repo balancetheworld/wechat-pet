@@ -1,10 +1,10 @@
 import type { PropsWithChildren } from 'react'
-import { useLaunch } from '@tarojs/taro'
+import { useBootstrap } from './hooks/use-bootstrap'
 
 import './app.scss'
 
 function App({ children }: PropsWithChildren<any>) {
-  useLaunch(() => {})
+  useBootstrap()
 
   // children 是将要会渲染的页面
   return children

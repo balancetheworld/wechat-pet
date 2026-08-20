@@ -16,7 +16,7 @@
   ],
   "author": "",
   "scripts": {
-    "prepare": "husky",
+    "prepare": "cd .. && husky client/.husky",
     "new": "taro new",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -58,7 +58,8 @@
     "@tarojs/shared": "4.2.1",
     "@tarojs/taro": "4.2.1",
     "react": "^18.0.0",
-    "react-dom": "^18.0.0"
+    "react-dom": "^18.0.0",
+    "zustand": "^5.0.15"
   },
   "devDependencies": {
     "@antfu/eslint-config": "^4.15.0",
@@ -93,5 +94,8 @@
     "tsconfig-paths-webpack-plugin": "^4.1.0",
     "typescript": "^5.4.5",
     "webpack": "5.91.0"
+  },
+  "lint-staged": {
+    "*.{js,mjs,ts,tsx,json}": "eslint --fix"
   }
 }

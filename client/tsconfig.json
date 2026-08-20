@@ -6,7 +6,6 @@
     "rootDir": ".",
     "module": "commonjs",
     "moduleResolution": "node",
-    "ignoreDeprecations": "6.0",
     "paths": {
       // TS5090 leading './'
       "@/*": ["./src/*"]
@@ -24,7 +23,8 @@
     "preserveConstEnums": true,
     "removeComments": false,
     "sourceMap": true,
-    "allowSyntheticDefaultImports": true
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true
   },
   "include": ["./src", "./types", "./config"],
   "compileOnSave": false
