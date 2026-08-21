@@ -13,3 +13,8 @@ export interface UploadOptions {
   name: string
   formData?: Record<string, string>
 }
+
+export interface UpdateProfileRequest {
+  nickname: string
+  avatar_asset_id: string
+}

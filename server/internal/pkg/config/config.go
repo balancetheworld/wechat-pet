@@ -30,7 +30,7 @@ type Config struct {
 }
 
 func Load(yamlPaths ...string) (Config, error) {
-	cfg := Config{AppEnv: "development", HTTPAddr: ":8080", DatabaseDriver: "postgres", JWTExpireMinutes: 60, StorageDriver: "local", LocalUploadDir: "data/uploads"}
+	cfg := Config{AppEnv: "development", HTTPAddr: ":8080", DatabaseDriver: "postgres", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads"}
 	yamlPath := ""
 	if len(yamlPaths) > 0 {
 		yamlPath = yamlPaths[0]

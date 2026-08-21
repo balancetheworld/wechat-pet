@@ -3,7 +3,7 @@ http_addr: ':8080'
 database_driver: postgres
 database_dsn: postgres://invalid:invalid@127.0.0.1:5432/invalid?sslmode=disable
 jwt_secret: invalid-development-secret
-jwt_expire_minutes: 60
+jwt_expire_minutes: 120
 wechat_app_id: wx-invalid-app-id
 wechat_app_secret: invalid-wechat-app-secret
 storage_driver: local

@@ -3,6 +3,7 @@ module github.com/balancetheworld/wechat-pet/server
 go 1.24.3
 
 require (
+	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/gin-gonic/gin v1.11.0
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.50

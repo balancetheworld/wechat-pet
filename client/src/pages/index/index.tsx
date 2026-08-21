@@ -34,7 +34,7 @@ export default function Index() {
     return (
       <View className="index">
         <Text>请先完善个人资料</Text>
-        <Button onClick={() => navigateTo(routes.pages.profileEdit)}>完善资料</Button>
+        <Button onClick={() => navigateTo(routes.pages.profileOnboarding)}>完善资料</Button>
       </View>
     )
   }
