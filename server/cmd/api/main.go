@@ -5,10 +5,15 @@ import (
 	"os"
 	"time"
 
+	appauth "github.com/balancetheworld/wechat-pet/server/internal/app/auth"
+	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
+	userapp "github.com/balancetheworld/wechat-pet/server/internal/app/user"
 	"github.com/balancetheworld/wechat-pet/server/internal/httpapi"
 	"github.com/balancetheworld/wechat-pet/server/internal/logging"
 	"github.com/balancetheworld/wechat-pet/server/internal/pkg/config"
 	"github.com/balancetheworld/wechat-pet/server/internal/pkg/database"
+	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
+	"github.com/balancetheworld/wechat-pet/server/internal/platform/wechat"
 )
 
 func main() {
@@ -30,7 +35,33 @@ func main() {
 	}
 	defer db.Close()
 
-	server := httpapi.New(logger)
+	userRepository, err := userapp.NewRepository(db, cfg.DatabaseDriver)
+	if err != nil {
+		logger.Error("create user repository", "error", err)
+		os.Exit(1)
+	}
+	familyRepository, err := familyapp.NewRepository(db, cfg.DatabaseDriver)
+	if err != nil {
+		logger.Error("create family repository", "error", err)
+		os.Exit(1)
+	}
+	tokenSigner, err := jwtpkg.NewSigner(cfg.JWTSecret, time.Duration(cfg.JWTExpireMinutes)*time.Minute)
+	if err != nil {
+		logger.Error("create jwt signer", "error", err)
+		os.Exit(1)
+	}
+	wechatClient := wechat.NewHTTPClient(cfg.WeChatAppID, cfg.WeChatAppSecret, 5*time.Second)
+	authService, err := appauth.NewService(wechatClient, userRepository, familyRepository, tokenSigner)
+	if err != nil {
+		logger.Error("create auth service", "error", err)
+		os.Exit(1)
+	}
+	userService, err := userapp.NewService(userRepository, familyRepository)
+	if err != nil {
+		logger.Error("create user service", "error", err)
+		os.Exit(1)
+	}
+	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, TokenSigner: tokenSigner}, logger)
 	logger.Info("api server starting", "addr", cfg.HTTPAddr)
 	if err := server.Run(cfg.HTTPAddr); err != nil {
 		logger.Error("api server stopped", "error", err)

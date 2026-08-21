@@ -9,6 +9,7 @@ export default defineAppConfig({
     'pages/pets/detail/index',
     'pages/pets/edit/index',
     'pages/profile/edit/index',
+    'pages/onboarding/profile',
     'pages/share/index',
   ],
   window: {

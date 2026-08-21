@@ -16,3 +16,14 @@ export interface AuthSession {
   family: FamilySummary | null
   familyRole: FamilyRole | null
 }
+
+export interface MeResponseDTO {
+  user: {
+    id: string
+    nickname: string
+    avatar: string
+    profile_completed: boolean
+  }
+  family: FamilySummary | null
+  identity: Identity
+}

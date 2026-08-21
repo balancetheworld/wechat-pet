@@ -1,9 +1,12 @@
 package httpapi
 
-import "github.com/gin-gonic/gin"
+import (
+	authapi "github.com/balancetheworld/wechat-pet/server/internal/httpapi/auth"
+	userapi "github.com/balancetheworld/wechat-pet/server/internal/httpapi/user"
+	"github.com/gin-gonic/gin"
+)
 
-func registerV1Routes(router *gin.RouterGroup) {
-	registerModuleRoutes(router)
+func registerV1Routes(router *gin.RouterGroup, dependencies Dependencies) {
+	authapi.RegisterRoutes(router, dependencies.AuthService)
+	userapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.UserService)
 }
-
-func registerModuleRoutes(router *gin.RouterGroup) {}

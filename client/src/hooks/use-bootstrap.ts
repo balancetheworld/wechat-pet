@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { login } from '../services/auth'
+import { silentLogin } from '../services/auth'
 import { useAppStore } from '../stores/app-store'
 import { useAuthStore } from '../stores/auth-store'
 import { useFamilyStore } from '../stores/family-store'
@@ -24,9 +24,8 @@ export function useBootstrap() {
       const {
         clearSession,
         hydrate,
-        setSession,
       } = useAuthStore.getState()
-      const { clearFamily, setFamily } = useFamilyStore.getState()
+      const { clearFamily } = useFamilyStore.getState()
 
       setBootstrapCompleted(false)
       setBootstrapError('')
@@ -34,16 +33,7 @@ export function useBootstrap() {
 
       try {
         await hydrate()
-        const session = await login()
-
-        await setSession(session)
-
-        if (session.family && session.familyRole) {
-          setFamily(session.family, session.familyRole)
-        }
-        else {
-          clearFamily()
-        }
+        await silentLogin()
 
         setBootstrapCompleted(true)
       }

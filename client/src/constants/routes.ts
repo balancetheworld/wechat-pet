@@ -13,6 +13,7 @@ export const routes = {
     petDetail: '/pages/pets/detail/index',
     petEdit: '/pages/pets/edit/index',
     profileEdit: '/pages/profile/edit/index',
+    profileOnboarding: '/pages/onboarding/profile',
     share: '/pages/share/index',
   },
 } as const
