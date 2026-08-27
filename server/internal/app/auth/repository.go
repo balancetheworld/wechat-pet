@@ -7,4 +7,4 @@ import (
 
 type UserRepository = userapp.Repository
 
-type FamilyRepository = familyapp.Repository
+type FamilyRepository = familyapp.ActiveFamilyRepository

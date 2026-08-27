@@ -6,6 +6,8 @@ export default defineAppConfig({
     'pages/profile/index',
     'pages/family/create/index',
     'pages/family/join/index',
+    'pages/family/pending/index',
+    'pages/family/members/index',
     'pages/pets/detail/index',
     'pages/pets/edit/index',
     'pages/profile/edit/index',

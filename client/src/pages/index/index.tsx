@@ -56,6 +56,7 @@ export default function Index() {
         你好，
         {user?.nickname}
       </Text>
+      <Button onClick={() => navigateTo(routes.pages.familyMembers)}>家庭成员</Button>
       <Button onClick={() => switchTab(routes.tabs.home)}>宠物列表</Button>
       <Button onClick={() => switchTab(routes.tabs.calendar)}>日历</Button>
       <Button onClick={() => switchTab(routes.tabs.ask)}>问问</Button>

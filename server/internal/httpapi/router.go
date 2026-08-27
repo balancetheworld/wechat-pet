@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	appauth "github.com/balancetheworld/wechat-pet/server/internal/app/auth"
+	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
 	appuser "github.com/balancetheworld/wechat-pet/server/internal/app/user"
 	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
 	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
@@ -11,9 +12,11 @@ import (
 )
 
 type Dependencies struct {
-	AuthService *appauth.Service
-	UserService *appuser.Service
-	TokenSigner *jwtpkg.Signer
+	AuthService      *appauth.Service
+	UserService      *appuser.Service
+	FamilyService    *familyapp.Service
+	FamilyRepository familyapp.Repository
+	TokenSigner      *jwtpkg.Signer
 }
 
 // New creates the API router and installs process-level middleware.

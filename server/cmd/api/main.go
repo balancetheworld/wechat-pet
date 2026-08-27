@@ -61,7 +61,12 @@ func main() {
 		logger.Error("create user service", "error", err)
 		os.Exit(1)
 	}
-	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, TokenSigner: tokenSigner}, logger)
+	familyService, err := familyapp.NewService(familyRepository)
+	if err != nil {
+		logger.Error("create family service", "error", err)
+		os.Exit(1)
+	}
+	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, FamilyService: familyService, FamilyRepository: familyRepository, TokenSigner: tokenSigner}, logger)
 	logger.Info("api server starting", "addr", cfg.HTTPAddr)
 	if err := server.Run(cfg.HTTPAddr); err != nil {
 		logger.Error("api server stopped", "error", err)
