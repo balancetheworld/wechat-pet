@@ -10,6 +10,8 @@ export const routes = {
   pages: {
     createFamily: '/pages/family/create/index',
     joinFamily: '/pages/family/join/index',
+    pendingFamily: '/pages/family/pending/index',
+    familyMembers: '/pages/family/members/index',
     petDetail: '/pages/pets/detail/index',
     petEdit: '/pages/pets/edit/index',
     profileEdit: '/pages/profile/edit/index',

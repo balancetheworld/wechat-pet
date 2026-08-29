@@ -8,6 +8,8 @@ const (
 	CodeTokenExpired = 40102
 	CodeForbidden    = 40301
 	CodeNotOwner     = 40302
+	CodeNotFound     = 40401
+	CodeConflict     = 40901
 	CodeInternal     = 50000
 )
 
@@ -43,6 +45,14 @@ func Forbidden() *AppError {
 
 func NotOwner() *AppError {
 	return &AppError{HTTPStatus: http.StatusForbidden, Code: CodeNotOwner, Message: "仅家庭拥有者可操作"}
+}
+
+func NotFound(message string) *AppError {
+	return &AppError{HTTPStatus: http.StatusNotFound, Code: CodeNotFound, Message: message}
+}
+
+func Conflict(message string) *AppError {
+	return &AppError{HTTPStatus: http.StatusConflict, Code: CodeConflict, Message: message}
 }
 
 func Internal(cause error) *AppError {

@@ -7,6 +7,7 @@ import (
 
 	appauth "github.com/balancetheworld/wechat-pet/server/internal/app/auth"
 	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
+	petapp "github.com/balancetheworld/wechat-pet/server/internal/app/pet"
 	userapp "github.com/balancetheworld/wechat-pet/server/internal/app/user"
 	"github.com/balancetheworld/wechat-pet/server/internal/httpapi"
 	"github.com/balancetheworld/wechat-pet/server/internal/logging"
@@ -61,7 +62,22 @@ func main() {
 		logger.Error("create user service", "error", err)
 		os.Exit(1)
 	}
-	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, TokenSigner: tokenSigner}, logger)
+	familyService, err := familyapp.NewService(familyRepository)
+	if err != nil {
+		logger.Error("create family service", "error", err)
+		os.Exit(1)
+	}
+	petRepository, err := petapp.NewRepository(db, cfg.DatabaseDriver)
+	if err != nil {
+		logger.Error("create pet repository", "error", err)
+		os.Exit(1)
+	}
+	petService, err := petapp.NewService(petRepository)
+	if err != nil {
+		logger.Error("create pet service", "error", err)
+		os.Exit(1)
+	}
+	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, FamilyService: familyService, FamilyRepository: familyRepository, PetService: petService, PetRepository: petRepository, TokenSigner: tokenSigner}, logger)
 	logger.Info("api server starting", "addr", cfg.HTTPAddr)
 	if err := server.Run(cfg.HTTPAddr); err != nil {
 		logger.Error("api server stopped", "error", err)

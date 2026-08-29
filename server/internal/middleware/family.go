@@ -14,7 +14,7 @@ const (
 	familyRoleKey = "family_role"
 )
 
-func RequireFamily(repository familyapp.Repository) gin.HandlerFunc {
+func RequireFamily(repository familyapp.ActiveFamilyRepository) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		userID, ok := GetCurrentUserID(c)
 		if !ok || repository == nil {
