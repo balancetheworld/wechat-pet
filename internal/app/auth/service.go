@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	userapp "github.com/balancetheworld/wechat-pet/server/internal/app/user"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	"github.com/balancetheworld/wechat-pet/server/internal/platform/wechat"
+	userapp "github.com/balancetheworld/wechat-pet/internal/app/user"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	"github.com/balancetheworld/wechat-pet/internal/platform/wechat"
 )
 
 type TokenIssuer interface {

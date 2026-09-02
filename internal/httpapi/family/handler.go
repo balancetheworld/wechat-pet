@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	"github.com/balancetheworld/wechat-pet/server/internal/middleware"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	"github.com/balancetheworld/wechat-pet/internal/middleware"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 

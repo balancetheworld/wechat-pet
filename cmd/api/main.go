@@ -5,16 +5,16 @@ import (
 	"os"
 	"time"
 
-	appauth "github.com/balancetheworld/wechat-pet/server/internal/app/auth"
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	petapp "github.com/balancetheworld/wechat-pet/server/internal/app/pet"
-	userapp "github.com/balancetheworld/wechat-pet/server/internal/app/user"
-	"github.com/balancetheworld/wechat-pet/server/internal/httpapi"
-	"github.com/balancetheworld/wechat-pet/server/internal/logging"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/config"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/database"
-	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
-	"github.com/balancetheworld/wechat-pet/server/internal/platform/wechat"
+	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
+	userapp "github.com/balancetheworld/wechat-pet/internal/app/user"
+	"github.com/balancetheworld/wechat-pet/internal/httpapi"
+	"github.com/balancetheworld/wechat-pet/internal/logging"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/config"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/database"
+	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
+	"github.com/balancetheworld/wechat-pet/internal/platform/wechat"
 )
 
 func main() {

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/config"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/config"
 )
 
 func TestOpenSQLite(t *testing.T) {

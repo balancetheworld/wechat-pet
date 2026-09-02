@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
 	_ "github.com/mattn/go-sqlite3"
 )
 

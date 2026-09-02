@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 	jwt "github.com/golang-jwt/jwt"
 )

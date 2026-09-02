@@ -5,9 +5,9 @@ import (
 	"errors"
 	"strings"
 
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	"github.com/balancetheworld/wechat-pet/server/internal/model"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	"github.com/balancetheworld/wechat-pet/internal/model"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
 )
 
 type Service struct {

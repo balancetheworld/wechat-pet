@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	"github.com/balancetheworld/wechat-pet/server/internal/model"
-	"github.com/balancetheworld/wechat-pet/server/internal/platform/wechat"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	"github.com/balancetheworld/wechat-pet/internal/model"
+	"github.com/balancetheworld/wechat-pet/internal/platform/wechat"
 )
 
 type fakeWeChat struct {

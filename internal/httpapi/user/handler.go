@@ -3,11 +3,11 @@ package user
 import (
 	"errors"
 
-	appauth "github.com/balancetheworld/wechat-pet/server/internal/app/auth"
-	appuser "github.com/balancetheworld/wechat-pet/server/internal/app/user"
-	"github.com/balancetheworld/wechat-pet/server/internal/middleware"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
+	appuser "github.com/balancetheworld/wechat-pet/internal/app/user"
+	"github.com/balancetheworld/wechat-pet/internal/middleware"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 

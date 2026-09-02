@@ -5,7 +5,7 @@ import (
 	"encoding/hex"
 	"net/http"
 
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
 )
 

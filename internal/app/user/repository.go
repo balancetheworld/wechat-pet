@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/balancetheworld/wechat-pet/server/internal/model"
+	"github.com/balancetheworld/wechat-pet/internal/model"
 )
 
 var ErrNotFound = sql.ErrNoRows

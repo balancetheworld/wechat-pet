@@ -1,4 +1,4 @@
-module github.com/balancetheworld/wechat-pet/server
+module github.com/balancetheworld/wechat-pet
 
 go 1.24.3
 

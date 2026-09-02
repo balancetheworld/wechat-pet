@@ -3,12 +3,12 @@ package httpapi
 import (
 	"log/slog"
 
-	appauth "github.com/balancetheworld/wechat-pet/server/internal/app/auth"
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	petapp "github.com/balancetheworld/wechat-pet/server/internal/app/pet"
-	appuser "github.com/balancetheworld/wechat-pet/server/internal/app/user"
-	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
+	appuser "github.com/balancetheworld/wechat-pet/internal/app/user"
+	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 

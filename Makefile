@@ -1,30 +1,40 @@
 SHELL := /bin/sh
 
+GO_FILES := $(shell find cmd internal -type d -name vendor -prune -o -type f -name '*.go' -print)
+
 .PHONY: run build fmt fmt-check vet test check migrate-up migrate-down
 
 run:
-	$(MAKE) -C server run
+	go run ./cmd/api
 
 build:
-	$(MAKE) -C server build
+	mkdir -p bin
+	go build -o bin/api ./cmd/api
 
 fmt:
-	$(MAKE) -C server fmt
+	gofmt -w $(GO_FILES)
 
 fmt-check:
-	$(MAKE) -C server fmt-check
+	@unformatted="$$(gofmt -l $(GO_FILES))"; \
+	if [ -n "$$unformatted" ]; then \
+		printf '%s\n' "$$unformatted"; \
+		exit 1; \
+	fi
 
 vet:
-	$(MAKE) -C server vet
+	go vet ./...
 
 test:
-	$(MAKE) -C server test
+	go test ./...
 
 check:
-	$(MAKE) -C server check
+	$(MAKE) fmt-check
+	$(MAKE) vet
+	$(MAKE) test
+	$(MAKE) build
 
 migrate-up:
-	$(MAKE) -C server migrate-up
+	./scripts/migrate-up.sh
 
 migrate-down:
-	$(MAKE) -C server migrate-down
+	./scripts/migrate-down.sh "$(MIGRATE_STEPS)"

@@ -1,6 +1,6 @@
 {
   "miniprogramRoot": "dist/",
-  "projectname": "client",
+  "projectname": "web",
   "description": "宠物家庭管理微信小程序",
   "appid": "wxd9aa392313fde6d9",
   "setting": {

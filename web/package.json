@@ -1,5 +1,5 @@
 {
-  "name": "client",
+  "name": "web",
   "version": "1.0.0",
   "private": true,
   "packageManager": "pnpm@10.23.0",
@@ -16,7 +16,7 @@
   ],
   "author": "",
   "scripts": {
-    "prepare": "cd .. && husky client/.husky",
+    "prepare": "cd .. && husky web/.husky",
     "new": "taro new",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",

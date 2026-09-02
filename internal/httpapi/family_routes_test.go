@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
 	_ "github.com/mattn/go-sqlite3"
 )
 

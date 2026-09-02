@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
 )
 
 type Service struct {

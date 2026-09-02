@@ -1,10 +1,10 @@
 package httpapi
 
 import (
-	authapi "github.com/balancetheworld/wechat-pet/server/internal/httpapi/auth"
-	familyapi "github.com/balancetheworld/wechat-pet/server/internal/httpapi/family"
-	petapi "github.com/balancetheworld/wechat-pet/server/internal/httpapi/pet"
-	userapi "github.com/balancetheworld/wechat-pet/server/internal/httpapi/user"
+	authapi "github.com/balancetheworld/wechat-pet/internal/httpapi/auth"
+	familyapi "github.com/balancetheworld/wechat-pet/internal/httpapi/family"
+	petapi "github.com/balancetheworld/wechat-pet/internal/httpapi/pet"
+	userapi "github.com/balancetheworld/wechat-pet/internal/httpapi/user"
 	"github.com/gin-gonic/gin"
 )
 

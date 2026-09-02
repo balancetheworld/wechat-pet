@@ -1,4 +1,4 @@
 #!/usr/bin/env sh
 
-cd client
+cd web
 pnpm exec lint-staged

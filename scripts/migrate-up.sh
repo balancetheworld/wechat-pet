@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-SERVER_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 MIGRATE_BIN=${MIGRATE_BIN:-migrate}
 DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
 DATABASE_DSN=${DATABASE_DSN:-}
@@ -27,4 +27,4 @@ case "$DATABASE_DRIVER" in
 		;;
 esac
 
-"$MIGRATE_BIN" -source "file://$SERVER_DIR/migrations" -database "$DATABASE_URL" up
+"$MIGRATE_BIN" -source "file://$ROOT_DIR/migrations" -database "$DATABASE_URL" up

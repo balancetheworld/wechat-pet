@@ -1,10 +1,10 @@
 package pet
 
 import (
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	petapp "github.com/balancetheworld/wechat-pet/server/internal/app/pet"
-	"github.com/balancetheworld/wechat-pet/server/internal/middleware"
-	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
+	"github.com/balancetheworld/wechat-pet/internal/middleware"
+	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
 	"github.com/gin-gonic/gin"
 )
 

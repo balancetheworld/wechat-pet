@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/balancetheworld/wechat-pet/server/internal/platform/storage"
+	"github.com/balancetheworld/wechat-pet/internal/platform/storage"
 )
 
 type Service struct {

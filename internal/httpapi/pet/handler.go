@@ -3,10 +3,10 @@ package pet
 import (
 	"errors"
 
-	petapp "github.com/balancetheworld/wechat-pet/server/internal/app/pet"
-	"github.com/balancetheworld/wechat-pet/server/internal/middleware"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
+	"github.com/balancetheworld/wechat-pet/internal/middleware"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 

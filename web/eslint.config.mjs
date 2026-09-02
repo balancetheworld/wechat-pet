@@ -10,7 +10,7 @@ export default antfu(
     ignores: ['**/node_modules/**', '**/dist/**', '**/.taro/**', '**/.temp/**', '**/coverage/**'],
   },
   {
-    name: 'client/globals-and-rules',
+    name: 'web/globals-and-rules',
     languageOptions: {
       globals: {
         App: 'readonly',
