@@ -1,13 +1,14 @@
 export const routes = {
   // tabs：存放底部tabBar对应的页面
   tabs: {
-    home: '/pages/index/index',
     calendar: '/pages/calendar/index',
     ask: '/pages/ask/index',
     profile: '/pages/profile/index',
   },
   // pages：普通非tab页面，需要navigateTo跳转打开的子页面
   pages: {
+    home: '/pages/index/index',
+    account: '/pages/account/index',
     createFamily: '/pages/family/create/index',
     joinFamily: '/pages/family/join/index',
     pendingFamily: '/pages/family/pending/index',

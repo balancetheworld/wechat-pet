@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/joho/godotenv"
 	"gopkg.in/yaml.v3"
 )
 
@@ -30,6 +31,9 @@ type Config struct {
 }
 
 func Load(yamlPaths ...string) (Config, error) {
+	if err := loadDotEnv(); err != nil {
+		return Config{}, err
+	}
 	cfg := Config{AppEnv: "development", HTTPAddr: ":8080", DatabaseDriver: "postgres", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads"}
 	yamlPath := ""
 	if len(yamlPaths) > 0 {
@@ -54,6 +58,30 @@ func Load(yamlPaths ...string) (Config, error) {
 		return Config{}, err
 	}
 	return cfg, nil
+}
+
+func loadDotEnv() error {
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("APP_ENV")), "production") {
+		return nil
+	}
+	values, err := godotenv.Read(".env")
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return fmt.Errorf("read .env: %w", err)
+	}
+	if strings.EqualFold(strings.TrimSpace(values["APP_ENV"]), "production") {
+		return nil
+	}
+	for name, value := range values {
+		if _, exists := os.LookupEnv(name); !exists {
+			if err := os.Setenv(name, value); err != nil {
+				return fmt.Errorf("load .env variable %s: %w", name, err)
+			}
+		}
+	}
+	return nil
 }
 
 func applyEnvironment(cfg *Config) error {

@@ -1,6 +1,7 @@
 import { Button, Input, Text, View } from '@tarojs/components'
 import Taro, { useRouter } from '@tarojs/taro'
 import { useEffect, useState } from 'react'
+import PageBackground from '../../../components/page-background'
 import { createPet, getPet, updatePet } from '../../../services/pet'
 import { navigateBack } from '../../../utils/navigation'
 
@@ -61,7 +62,8 @@ export default function PetEdit() {
   }
 
   return (
-    <View>
+    <View className="themed-page">
+      <PageBackground />
       <Text>{petID ? '编辑宠物' : '创建宠物'}</Text>
       <Input
         maxlength={50}

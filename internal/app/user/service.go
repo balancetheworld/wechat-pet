@@ -11,8 +11,13 @@ import (
 )
 
 type Service struct {
-	users  Repository
-	family familyapp.Repository
+	users      Repository
+	family     familyapp.Repository
+	avatarURLs AvatarURLResolver
+}
+
+type AvatarURLResolver interface {
+	URL(ctx context.Context, key string) (string, error)
 }
 
 type FamilySummary struct {
@@ -26,11 +31,15 @@ type Profile struct {
 	Identity string
 }
 
-func NewService(users Repository, family familyapp.Repository) (*Service, error) {
+func NewService(users Repository, family familyapp.Repository, avatarURLs ...AvatarURLResolver) (*Service, error) {
 	if users == nil || family == nil {
 		return nil, errors.New("user service dependencies are required")
 	}
-	return &Service{users: users, family: family}, nil
+	var avatarURLResolver AvatarURLResolver
+	if len(avatarURLs) > 0 {
+		avatarURLResolver = avatarURLs[0]
+	}
+	return &Service{users: users, family: family, avatarURLs: avatarURLResolver}, nil
 }
 
 func (s *Service) Me(ctx context.Context, userID string) (Profile, error) {
@@ -66,9 +75,19 @@ func (s *Service) meResponse(ctx context.Context, value model.User) (Profile, er
 		}
 		familyDTO = &FamilySummary{ID: family.ID, Name: family.Name}
 	}
-	avatar := ""
-	if value.AvatarAssetID != nil {
-		avatar = *value.AvatarAssetID
+	avatar, err := s.avatarURL(ctx, value.AvatarAssetID)
+	if err != nil {
+		return Profile{}, appErrors.Internal(err)
 	}
 	return Profile{User: NewUserDTO(value, avatar), Family: familyDTO, Identity: identity}, nil
+}
+
+func (s *Service) avatarURL(ctx context.Context, assetID *string) (string, error) {
+	if assetID == nil || strings.TrimSpace(*assetID) == "" {
+		return "", nil
+	}
+	if s.avatarURLs == nil {
+		return *assetID, nil
+	}
+	return s.avatarURLs.URL(ctx, *assetID)
 }

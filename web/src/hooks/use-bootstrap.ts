@@ -1,5 +1,4 @@
 import { useEffect, useRef } from 'react'
-import { silentLogin } from '../services/auth'
 import { useAppStore } from '../stores/app-store'
 import { useAuthStore } from '../stores/auth-store'
 import { useFamilyStore } from '../stores/family-store'
@@ -33,7 +32,6 @@ export function useBootstrap() {
 
       try {
         await hydrate()
-        await silentLogin()
 
         setBootstrapCompleted(true)
       }

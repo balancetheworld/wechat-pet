@@ -1,6 +1,7 @@
 import { Button, Input, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useState } from 'react'
+import PageBackground from '../../../components/page-background'
 import { routes } from '../../../constants/routes'
 import { applyJoinFamily } from '../../../services/family'
 import { navigateTo } from '../../../utils/navigation'
@@ -34,8 +35,9 @@ export default function JoinFamily() {
   }
 
   return (
-    <View>
-      <Text>申请加入</Text>
+    <View className="themed-page">
+      <PageBackground />
+      <Text className="themed-page__title">申请加入</Text>
       <Input
         maxlength={32}
         placeholder="请输入家庭码"

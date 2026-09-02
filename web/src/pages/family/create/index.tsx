@@ -1,11 +1,12 @@
 import { Button, Input, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useState } from 'react'
+import PageBackground from '../../../components/page-background'
 import { routes } from '../../../constants/routes'
 import { createFamily } from '../../../services/family'
 import { useAuthStore } from '../../../stores/auth-store'
 import { useFamilyStore } from '../../../stores/family-store'
-import { switchTab } from '../../../utils/navigation'
+import { reLaunch } from '../../../utils/navigation'
 
 export default function CreateFamily() {
   const [name, setName] = useState('')
@@ -29,7 +30,7 @@ export default function CreateFamily() {
         useAuthStore.getState().setUserProfile(user, { id: family.id, name: family.name }, 'owner')
       }
       await Taro.showToast({ title: '家庭已创建', icon: 'success' })
-      await switchTab(routes.tabs.home)
+      await reLaunch(routes.pages.home)
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '创建失败，请重试'
@@ -41,8 +42,9 @@ export default function CreateFamily() {
   }
 
   return (
-    <View>
-      <Text>创建家庭</Text>
+    <View className="themed-page">
+      <PageBackground />
+      <Text className="themed-page__title">创建家庭</Text>
       <Input
         maxlength={50}
         placeholder="请输入家庭名称"

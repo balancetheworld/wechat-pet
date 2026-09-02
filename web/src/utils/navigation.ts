@@ -11,6 +11,10 @@ export function switchTab(url: TabRoute) {
   return Taro.switchTab({ url })
 }
 
+export function reLaunch(url: string) {
+  return Taro.reLaunch({ url })
+}
+
 export function navigateBack(delta = 1) {
   return Taro.navigateBack({ delta })
 }

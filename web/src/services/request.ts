@@ -31,7 +31,7 @@ async function handleAuthFailure() {
     title: '登录已失效',
     icon: 'none',
   })
-  await Taro.switchTab({ url: routes.tabs.home })
+  await Taro.reLaunch({ url: routes.pages.home })
 }
 
 async function refreshSession() {

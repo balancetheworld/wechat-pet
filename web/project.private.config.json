@@ -2,7 +2,7 @@
   "libVersion": "3.17.1",
   "projectname": "wechat-pet",
   "setting": {
-    "urlCheck": true,
+    "urlCheck": false,
     "coverView": false,
     "lazyloadPlaceholderEnable": false,
     "skylineRenderEnable": false,

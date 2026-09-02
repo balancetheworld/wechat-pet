@@ -29,6 +29,37 @@ func TestLoadReadsYAMLAndEnvironmentOverrides(t *testing.T) {
 	}
 }
 
+func TestLoadReadsDotEnvWithoutOverridingEnvironment(t *testing.T) {
+	directory := t.TempDir()
+	file, err := os.Create(directory + "/.env")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.WriteString("app_env=development\nDATABASE_DRIVER=sqlite\nDATABASE_DSN=:memory:\nHTTP_ADDR=:8082\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(directory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(workingDirectory) })
+	t.Setenv("HTTP_ADDR", ":9090")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.DatabaseDriver != "sqlite" || cfg.DatabaseDSN != ":memory:" || cfg.HTTPAddr != ":9090" {
+		t.Fatalf("unexpected config: %+v", cfg)
+	}
+}
+
 func TestProductionRequiresSecrets(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("DATABASE_DSN", "postgres://example")

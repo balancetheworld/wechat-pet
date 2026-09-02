@@ -1,0 +1,373 @@
+.archive-page {
+  position: relative;
+  overflow: hidden;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 96rpx 24rpx 160rpx;
+  background: #F5EFE6;
+}
+
+.archive-page > view {
+  position: relative;
+  z-index: 1;
+}
+
+.archive-page > .archive-background {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.manual-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.book-container {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1086 / 1448;
+  flex-shrink: 0;
+  overflow: hidden;
+  perspective: 1600rpx;
+}
+
+.book-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: left center;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  transition: transform 220ms ease-out;
+  will-change: transform;
+}
+
+.book-card-next {
+  z-index: 0;
+}
+
+.book-card-current {
+  z-index: 1;
+}
+
+.book-card.dragging {
+  transition: none;
+}
+
+.book-cover,
+.book-back-cover,
+.book-page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 6rpx solid #2A2520;
+  border-radius: 28rpx;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+  overflow: hidden;
+}
+
+.book-cover {
+  background: #F5C6C0;
+}
+
+.cover-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.book-back-cover {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  background: #F5C6C0;
+}
+
+.back-emoji,
+.back-title,
+.back-sub,
+.page-num,
+.page-title,
+.page-subtitle,
+.item-label,
+.item-value {
+  display: block;
+}
+
+.back-restart {
+  padding: 16rpx 40rpx;
+  border: 4rpx solid #2A2520;
+  border-radius: 20rpx;
+  box-shadow: 4rpx 6rpx 0 #2A2520;
+  color: #FFFEFB;
+  background: #C8423A;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 28rpx;
+  font-weight: 600;
+}
+
+.back-emoji {
+  margin-bottom: 24rpx;
+  font-size: 120rpx;
+}
+
+.back-title {
+  margin-bottom: 16rpx;
+  color: #2A2520;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 40rpx;
+}
+
+.back-sub {
+  margin-bottom: 40rpx;
+  color: #5A504A;
+  font-size: 26rpx;
+}
+
+.book-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: #FFFEFB;
+}
+
+.page-num {
+  position: absolute;
+  top: 24rpx;
+  right: 32rpx;
+  z-index: 1;
+  color: #F5C6C0;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 60rpx;
+  font-weight: 700;
+}
+
+.page-content {
+  flex: 1;
+  box-sizing: border-box;
+  padding: 60rpx 40rpx 20rpx;
+}
+
+.page-title {
+  margin-bottom: 8rpx;
+  color: #C8423A;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 44rpx;
+}
+
+.page-subtitle {
+  margin-bottom: 24rpx;
+  color: #8A8278;
+  font-size: 24rpx;
+}
+
+.page-divider {
+  height: 4rpx;
+  margin-bottom: 24rpx;
+  border-radius: 4rpx;
+  background: #EDE5D8;
+}
+
+.page-items {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.page-item {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx 24rpx;
+  border: 3rpx solid #EDE5D8;
+  border-radius: 16rpx;
+  background: #FAF6EF;
+}
+
+.item-emoji {
+  display: flex;
+  width: 56rpx;
+  height: 56rpx;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 3rpx solid #F5D68A;
+  border-radius: 50%;
+  background: #FFF8E8;
+  font-size: 28rpx;
+}
+
+.item-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.item-label {
+  color: #8A8278;
+  font-size: 22rpx;
+}
+
+.item-value {
+  margin-top: 4rpx;
+  color: #2A2520;
+  font-size: 28rpx;
+}
+
+.page-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 32rpx 24rpx;
+  border-top: 3rpx solid #EDE5D8;
+}
+
+.page-nav {
+  padding: 12rpx 24rpx;
+  border: 3rpx solid #2A2520;
+  border-radius: 16rpx;
+  color: #2A2520;
+  background: #F5EFE6;
+  font-size: 24rpx;
+}
+
+.page-nav.next {
+  box-shadow: 4rpx 6rpx 0 #2A2520;
+  color: #FFFEFB;
+  background: #C8423A;
+}
+
+.page-indicator {
+  color: #8A8278;
+  font-size: 24rpx;
+}
+
+.toc-overlay {
+  position: fixed;
+  z-index: 100;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(42, 37, 32, 0.5);
+}
+
+.toc-sheet {
+  display: flex;
+  width: 100%;
+  max-height: 80vh;
+  box-sizing: border-box;
+  flex-direction: column;
+  padding: 0 32rpx 60rpx;
+  border-top: 6rpx solid #2A2520;
+  border-radius: 36rpx 36rpx 0 0;
+  background: #FFFEFB;
+}
+
+.toc-handle {
+  width: 72rpx;
+  height: 8rpx;
+  margin: 16rpx auto 0;
+  border-radius: 8rpx;
+  background: #EDE5D8;
+}
+
+.toc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  border-bottom: 3rpx solid #EDE5D8;
+}
+
+.toc-title {
+  color: #2A2520;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 36rpx;
+}
+
+.toc-sub {
+  flex: 1;
+  margin-left: 16rpx;
+  color: #8A8278;
+  font-size: 22rpx;
+}
+
+.toc-close {
+  display: flex;
+  width: 56rpx;
+  height: 56rpx;
+  align-items: center;
+  justify-content: center;
+  color: #2A2520;
+  font-size: 40rpx;
+}
+
+.toc-list {
+  flex: 1;
+  padding: 16rpx 0;
+}
+
+.toc-item {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  padding: 24rpx 16rpx;
+  border-bottom: 2rpx solid #EDE5D8;
+}
+
+.toc-num {
+  min-width: 60rpx;
+  color: #F5C6C0;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.toc-name {
+  color: #2A2520;
+  font-size: 30rpx;
+}
+
+.toc-item.active {
+  padding-left: 24rpx;
+  border-radius: 16rpx;
+  background: #FFF8E8;
+}
+
+.toc-item.active .toc-num,
+.toc-item.active .toc-name {
+  color: #C8423A;
+}
+
+.toc-item.active .toc-name {
+  font-weight: 600;
+}
+
+@keyframes manual-page-turn {
+  from {
+    opacity: 0.5;
+    transform: perspective(1200rpx) rotateY(12deg) translateX(24rpx);
+  }
+
+  to {
+    opacity: 1;
+    transform: perspective(1200rpx) rotateY(0) translateX(0);
+  }
+}

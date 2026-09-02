@@ -9,6 +9,7 @@ import (
 	appuser "github.com/balancetheworld/wechat-pet/internal/app/user"
 	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
 	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
+	fileservice "github.com/balancetheworld/wechat-pet/internal/service/file"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,6 +21,8 @@ type Dependencies struct {
 	PetService       *petapp.Service
 	PetRepository    petapp.Repository
 	TokenSigner      *jwtpkg.Signer
+	FileService      *fileservice.Service
+	LocalUploadDir   string
 }
 
 // New creates the API router and installs process-level middleware.
@@ -37,6 +40,9 @@ func NewWithDependencies(dependencies Dependencies, loggers ...*slog.Logger) *gi
 	router.GET("/healthz", func(c *gin.Context) {
 		response.Success(c, map[string]string{"status": "ok"})
 	})
+	if dependencies.LocalUploadDir != "" {
+		router.Static("/uploads", dependencies.LocalUploadDir)
+	}
 	v1 := router.Group("/api/v1")
 	registerV1Routes(v1, dependencies)
 

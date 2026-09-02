@@ -1,0 +1,893 @@
+/* ============================================
+   宠物日历 - 红绘主题样式
+   ============================================ */
+
+.cal-page {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #F5EFE6;
+}
+
+.cal-page {
+  background: #FFFEFB;
+}
+
+.cal-background {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.cal-page > view {
+  position: relative;
+  z-index: 1;
+}
+
+.cal-page {
+  min-height: 100vh;
+  height: auto;
+  box-sizing: border-box;
+  padding: 32rpx 24rpx 160rpx;
+}
+
+.cal-calendar-card {
+  padding: 34rpx 28rpx 30rpx;
+  background: rgba(255, 254, 251, 0.8);
+  border: 1rpx solid rgba(163, 194, 232, 0.42);
+  border-radius: 12rpx;
+  box-shadow: var(--glass-shadow);
+}
+
+.cal-calendar-head,
+.cal-day-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.cal-month-en,
+.cal-month-cn,
+.cal-day-title,
+.cal-day-subtitle,
+.cal-empty-state__icon,
+.cal-empty-state__title,
+.cal-empty-state__text {
+  display: block;
+}
+
+.cal-month-en {
+  color: #7FA5D6;
+  font-size: 22rpx;
+  font-weight: 600;
+  letter-spacing: 3rpx;
+}
+
+.cal-month-cn {
+  margin-top: 8rpx;
+  color: #2A2520;
+  font-size: 42rpx;
+  font-weight: 600;
+}
+
+.cal-today-pill {
+  padding: 12rpx 22rpx;
+  color: #4A6489;
+  font-size: 24rpx;
+  background: rgba(163, 194, 232, 0.2);
+  border-radius: 10rpx;
+}
+
+.cal-week-row,
+.cal-days-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  text-align: center;
+}
+
+.cal-week-row {
+  margin-top: 34rpx;
+  color: #8B7E70;
+  font-size: 22rpx;
+}
+
+.cal-days-grid {
+  margin-top: 16rpx;
+}
+
+.cal-day {
+  position: relative;
+  min-height: 72rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4A6489;
+  font-size: 25rpx;
+  border-radius: 8rpx;
+}
+
+.cal-day.active {
+  color: #FFFEFB;
+  background: #7FA5D6;
+}
+
+.cal-day-dot {
+  position: absolute;
+  bottom: 8rpx;
+  width: 7rpx;
+  height: 7rpx;
+  background: #FFFEFB;
+  border-radius: 50%;
+}
+
+.cal-day-card {
+  margin: 24rpx 0 0;
+  overflow: hidden;
+  background: rgba(255, 254, 251, 0.8);
+  border: 1rpx solid rgba(163, 194, 232, 0.42);
+  border-radius: 12rpx;
+  box-shadow: var(--glass-shadow);
+}
+
+.cal-day-header {
+  padding: 28rpx 30rpx;
+  border-bottom: 1rpx solid rgba(163, 194, 232, 0.28);
+}
+
+.cal-day-title {
+  color: #2A2520;
+  font-size: 29rpx;
+  font-weight: 600;
+}
+
+.cal-day-subtitle {
+  margin-top: 10rpx;
+  color: #8B7E70;
+  font-size: 23rpx;
+}
+
+.cal-day-add {
+  width: 58rpx;
+  height: 58rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #FFFEFB;
+  font-size: 34rpx;
+  background: #7FA5D6;
+  border-radius: 10rpx;
+}
+
+.cal-empty-state {
+  padding: 74rpx 32rpx;
+  text-align: center;
+}
+
+.cal-empty-state__icon {
+  color: #7FA5D6;
+  font-size: 52rpx;
+  line-height: 1;
+}
+
+.cal-empty-state__title {
+  margin-top: 24rpx;
+  color: #2A2520;
+  font-size: 29rpx;
+  font-weight: 600;
+}
+
+.cal-empty-state__text {
+  margin-top: 14rpx;
+  color: #8B7E70;
+  font-size: 24rpx;
+}
+
+.cal-day-scroll {
+  background: transparent;
+}
+
+.cal-day-card,
+.cal-dd-clip {
+  background: rgba(255,255,255,0.78);
+  border-color: rgba(163,194,232,0.28);
+}
+
+.cal-fab-btn {
+  background: rgba(127,165,214,0.86);
+}
+
+/* --- 顶部导航 --- */
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24rpx;
+  height: 88rpx;
+  flex-shrink: 0;
+  background: #F5EFE6;
+}
+
+.cal-family-btn {
+  width: 60rpx;
+  height: 60rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36rpx;
+  color: #2A2520;
+}
+
+.cal-title {
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 34rpx;
+  color: #2A2520;
+}
+
+.cal-capsule {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  padding: 6rpx 16rpx;
+  border: 2rpx solid #2A2520;
+  border-radius: 30rpx;
+  background: #FFFEFB;
+
+  .capsule-more {
+    font-size: 20rpx;
+    letter-spacing: 2rpx;
+    color: #2A2520;
+  }
+  .capsule-divider {
+    width: 2rpx;
+    height: 16rpx;
+    background: #2A2520;
+    opacity: 0.3;
+  }
+  .capsule-mark {
+    width: 16rpx;
+    height: 16rpx;
+    border: 2rpx solid #2A2520;
+    border-radius: 50%;
+  }
+}
+
+/* --- 内容区 --- */
+.cal-content {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* --- 猫爪书签 --- */
+.cal-bookmark {
+  position: absolute;
+  top: 12rpx;
+  right: 32rpx;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+  background: #C8423A;
+  border: 6rpx solid #2A2520;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 36;
+  transition: top 0.38s cubic-bezier(0.4, 0, 0.2, 1);
+
+  .paw-icon {
+    font-size: 36rpx;
+  }
+
+  &.open {
+    top: 460rpx;
+  }
+}
+
+/* --- 日历下拉 --- */
+.cal-dropdown {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.38s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 35;
+  background: #FFFEFB;
+  border-bottom: 6rpx solid #2A2520;
+  box-shadow: 0 8rpx 24rpx rgba(42, 37, 32, 0.12);
+
+  &.open {
+    max-height: 880rpx;
+  }
+}
+
+.cal-dd-content {
+  padding: 24rpx 24rpx 16rpx;
+}
+
+.cal-dd-title {
+  text-align: center;
+  margin-bottom: 20rpx;
+
+  .dd-month-en {
+    display: block;
+    font-size: 40rpx;
+    font-weight: 700;
+    color: #C8423A;
+    font-family: 'Ma Shan Zheng', cursive;
+  }
+  .dd-month-cn {
+    display: block;
+    font-size: 28rpx;
+    color: #2A2520;
+    margin-top: 4rpx;
+  }
+  .dd-sub {
+    display: block;
+    font-size: 22rpx;
+    color: #8A8278;
+    margin-top: 4rpx;
+  }
+}
+
+.cal-dd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16rpx;
+}
+
+.cal-dd-filter {
+  background: #F5D68A;
+  border: 4rpx solid #2A2520;
+  border-radius: 20rpx;
+  padding: 8rpx 20rpx;
+  font-size: 24rpx;
+  color: #2A2520;
+  font-weight: 600;
+}
+
+.cal-dd-nav {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+
+  .dd-nav-btn {
+    width: 56rpx;
+    height: 56rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36rpx;
+    color: #C8423A;
+    background: #F5EFE6;
+    border: 4rpx solid #2A2520;
+    border-radius: 50%;
+  }
+  .dd-ym {
+    font-size: 28rpx;
+    font-weight: 700;
+    color: #2A2520;
+    min-width: 120rpx;
+    text-align: center;
+  }
+}
+
+.cal-dd-weekrow {
+  display: flex;
+  margin-bottom: 8rpx;
+
+  .cal-dd-week {
+    flex: 1;
+    text-align: center;
+    font-size: 22rpx;
+    color: #8A8278;
+    padding: 8rpx 0;
+  }
+}
+
+.cal-dd-grid {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.cal-dd-cell {
+  width: calc(100% / 7);
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  border-radius: 12rpx;
+
+  .cdd-day {
+    font-size: 26rpx;
+    color: #2A2520;
+  }
+
+  &.other-month .cdd-day {
+    color: #C8C0B4;
+  }
+
+  &.selected {
+    background: #C8423A;
+    .cdd-day { color: #FFFEFB; font-weight: 700; }
+  }
+
+  &.alarm {
+    border: 4rpx solid #E8C468;
+  }
+
+  .cdd-dot {
+    width: 10rpx;
+    height: 10rpx;
+    border-radius: 50%;
+    margin-top: 4rpx;
+
+    &.med { background: #C8423A; }
+    &.daily { background: #A8D5E5; }
+  }
+}
+
+/* --- 每日详情 --- */
+.cal-day-scroll {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20rpx 0 160rpx;
+}
+
+.cal-day-card {
+  margin: 0 24rpx;
+  background: #FFFEFB;
+  border: 6rpx solid #2A2520;
+  border-radius: 28rpx;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+  overflow: hidden;
+}
+
+.cal-day-header {
+  padding: 24rpx 28rpx 16rpx;
+  border-bottom: 4rpx solid #EDE5D8;
+
+  .d-date {
+    font-size: 32rpx;
+    font-weight: 700;
+    color: #2A2520;
+    font-family: 'Ma Shan Zheng', cursive;
+  }
+  .d-today-tag {
+    display: inline-block;
+    margin-left: 12rpx;
+    padding: 2rpx 14rpx;
+    background: #C8423A;
+    color: #FFFEFB;
+    border-radius: 12rpx;
+    font-size: 22rpx;
+  }
+  .d-summary {
+    display: block;
+    margin-top: 8rpx;
+    font-size: 24rpx;
+    color: #8A8278;
+  }
+}
+
+.cal-day-body {
+  padding: 16rpx 24rpx;
+}
+
+.cal-day-empty {
+  text-align: center;
+  padding: 80rpx 0;
+
+  .e-emoji { font-size: 64rpx; display: block; }
+  .e-title { display: block; font-size: 28rpx; color: #2A2520; margin-top: 16rpx; }
+  .e-sub { display: block; font-size: 24rpx; color: #8A8278; margin-top: 8rpx; }
+}
+
+/* --- 记录行 --- */
+.cal-rec-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16rpx;
+  padding: 20rpx 0;
+  border-bottom: 2rpx solid #EDE5D8;
+
+  &:last-child { border-bottom: none; }
+
+  &.todo {
+    background: #FFF8E8;
+    margin: 0 -16rpx;
+    padding: 20rpx 16rpx;
+    border-radius: 16rpx;
+    border: 4rpx solid #F5D68A;
+    border-bottom: 4rpx solid #F5D68A;
+  }
+}
+
+.cal-rec-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.cal-rec-head {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  margin-bottom: 8rpx;
+
+  .cal-rec-cat {
+    padding: 4rpx 16rpx;
+    border-radius: 12rpx;
+    font-size: 22rpx;
+    font-weight: 700;
+    border: 2rpx solid #2A2520;
+
+    &.medical { background: #C8423A; color: #FFFEFB; }
+    &.daily { background: #A8D5E5; color: #2A2520; }
+    &.todo { background: #F5D68A; color: #2A2520; }
+  }
+  .cal-rec-pet {
+    font-size: 24rpx;
+    color: #2A2520;
+    font-weight: 600;
+  }
+  .cal-rec-time {
+    font-size: 22rpx;
+    color: #8A8278;
+    margin-left: auto;
+  }
+}
+
+.cal-rec-text {
+  display: block;
+  font-size: 26rpx;
+  color: #2A2520;
+  line-height: 1.5;
+}
+
+.td-sub {
+  display: block;
+  font-size: 22rpx;
+  color: #C8423A;
+  margin-top: 6rpx;
+}
+
+.cal-rec-by {
+  display: block;
+  font-size: 22rpx;
+  color: #8A8278;
+  margin-top: 6rpx;
+}
+
+.cal-rec-imgs {
+  display: flex;
+  gap: 8rpx;
+  margin-top: 8rpx;
+
+  .img-thumb {
+    width: 56rpx;
+    height: 56rpx;
+    border-radius: 12rpx;
+    background: #F5EFE6;
+    border: 2rpx solid #EDE5D8;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28rpx;
+  }
+}
+
+.cal-btn-done {
+  flex-shrink: 0;
+  padding: 12rpx 20rpx;
+  background: #C8423A;
+  color: #FFFEFB;
+  border: 4rpx solid #2A2520;
+  border-radius: 16rpx;
+  box-shadow: 4rpx 6rpx 0 #2A2520;
+  font-size: 24rpx;
+  font-weight: 600;
+}
+
+/* --- FAB --- */
+.cal-fab {
+  position: fixed;
+  bottom: 140rpx;
+  right: 32rpx;
+  z-index: 40;
+}
+
+.cal-fab-btn {
+  width: 100rpx;
+  height: 100rpx;
+  border-radius: 50%;
+  background: #C8423A;
+  color: #FFFEFB;
+  border: 6rpx solid #2A2520;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 52rpx;
+  font-weight: 700;
+}
+
+/* --- 弹层 --- */
+.cal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(42, 37, 32, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+
+  &.show { display: flex; }
+}
+
+.cal-sheet {
+  width: 100%;
+  background: #FFFEFB;
+  border-radius: 36rpx 36rpx 0 0;
+  border-top: 6rpx solid #2A2520;
+  padding: 0 32rpx 60rpx;
+  max-height: 85vh;
+  overflow-y: auto;
+}
+
+.cal-sheet-handle {
+  width: 72rpx;
+  height: 8rpx;
+  background: #EDE5D8;
+  border-radius: 8rpx;
+  margin: 16rpx auto 0;
+}
+
+.cal-sheet-title {
+  display: block;
+  text-align: center;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #2A2520;
+  font-family: 'Ma Shan Zheng', cursive;
+  margin: 20rpx 0 24rpx;
+}
+
+.cal-field-label {
+  display: block;
+  font-size: 26rpx;
+  color: #2A2520;
+  font-weight: 600;
+  margin: 20rpx 0 12rpx;
+}
+
+.cal-seg {
+  display: flex;
+  gap: 16rpx;
+}
+
+.cal-seg-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  padding: 16rpx 0;
+  border: 4rpx solid #2A2520;
+  border-radius: 16rpx;
+  background: #F5EFE6;
+  font-size: 28rpx;
+  color: #2A2520;
+
+  .seg-dot {
+    width: 16rpx;
+    height: 16rpx;
+    border-radius: 50%;
+    background: #A8D5E5;
+  }
+
+  &.active {
+    background: #C8423A;
+    color: #FFFEFB;
+    box-shadow: 4rpx 6rpx 0 #2A2520;
+
+    .seg-dot { background: #FFFEFB; }
+  }
+}
+
+.cal-pet-chips {
+  display: flex;
+  gap: 12rpx;
+  flex-wrap: wrap;
+}
+
+.cal-pet-chip {
+  padding: 12rpx 24rpx;
+  border: 4rpx solid #2A2520;
+  border-radius: 20rpx;
+  background: #FFFEFB;
+  font-size: 26rpx;
+  color: #2A2520;
+
+  &.selected {
+    background: #F5D68A;
+    box-shadow: 4rpx 6rpx 0 #2A2520;
+  }
+}
+
+.cal-time-display {
+  padding: 20rpx 24rpx;
+  border: 4rpx solid #2A2520;
+  border-radius: 16rpx;
+  background: #F5EFE6;
+  font-size: 28rpx;
+  color: #2A2520;
+}
+
+.cal-textarea {
+  width: 100%;
+  min-height: 120rpx;
+  padding: 20rpx 24rpx;
+  border: 4rpx solid #2A2520;
+  border-radius: 16rpx;
+  background: #F5EFE6;
+  font-size: 28rpx;
+  color: #2A2520;
+  box-sizing: border-box;
+}
+
+.cal-remind-box {
+  margin-top: 20rpx;
+}
+
+.cal-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 0;
+
+  .sr-label {
+    font-size: 26rpx;
+    color: #2A2520;
+  }
+}
+
+.cal-switch {
+  width: 88rpx;
+  height: 48rpx;
+  border-radius: 24rpx;
+  background: #EDE5D8;
+  border: 4rpx solid #2A2520;
+  position: relative;
+  transition: background 0.2s;
+
+  &::after {
+    content: '';
+    position: absolute;
+    top: 4rpx;
+    left: 4rpx;
+    width: 32rpx;
+    height: 32rpx;
+    border-radius: 50%;
+    background: #FFFEFB;
+    border: 2rpx solid #2A2520;
+    transition: left 0.2s;
+  }
+
+  &.on {
+    background: #C8423A;
+    &::after { left: 48rpx; }
+  }
+}
+
+.cal-remind-panel {
+  padding: 16rpx 24rpx;
+  background: #FFF8E8;
+  border: 4rpx solid #F5D68A;
+  border-radius: 16rpx;
+}
+
+.cal-remind-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8rpx 0;
+  font-size: 26rpx;
+  color: #2A2520;
+
+  .rr-val {
+    color: #C8423A;
+    font-weight: 600;
+  }
+}
+
+.cal-cycle-chips {
+  display: flex;
+  gap: 12rpx;
+  margin-top: 12rpx;
+}
+
+.cal-cycle-chip {
+  padding: 10rpx 20rpx;
+  border: 4rpx solid #2A2520;
+  border-radius: 16rpx;
+  background: #FFFEFB;
+  font-size: 24rpx;
+  color: #2A2520;
+
+  &.selected {
+    background: #C8423A;
+    color: #FFFEFB;
+  }
+}
+
+.cal-submit-btn {
+  margin-top: 32rpx;
+  padding: 24rpx 0;
+  text-align: center;
+  background: #C8423A;
+  color: #FFFEFB;
+  border: 6rpx solid #2A2520;
+  border-radius: 20rpx;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+  font-size: 32rpx;
+  font-weight: 700;
+  font-family: 'Ma Shan Zheng', cursive;
+
+  &.disabled {
+    opacity: 0.4;
+    pointer-events: none;
+  }
+}
+
+.cal-done-info {
+  padding: 24rpx;
+  background: #FFF8E8;
+  border: 4rpx solid #F5D68A;
+  border-radius: 16rpx;
+  font-size: 26rpx;
+  color: #2A2520;
+  line-height: 1.6;
+  margin-bottom: 24rpx;
+}
+
+.cal-sheet-actions {
+  display: flex;
+  gap: 16rpx;
+}
+
+.cal-btn {
+  flex: 1;
+  text-align: center;
+  padding: 20rpx 0;
+  border: 4rpx solid #2A2520;
+  border-radius: 16rpx;
+  font-size: 30rpx;
+  font-weight: 600;
+
+  &.cancel {
+    background: #F5EFE6;
+    color: #2A2520;
+  }
+  &.save {
+    background: #C8423A;
+    color: #FFFEFB;
+    box-shadow: 4rpx 6rpx 0 #2A2520;
+  }
+}

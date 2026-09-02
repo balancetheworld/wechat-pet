@@ -1,13 +1,14 @@
 import { Button, Text, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import { useCallback, useEffect, useState } from 'react'
+import PageBackground from '../../components/page-background'
 import { routes } from '../../constants/routes'
 import { getPets } from '../../services/pet'
 import { useAppStore } from '../../stores/app-store'
 import { useAuthStore } from '../../stores/auth-store'
 import { useFamilyStore } from '../../stores/family-store'
 import { usePetStore } from '../../stores/pet-store'
-import { navigateTo, switchTab } from '../../utils/navigation'
+import { navigateTo, reLaunch, switchTab } from '../../utils/navigation'
 import './index.scss'
 
 export default function Index() {
@@ -42,9 +43,16 @@ export default function Index() {
     void loadPets()
   })
 
+  useEffect(() => {
+    if (bootstrapCompleted && !bootstrapError && user && identity !== 'guest') {
+      void reLaunch(routes.tabs.calendar)
+    }
+  }, [bootstrapCompleted, bootstrapError, identity, user])
+
   if (!bootstrapCompleted) {
     return (
       <View className="index">
+        <PageBackground />
         <Text>启动中</Text>
       </View>
     )
@@ -53,19 +61,18 @@ export default function Index() {
   if (bootstrapError) {
     return (
       <View className="index">
+        <PageBackground />
         <Text>{bootstrapError}</Text>
         <Button onClick={retryBootstrap}>重新登录</Button>
       </View>
     )
   }
 
-  const needsProfileOnboarding = !user?.nickname?.trim() || !user.avatarUrl
-
-  if (needsProfileOnboarding) {
+  if (user && identity !== 'guest') {
     return (
       <View className="index">
-        <Text>请先完善个人资料</Text>
-        <Button onClick={() => navigateTo(routes.pages.profileOnboarding)}>完善资料</Button>
+        <PageBackground />
+        <Text>正在打开宠物日历</Text>
       </View>
     )
   }
@@ -73,7 +80,10 @@ export default function Index() {
   if (identity === 'guest') {
     return (
       <View className="index">
-        <Text className="title">宠物家庭</Text>
+        <PageBackground />
+        <View className="index__header">
+          <Text className="title">宠物家庭</Text>
+        </View>
         <Button onClick={() => navigateTo(routes.pages.createFamily)}>创建家庭</Button>
         <Button onClick={() => navigateTo(routes.pages.joinFamily)}>加入家庭</Button>
       </View>
@@ -82,11 +92,16 @@ export default function Index() {
 
   return (
     <View className="index">
-      <Text>{family?.name}</Text>
-      <Text className="title">
-        你好，
-        {user?.nickname}
-      </Text>
+      <PageBackground />
+      <View className="index__header">
+        <View>
+          <Text>{family?.name}</Text>
+          <Text className="title">
+            你好，
+            {user?.nickname}
+          </Text>
+        </View>
+      </View>
       <Button onClick={() => navigateTo(routes.pages.familyMembers)}>家庭成员</Button>
       <Button loading={loadingPets} onClick={loadPets}>刷新宠物</Button>
       <Button onClick={() => navigateTo(routes.pages.petEdit)}>创建宠物</Button>

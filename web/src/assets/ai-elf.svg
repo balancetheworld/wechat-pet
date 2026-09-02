@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 140" class="ai-elf">
+  <defs>
+    <!-- 脸庞：米色不规则椭圆，带淡淡渐变让表情有立体感 -->
+    <linearGradient id="elfFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#E6D2C4"/>
+      <stop offset="100%" stop-color="#D9C3B6"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 公共脸庞 -->
+  <g class="elf-face">
+    <ellipse cx="70" cy="70" rx="64" ry="45" fill="url(#elfFace)" transform="rotate(-14 70 70)"/>
+  </g>
+
+  <!-- 鼻子：黑色椭圆 -->
+  <ellipse cx="126" cy="72" rx="20" ry="14" fill="#1A1A1A"/>
+
+  <!-- 表情 1：平静（圆眼，无嘴） -->
+  <g class="elf-neutral">
+    <ellipse cx="54" cy="62" rx="11" ry="13" fill="#1A1A1A"/>
+    <ellipse cx="150" cy="60" rx="10" ry="12" fill="#1A1A1A"/>
+    <!--  tiny 眼神高光 -->
+    <circle cx="57" cy="58" r="3.2" fill="#FFFFFF" opacity="0.9"/>
+    <circle cx="153" cy="56" r="3" fill="#FFFFFF" opacity="0.9"/>
+  </g>
+
+  <!-- 表情 2：思考 / 委屈（小下垂眼 + 下垂嘴） -->
+  <g class="elf-thinking">
+    <!-- 左眼 -->
+    <ellipse cx="54" cy="64" rx="7" ry="9" fill="#1A1A1A" transform="rotate(-8 54 64)"/>
+    <circle cx="56" cy="61" r="2.2" fill="#FFFFFF" opacity="0.85"/>
+    <!-- 右眼 -->
+    <ellipse cx="150" cy="62" rx="6" ry="8" fill="#1A1A1A" transform="rotate(8 150 62)"/>
+    <circle cx="152" cy="59" r="2" fill="#FFFFFF" opacity="0.85"/>
+    <!-- 下垂嘴 -->
+    <path d="M114 98 Q126 88 138 98" stroke="#1A1A1A" stroke-width="4" stroke-linecap="round" fill="none"/>
+  </g>
+
+  <!-- 表情 3：开心（眯眼笑，可加 tiny 嘴） -->
+  <g class="elf-happy">
+    <!-- 左眼：笑弧线 -->
+    <path d="M44 66 Q54 56 64 66" stroke="#1A1A1A" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M48 64 Q54 58 60 64" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+    <!-- 右眼：笑弧线 -->
+    <path d="M140 64 Q150 54 160 64" stroke="#1A1A1A" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M144 62 Q150 56 156 62" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+    <!-- 小上扬嘴 -->
+    <path d="M114 100 Q126 108 138 100" stroke="#1A1A1A" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.6"/>
+  </g>
+
+  <!-- 表情 4：眨眼 / 顽皮（左眼笑，右眼圆） -->
+  <g class="elf-wink">
+    <path d="M44 66 Q54 56 64 66" stroke="#1A1A1A" stroke-width="6" stroke-linecap="round" fill="none"/>
+    <path d="M48 64 Q54 58 60 64" stroke="#FFFFFF" stroke-width="2.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+    <ellipse cx="150" cy="60" rx="11" ry="13" fill="#1A1A1A"/>
+    <circle cx="153" cy="56" r="3.2" fill="#FFFFFF" opacity="0.9"/>
+  </g>
+</svg>

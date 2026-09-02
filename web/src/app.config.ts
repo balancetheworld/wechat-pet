@@ -1,9 +1,11 @@
 export default defineAppConfig({
   pages: [
+    'pages/onboarding/profile',
     'pages/index/index',
     'pages/calendar/index',
     'pages/ask/index',
     'pages/profile/index',
+    'pages/account/index',
     'pages/family/create/index',
     'pages/family/join/index',
     'pages/family/pending/index',
@@ -11,7 +13,6 @@ export default defineAppConfig({
     'pages/pets/detail/index',
     'pages/pets/edit/index',
     'pages/profile/edit/index',
-    'pages/onboarding/profile',
     'pages/share/index',
   ],
   window: {
@@ -21,15 +22,12 @@ export default defineAppConfig({
     navigationBarTextStyle: 'black',
   },
   tabBar: {
+    custom: true,
     color: '#666',
     selectedColor: '#222',
     backgroundColor: '#fff',
     borderStyle: 'black',
     list: [
-      {
-        pagePath: 'pages/index/index',
-        text: '首页',
-      },
       {
         pagePath: 'pages/calendar/index',
         text: '日历',
@@ -40,7 +38,7 @@ export default defineAppConfig({
       },
       {
         pagePath: 'pages/profile/index',
-        text: '我的',
+        text: '档案',
       },
     ],
   },

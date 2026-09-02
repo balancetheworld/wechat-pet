@@ -1,6 +1,7 @@
 import { Button, Text, View } from '@tarojs/components'
 import Taro, { useDidShow, useRouter } from '@tarojs/taro'
 import { useState } from 'react'
+import PageBackground from '../../../components/page-background'
 import { deletePet, getPet } from '../../../services/pet'
 import { navigateBack, openPetEdit } from '../../../utils/navigation'
 
@@ -53,7 +54,8 @@ export default function PetDetail() {
   })
 
   return (
-    <View>
+    <View className="themed-page">
+      <PageBackground />
       <Text>{name || '宠物详情'}</Text>
       <Button loading={loading} disabled={loading || !petID} onClick={() => petID && openPetEdit(petID)}>修改名称</Button>
       <Button disabled={loading || !petID} onClick={handleDelete}>删除宠物</Button>

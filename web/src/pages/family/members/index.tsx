@@ -2,6 +2,7 @@ import type { FamilyMember, JoinApplication } from '../../../types/family'
 import { Button, Text, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import { useState } from 'react'
+import PageBackground from '../../../components/page-background'
 import { approveApplication, getMembers, getPendingApplications, rejectApplication, removeMember } from '../../../services/family'
 import { useAuthStore } from '../../../stores/auth-store'
 
@@ -52,7 +53,8 @@ export default function FamilyMembers() {
   })
 
   return (
-    <View>
+    <View className="themed-page">
+      <PageBackground />
       <Button loading={loading} onClick={load}>刷新</Button>
       {members.map(member => (
         <View key={member.id}>

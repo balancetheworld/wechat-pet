@@ -3,9 +3,10 @@ module github.com/balancetheworld/wechat-pet
 go 1.24.3
 
 require (
-	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/gin-gonic/gin v1.11.0
+	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/jackc/pgx/v5 v5.7.6
+	github.com/joho/godotenv v1.5.1
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.50
 	gopkg.in/yaml.v3 v3.0.1
 )

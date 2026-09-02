@@ -1,10 +1,11 @@
 import { Button, Text, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import { useState } from 'react'
+import PageBackground from '../../../components/page-background'
 import { routes } from '../../../constants/routes'
 import { getMyJoinApplication } from '../../../services/family'
 import { getMe } from '../../../services/user'
-import { navigateTo, switchTab } from '../../../utils/navigation'
+import { navigateTo, reLaunch } from '../../../utils/navigation'
 
 export default function PendingFamily() {
   const [status, setStatus] = useState<'pending' | 'active' | 'rejected' | 'none'>('none')
@@ -21,7 +22,7 @@ export default function PendingFamily() {
       setStatus(application.status)
       if (application.status === 'active') {
         await getMe()
-        await switchTab(routes.tabs.home)
+        await reLaunch(routes.pages.home)
       }
     }
     catch (error) {
@@ -39,7 +40,8 @@ export default function PendingFamily() {
 
   if (status === 'pending') {
     return (
-      <View>
+      <View className="themed-page">
+        <PageBackground />
         <Text>等待家庭拥有者审核</Text>
         <Button loading={loading} onClick={load}>刷新状态</Button>
       </View>
@@ -48,7 +50,8 @@ export default function PendingFamily() {
 
   if (status === 'rejected') {
     return (
-      <View>
+      <View className="themed-page">
+        <PageBackground />
         <Text>申请未通过</Text>
         <Button onClick={() => navigateTo(routes.pages.joinFamily)}>重新申请</Button>
       </View>
@@ -56,7 +59,8 @@ export default function PendingFamily() {
   }
 
   return (
-    <View>
+    <View className="themed-page">
+      <PageBackground />
       <Text>暂无加入申请</Text>
       <Button onClick={() => navigateTo(routes.pages.joinFamily)}>申请加入家庭</Button>
     </View>
