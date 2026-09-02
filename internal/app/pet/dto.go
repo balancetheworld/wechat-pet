@@ -6,7 +6,8 @@ type PetDTO struct {
 }
 
 type CreatePetRequest struct {
-	Name string `json:"name" binding:"required,min=1,max=50"`
+	Name          string `json:"name" binding:"required,min=1,max=50"`
+	AvatarAssetID string `json:"avatar_asset_id"`
 }
 
 type UpdatePetRequest struct {

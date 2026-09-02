@@ -51,6 +51,15 @@ func (s *Service) Create(ctx context.Context, familyID string, userID string, re
 	if err != nil {
 		return PetDTO{}, appErrors.Internal(err)
 	}
+	if request.AvatarAssetID != "" {
+		if creator, ok := s.repository.(interface {
+			SetAvatar(context.Context, string, string, string) error
+		}); ok {
+			if err := creator.SetAvatar(ctx, familyID, value.ID, request.AvatarAssetID); err != nil {
+				return PetDTO{}, appErrors.Internal(err)
+			}
+		}
+	}
 	return toDTO(value), nil
 }
 

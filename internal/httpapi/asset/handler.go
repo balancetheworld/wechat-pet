@@ -15,6 +15,7 @@ import (
 )
 
 const maxAvatarSize = 5 << 20
+const maxMediaSize = 50 << 20
 
 type Handler struct{ service *fileservice.Service }
 
@@ -29,8 +30,9 @@ func (h *Handler) Upload(c *gin.Context) {
 		response.Fail(c, appErrors.Unauthorized())
 		return
 	}
-	if c.PostForm("type") != "avatar" {
-		response.Fail(c, appErrors.InvalidParam("仅支持上传头像"))
+	uploadType := c.PostForm("type")
+	if !supportedType(uploadType) {
+		response.Fail(c, appErrors.InvalidParam("不支持的文件类型"))
 		return
 	}
 	file, err := c.FormFile("file")
@@ -38,14 +40,18 @@ func (h *Handler) Upload(c *gin.Context) {
 		response.Fail(c, appErrors.InvalidParam("请选择头像图片"))
 		return
 	}
-	if file.Size <= 0 || file.Size > maxAvatarSize {
-		response.Fail(c, appErrors.InvalidParam("头像图片不能超过 5MB"))
+	limit := int64(maxAvatarSize)
+	if uploadType != "avatar" && uploadType != "pet_avatar" && uploadType != "pet_cover" {
+		limit = maxMediaSize
+	}
+	if file.Size <= 0 || file.Size > limit {
+		response.Fail(c, appErrors.InvalidParam("文件大小超出限制"))
 		return
 	}
 	contentType := strings.ToLower(strings.TrimSpace(file.Header.Get("Content-Type")))
-	extension := avatarExtension(contentType, file.Filename)
+	extension := assetExtension(contentType, file.Filename, uploadType)
 	if extension == "" {
-		response.Fail(c, appErrors.InvalidParam("头像仅支持 JPG、PNG 或 WEBP 图片"))
+		response.Fail(c, appErrors.InvalidParam("文件格式不支持"))
 		return
 	}
 	content, err := file.Open()
@@ -64,6 +70,28 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 	response.Success(c, uploadResponse{AssetID: assetID})
+}
+
+func supportedType(value string) bool {
+	switch value {
+	case "avatar", "pet_avatar", "pet_cover", "birthday_photo", "birthday_video", "growth_image":
+		return true
+	}
+	return false
+}
+
+func assetExtension(contentType, fileName, uploadType string) string {
+	if uploadType == "birthday_video" {
+		ext := strings.ToLower(filepath.Ext(fileName))
+		if strings.HasPrefix(contentType, "video/") || ext == ".mp4" || ext == ".mov" {
+			if ext == "" {
+				ext = ".mp4"
+			}
+			return ext
+		}
+		return ""
+	}
+	return avatarExtension(contentType, fileName)
 }
 
 func avatarExtension(contentType, fileName string) string {

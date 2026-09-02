@@ -1,4 +1,10 @@
 #!/usr/bin/env sh
 
 # 运行 commitlint 检查 commit message
-npx --no -- commitlint --edit ${1}
+root_dir="$(git rev-parse --show-toplevel)"
+commit_file="$(git rev-parse --git-path COMMIT_EDITMSG)"
+case "$commit_file" in
+  /*) ;;
+  *) commit_file="$root_dir/$commit_file" ;;
+esac
+"$root_dir/web/node_modules/.bin/commitlint" --config "$root_dir/web/commitlint.config.mjs" --edit "$commit_file"
