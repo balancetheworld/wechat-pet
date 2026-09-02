@@ -1,0 +1,117 @@
+/* ============================================
+   Pet Manual - 统一设计令牌 / Design Tokens
+   版本四十七：集中管理颜色、圆角、玻璃质感、间距等
+   此文件在 proto.scss 之后引入，用于覆盖和补充全局样式
+   ============================================ */
+
+/* 设计令牌变量：H5 挂 :root，小程序端挂 page（WXSS 对 :root 兼容性差） */
+@mixin design-tokens {
+  /* 品牌色 */
+  --primary: #A3C2E8;
+  --primary-dark: #7FA5D6;
+  --primary-light: #CCDFF4;
+  --primary-deep: #4A6489;
+
+  /* 辅助色 */
+  --accent-soft: #A8D5E5;
+  --green: #5BB89E;
+  --green-soft: #D4F0E5;
+  --yellow: #F0C674;
+  --danger: #EF4444;
+
+  /* 文字与底色 */
+  --ink: #2A2520;
+  --muted: #8B7E70;
+  --paper: #FAF6EF;
+  --paper-deep: #F5EFE6;
+  --line: #E0D5C5;
+  --surface: #FFFEFB;
+
+  /* 玻璃质感 */
+  --glass-border: 1px solid rgba(255, 255, 255, 0.55);
+  --glass-blur: blur(10px) saturate(1.6);
+  --glass-shadow: 0 4px 16px rgba(163, 194, 232, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+
+  /* 圆角令牌 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+
+  /* 按钮统一圆角：使按钮偏方 */
+  --btn-radius: 10px;
+  --btn-radius-sm: 8px;
+  --btn-radius-lg: 12px;
+
+  /* 间距 */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 12px;
+  --space-lg: 16px;
+  --space-xl: 20px;
+
+  /* 阴影 */
+  --shadow-sm: 0 2px 8px rgba(74, 100, 137, 0.08);
+  --shadow-md: 0 4px 16px rgba(163, 194, 232, 0.12);
+  --shadow-lg: 0 8px 24px rgba(163, 194, 232, 0.15);
+}
+
+/* #ifdef h5 */
+:root {
+  @include design-tokens;
+}
+/* #endif */
+/* #ifndef h5 */
+page {
+  @include design-tokens;
+}
+/* #endif */
+
+/* ===== 版本四十七：按钮圆角统一减小 ===== */
+/* 以下选择器覆盖 proto.scss 中对应按钮的圆角，使其更偏方 */
+.primary-button,
+.secondary-button,
+.add-pet,
+.preset-chip,
+.ask-send-btn,
+.ask-history-btn,
+.cal-btn,
+.cal-submit-btn,
+.cal-btn-done,
+.cal-cycle-chip,
+.cal-pet-chip,
+.chip,
+.onboarding-choice,
+.cal-seg-item,
+.cal-picker,
+.cal-dd-nav-btn,
+.cal-switch-row,
+.manual-header-btn,
+.cover-TOC-btn,
+.cal-family-btn,
+.dd-nav-btn,
+.avatar-pick-button,
+.management-button,
+.floating-family-button,
+.identity-photo,
+.submit-btn,
+.confirm-btn {
+  border-radius: var(--btn-radius) !important;
+}
+
+.chip-sm {
+  border-radius: var(--btn-radius-sm) !important;
+}
+
+.app-tab,
+.app-tab-indicator {
+  border-radius: var(--btn-radius-lg) !important;
+}
+
+/* 底部导航胶囊偏方 */
+.app-tabs {
+  border-radius: 22px !important;
+}

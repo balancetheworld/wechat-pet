@@ -1,11 +1,11 @@
 {
   "eslint.workingDirectories": [
     {
-      "directory": "./client",
+      "directory": "./web",
       "changeProcessCWD": true
     }
   ],
-  "typescript.tsdk": "${workspaceFolder}/client/node_modules/typescript/lib",
+  "typescript.tsdk": "${workspaceFolder}/web/node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
   "eslint.validate": [
     "javascript",
@@ -16,5 +16,5 @@
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit"
   },
-  "js/ts.tsdk.path": "${workspaceFolder}/client/node_modules/typescript/lib"
+  "js/ts.tsdk.path": "${workspaceFolder}/web/node_modules/typescript/lib"
 }

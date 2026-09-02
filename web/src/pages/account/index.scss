@@ -1,0 +1,119 @@
+.account-page {
+  position: relative;
+  overflow: hidden;
+  min-height: 100vh;
+  box-sizing: border-box;
+  padding: 32rpx 24rpx 160rpx;
+  color: var(--ink);
+  background: #F5EFE6;
+}
+
+.account-page > view,
+.account-page > text,
+.account-page > button {
+  position: relative;
+  z-index: 1;
+}
+
+.account-header {
+  padding: 18rpx 8rpx 30rpx;
+}
+
+.account-header__title,
+.account-user__name,
+.account-user__identity,
+.account-section__title,
+.account-family__name {
+  display: block;
+}
+
+.account-header__title {
+  color: var(--primary-deep);
+  font-size: 42rpx;
+  font-weight: 600;
+}
+
+.account-user,
+.account-family {
+  display: flex;
+  align-items: center;
+  padding: 30rpx;
+  background: rgba(255, 254, 251, 0.78);
+  border: var(--glass-border);
+  border-radius: 12rpx;
+  box-shadow: var(--glass-shadow);
+}
+
+.account-user__avatar {
+  width: 112rpx;
+  height: 112rpx;
+  border-radius: 50%;
+}
+
+.account-user__avatar--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  background: rgba(127, 165, 214, 0.2);
+  font-size: 22rpx;
+}
+
+.account-user__info {
+  margin-left: 24rpx;
+}
+
+.account-user__name {
+  font-size: 34rpx;
+  font-weight: 600;
+}
+
+.account-user__identity {
+  margin-top: 10rpx;
+  color: var(--muted);
+  font-size: 24rpx;
+}
+
+.account-section {
+  margin-top: 32rpx;
+}
+
+.account-section__title {
+  margin: 0 8rpx 18rpx;
+  color: var(--primary-deep);
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.account-family {
+  justify-content: space-between;
+}
+
+.account-family__name {
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.account-family--empty {
+  display: block;
+  text-align: center;
+}
+
+.account-family__actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+
+.account-family__actions button {
+  flex: 1;
+  padding: 0 8rpx;
+  font-size: 24rpx;
+}
+
+.account-back-home {
+  width: 100%;
+  margin-top: 36rpx;
+  color: #FFFEFB !important;
+  background: rgba(127, 165, 214, 0.86) !important;
+}

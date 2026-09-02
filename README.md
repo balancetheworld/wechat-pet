@@ -8,8 +8,10 @@
 
 ```text
 pet-family-miniapp
-├── client  Taro + React + TypeScript 微信小程序
-├── server  Go + Gin 后端 API
+├── web     Taro + React + TypeScript 微信小程序
+├── cmd     Go + Gin API 入口
+├── internal Go 后端业务实现
+├── migrations 数据库迁移
 ├── docs    项目设计、数据库、接口和流程文档
 └── deployments
     ├── compose
@@ -18,7 +20,7 @@ pet-family-miniapp
 
 开发规范
 页面不能直接调用 Taro.request。
-所有请求必须经过 client/src/services。
+所有请求必须经过 web/src/services。
 handler 不能直接操作数据库。
 service 负责业务规则和权限判断。
 repository 只负责数据库访问。

@@ -1,0 +1,45 @@
+// ============================================
+// 宠物小册 - 蓝色玻璃主题全局变量
+// ============================================
+
+// --- 主题色（淡蓝柔和版·再调浅） ---
+$primary: #A3C2E8;          // 主色（淡蓝）
+$primary-dark: #7FA5D6;     // 深蓝（淡深蓝）
+$primary-light: #CCDFF4;    // 浅蓝
+$cream: #F5EFE6;            // 奶油底色
+$cream-dark: #EDE5D8;       // 深奶油
+$blue: #BFE0F1;             // 浅蓝点缀
+$yellow: #F0C674;           // 黄色次要
+$yellow-deep: #E8C468;      // 深黄
+$ink: #2A2520;              // 深墨/文字
+$white: #FFFEFB;            // 暖白
+
+// --- 模块色 ---
+$ask-bg-start: rgba(191,224,241,0.45);   // AI板块渐变起始
+$ask-bg-end: rgba(245,239,230,0.8);      // AI板块渐变结束
+$cal-bg: #F5EFE6;            // 日历背景
+$manual-bg: rgba(191,224,241,0.3);       // 档案背景
+
+// --- 描边与阴影（玻璃质感） ---
+$border-width: 1px;
+$border-color: rgba(255, 255, 255, 0.55);
+$shadow-hard: 0 4px 16px rgba(163, 194, 232, 0.08);
+$shadow-soft: 0 4px 16px rgba(163, 194, 232, 0.12);
+$radius-sm: 8px;
+$radius-md: 14px;
+$radius-lg: 20px;
+$radius-xl: 28px;
+
+// --- 字体 ---
+$font-handwritten: 'Ma Shan Zheng', cursive;
+$font-sans: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+
+// --- 间距 ---
+$space-xs: 4px;
+$space-sm: 8px;
+$space-md: 16px;
+$space-lg: 24px;
+$space-xl: 32px;
+
+// --- 导航栏 ---
+$tabbar-height: 110rpx;

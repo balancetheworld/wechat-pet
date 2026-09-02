@@ -1,0 +1,409 @@
+/* ============================================
+   宠物档案册 - 红绘主题样式
+   ============================================ */
+
+.manual-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #F5EFE6;
+}
+
+/* --- 顶部导航 --- */
+.manual-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24rpx;
+  height: 88rpx;
+  flex-shrink: 0;
+
+  .manual-header-btn {
+    width: 60rpx;
+    height: 60rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40rpx;
+    color: #2A2520;
+  }
+
+  .manual-title {
+    font-family: 'Ma Shan Zheng', cursive;
+    font-size: 34rpx;
+    color: #2A2520;
+  }
+
+  .manual-capsule {
+    display: flex;
+    align-items: center;
+    gap: 8rpx;
+    padding: 6rpx 16rpx;
+    border: 2rpx solid #2A2520;
+    border-radius: 30rpx;
+    background: #FFFEFB;
+
+    .capsule-more { font-size: 20rpx; letter-spacing: 2rpx; color: #2A2520; }
+    .capsule-divider { width: 2rpx; height: 16rpx; background: #2A2520; opacity: 0.3; }
+    .capsule-mark { width: 16rpx; height: 16rpx; border: 2rpx solid #2A2520; border-radius: 50%; }
+  }
+}
+
+/* --- 书本容器 --- */
+.book-container {
+  flex: 1;
+  margin: 24rpx;
+  position: relative;
+  overflow: hidden;
+}
+
+/* --- 封面 --- */
+.book-cover {
+  width: 100%;
+  height: 100%;
+  background: #F5C6C0;
+  border: 6rpx solid #2A2520;
+  border-radius: 28rpx;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+
+  .cover-spine, .cover-spine-r {
+    width: 12rpx;
+    background: #2A2520;
+    flex-shrink: 0;
+  }
+}
+
+.cover-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx;
+  text-align: center;
+
+  .cover-emoji {
+    font-size: 120rpx;
+    margin-bottom: 24rpx;
+  }
+
+  .cover-title {
+    font-family: 'Ma Shan Zheng', cursive;
+    font-size: 48rpx;
+    color: #2A2520;
+    margin-bottom: 16rpx;
+  }
+
+  .cover-subtitle {
+    font-size: 26rpx;
+    color: #5A504A;
+    line-height: 1.5;
+    margin-bottom: 32rpx;
+    max-width: 400rpx;
+  }
+
+  .cover-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 8rpx;
+    margin-bottom: 40rpx;
+
+    .cover-meta-item {
+      font-size: 24rpx;
+      color: #5A504A;
+    }
+  }
+
+  .cover-TOC-btn {
+    padding: 16rpx 40rpx;
+    background: #C8423A;
+    color: #FFFEFB;
+    border: 4rpx solid #2A2520;
+    border-radius: 20rpx;
+    box-shadow: 4rpx 6rpx 0 #2A2520;
+    font-size: 28rpx;
+    font-weight: 600;
+    font-family: 'Ma Shan Zheng', cursive;
+  }
+
+  .cover-page-hint {
+    position: absolute;
+    bottom: 32rpx;
+    right: 32rpx;
+    font-size: 22rpx;
+    color: #8A8278;
+  }
+}
+
+/* --- 封底 --- */
+.book-back-cover {
+  width: 100%;
+  height: 100%;
+  background: #F5C6C0;
+  border: 6rpx solid #2A2520;
+  border-radius: 28rpx;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+
+  .back-emoji {
+    font-size: 120rpx;
+    margin-bottom: 24rpx;
+  }
+
+  .back-title {
+    font-family: 'Ma Shan Zheng', cursive;
+    font-size: 40rpx;
+    color: #2A2520;
+    margin-bottom: 16rpx;
+  }
+
+  .back-sub {
+    font-size: 26rpx;
+    color: #5A504A;
+    margin-bottom: 40rpx;
+  }
+
+  .back-restart {
+    padding: 16rpx 40rpx;
+    background: #C8423A;
+    color: #FFFEFB;
+    border: 4rpx solid #2A2520;
+    border-radius: 20rpx;
+    box-shadow: 4rpx 6rpx 0 #2A2520;
+    font-size: 28rpx;
+    font-weight: 600;
+  }
+}
+
+/* --- 内容页 --- */
+.book-page {
+  width: 100%;
+  height: 100%;
+  background: #FFFEFB;
+  border: 6rpx solid #2A2520;
+  border-radius: 28rpx;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.page-num {
+  position: absolute;
+  top: 24rpx;
+  right: 32rpx;
+  font-size: 60rpx;
+  font-weight: 700;
+  color: #F5C6C0;
+  font-family: 'Ma Shan Zheng', cursive;
+  z-index: 1;
+}
+
+.page-content {
+  flex: 1;
+  padding: 60rpx 40rpx 20rpx;
+  overflow-y: auto;
+}
+
+.page-title {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 44rpx;
+  color: #C8423A;
+  margin-bottom: 8rpx;
+}
+
+.page-subtitle {
+  display: block;
+  font-size: 24rpx;
+  color: #8A8278;
+  margin-bottom: 24rpx;
+}
+
+.page-divider {
+  height: 4rpx;
+  background: #EDE5D8;
+  border-radius: 4rpx;
+  margin-bottom: 24rpx;
+}
+
+.page-items {
+  display: flex;
+  flex-direction: column;
+  gap: 20rpx;
+}
+
+.page-item {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx 24rpx;
+  background: #FAF6EF;
+  border: 3rpx solid #EDE5D8;
+  border-radius: 16rpx;
+
+  .item-emoji {
+    width: 56rpx;
+    height: 56rpx;
+    border-radius: 50%;
+    background: #FFF8E8;
+    border: 3rpx solid #F5D68A;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 28rpx;
+    flex-shrink: 0;
+  }
+
+  .item-text {
+    flex: 1;
+    min-width: 0;
+
+    .item-label {
+      display: block;
+      font-size: 22rpx;
+      color: #8A8278;
+    }
+    .item-value {
+      display: block;
+      font-size: 28rpx;
+      color: #2A2520;
+      margin-top: 4rpx;
+    }
+  }
+}
+
+/* --- 页脚导航 --- */
+.page-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16rpx 32rpx 24rpx;
+  border-top: 3rpx solid #EDE5D8;
+
+  .page-nav {
+    padding: 12rpx 24rpx;
+    border: 3rpx solid #2A2520;
+    border-radius: 16rpx;
+    background: #F5EFE6;
+    font-size: 24rpx;
+    color: #2A2520;
+
+    &.next {
+      background: #C8423A;
+      color: #FFFEFB;
+      box-shadow: 4rpx 6rpx 0 #2A2520;
+    }
+  }
+
+  .page-indicator {
+    font-size: 24rpx;
+    color: #8A8278;
+  }
+}
+
+/* --- 目录弹层 --- */
+.toc-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(42, 37, 32, 0.5);
+  z-index: 100;
+  display: flex;
+  align-items: flex-end;
+}
+
+.toc-sheet {
+  width: 100%;
+  background: #FFFEFB;
+  border-radius: 36rpx 36rpx 0 0;
+  border-top: 6rpx solid #2A2520;
+  padding: 0 32rpx 60rpx;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.toc-handle {
+  width: 72rpx;
+  height: 8rpx;
+  background: #EDE5D8;
+  border-radius: 8rpx;
+  margin: 16rpx auto 0;
+}
+
+.toc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 0;
+  border-bottom: 3rpx solid #EDE5D8;
+
+  .toc-title {
+    font-family: 'Ma Shan Zheng', cursive;
+    font-size: 36rpx;
+    color: #2A2520;
+  }
+
+  .toc-sub {
+    font-size: 22rpx;
+    color: #8A8278;
+    flex: 1;
+    margin-left: 16rpx;
+  }
+
+  .toc-close {
+    width: 56rpx;
+    height: 56rpx;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 40rpx;
+    color: #2A2520;
+  }
+}
+
+.toc-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16rpx 0;
+}
+
+.toc-item {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  padding: 24rpx 16rpx;
+  border-bottom: 2rpx solid #EDE5D8;
+
+  .toc-num {
+    font-size: 32rpx;
+    font-weight: 700;
+    color: #F5C6C0;
+    font-family: 'Ma Shan Zheng', cursive;
+    min-width: 60rpx;
+  }
+
+  .toc-name {
+    font-size: 30rpx;
+    color: #2A2520;
+  }
+
+  &.active {
+    background: #FFF8E8;
+    border-radius: 16rpx;
+    padding-left: 24rpx;
+
+    .toc-num { color: #C8423A; }
+    .toc-name { color: #C8423A; font-weight: 600; }
+  }
+}
