@@ -46,6 +46,7 @@ func (r *SQLRepository) ListMonth(ctx context.Context, familyID, month, petID st
 		if err := rows.Scan(&date, &medical, &daily); err != nil {
 			return nil, err
 		}
+		date = normalizeDate(date)
 		markers[date] = DayMarkerDTO{Date: date, HasMedicalRecord: medical != 0, HasDailyRecord: daily != 0}
 	}
 	if err := rows.Err(); err != nil {
@@ -65,6 +66,7 @@ func (r *SQLRepository) ListMonth(ctx context.Context, familyID, month, petID st
 		if err := rows.Scan(&date); err != nil {
 			return nil, err
 		}
+		date = normalizeDate(date)
 		marker := markers[date]
 		marker.Date = date
 		marker.HasPendingReminder = true
@@ -376,12 +378,20 @@ func scanReminder(row scanner) (ReminderDTO, error) {
 		intervalValue := int(interval.Int64)
 		value.RepeatIntervalDays = &intervalValue
 	}
+	value.ReminderDate = normalizeDate(value.ReminderDate)
 	parsedChannels, err := parseChannels(channels)
 	if err != nil {
 		return ReminderDTO{}, err
 	}
 	value.NotificationChannels = parsedChannels
 	return value, nil
+}
+
+func normalizeDate(value string) string {
+	if len(value) >= len("2006-01-02") && value[4] == '-' && value[7] == '-' {
+		return value[:len("2006-01-02")]
+	}
+	return value
 }
 
 func parseChannels(value string) ([]string, error) {
