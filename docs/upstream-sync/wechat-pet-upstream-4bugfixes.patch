@@ -1,0 +1,116 @@
+--- a/internal/httpapi/pet/routes.go
++++ b/internal/httpapi/pet/routes.go
+@@ -20,11 +20,10 @@
+ 	group.PATCH("/:pet_id", handler.Update)
+ 	group.DELETE("/:pet_id", handler.Delete)
+ 	group.GET("/:pet_id/profile", handler.Profile)
+-	group.PATCH("/:pet_id/profile", handler.Resource)
+-	group.GET("/:pet_id/dates", handler.Resource)
+ 	group.GET("/:pet_id/:resource", handler.Resource)
+ 	group.POST("/:pet_id/:resource", handler.Resource)
+ 	group.PUT("/:pet_id/:resource", handler.Resource)
++	group.PATCH("/:pet_id/:resource", handler.Resource)
+ 	group.PATCH("/:pet_id/:resource/:resource_id", handler.Resource)
+ 	group.DELETE("/:pet_id/:resource/:resource_id", handler.Resource)
+ }
+--- a/internal/app/pet/profile.go
++++ b/internal/app/pet/profile.go
+@@ -62,9 +62,11 @@
+ 		return p, err
+ 	}
+ 	if birthday.Valid {
++		birthday.String = dateOnlyString(birthday.String)
+ 		p.Birthday = &birthday.String
+ 	}
+ 	if home.Valid {
++		home.String = dateOnlyString(home.String)
+ 		p.HomeDate = &home.String
+ 	}
+ 	now := time.Now()
+@@ -152,7 +154,11 @@
+ 			}
+ 			m := map[string]any{"id": vals[0]}
+ 			for i, k := range parts {
+-				m[k] = vals[i+1]
++				if dateOnlyFields[k] {
++					m[k] = dateOnly(vals[i+1])
++				} else {
++					m[k] = vals[i+1]
++				}
+ 			}
+ 			out = append(out, m)
+ 		}
+@@ -208,6 +214,34 @@
+ 	return nil, appErrors.InvalidParam("不支持的操作")
+ }
+ 
++// dateOnlyFields: 泛化资源表中 DATE 类型的列。pgx 驱动会把 DATE 返回成
++// time.Time（JSON 序列化为 RFC3339 带 T00:00:00Z 后缀），统一归一为
++// YYYY-MM-DD 输出 —— 前端展示与 GetProfile 派生字段计算都依赖该格式。
++var dateOnlyFields = map[string]bool{
++	"vaccinated_at": true,
++	"measured_at":   true,
++	"occurred_at":   true,
++}
++
++// dateOnlyString 把 "2024-03-15T00:00:00Z" 之类的字符串截取为 "2024-03-15"。
++func dateOnlyString(v string) string {
++	if len(v) > 10 {
++		return v[:10]
++	}
++	return v
++}
++
++// dateOnly 归一化任意类型的日期值（time.Time / string）。
++func dateOnly(value any) any {
++	switch v := value.(type) {
++	case time.Time:
++		return v.Format("2006-01-02")
++	case string:
++		return dateOnlyString(v)
++	}
++	return value
++}
++
+ func resourceSpec(resource string) (string, string, error) {
+ 	switch resource {
+ 	case "certificates":
+--- a/internal/app/calendar/repository.go
++++ b/internal/app/calendar/repository.go
+@@ -148,6 +148,19 @@
+ 	if err != nil {
+ 		return CompleteReminderDTO{}, err
+ 	}
++	content := strings.TrimSpace(request.Content)
++	if content == "" {
++		content = sourceContent
++	}
++	// 先插入完成记录与媒体，再更新提醒状态——completed_record_id 外键
++	// 指向的记录必须先存在（Postgres 事务内外键为立即检查，顺序颠倒
++	// 会触发 23503 外键违反；SQLite 默认不启用外键故此前未暴露）。
++	if err := r.insertRecord(ctx, tx, recordID, familyID, userID, petID, "medical", medicalType, content, completedAt); err != nil {
++		return CompleteReminderDTO{}, err
++	}
++	if err := r.insertMedia(ctx, tx, familyID, recordID, request.MediaAssetIDs); err != nil {
++		return CompleteReminderDTO{}, err
++	}
+ 	result, err := tx.ExecContext(ctx, r.query("UPDATE calendar_reminders SET status = 'completed', completed_at = ?, completed_by = ?, completed_record_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND family_id = ? AND status = 'pending'"), completedAt, userID, recordID, reminderID, familyID)
+ 	if err != nil {
+ 		return CompleteReminderDTO{}, err
+@@ -159,16 +172,6 @@
+ 	if affected == 0 {
+ 		return CompleteReminderDTO{}, ErrReminderCompleted
+ 	}
+-	content := strings.TrimSpace(request.Content)
+-	if content == "" {
+-		content = sourceContent
+-	}
+-	if err := r.insertRecord(ctx, tx, recordID, familyID, userID, petID, "medical", medicalType, content, completedAt); err != nil {
+-		return CompleteReminderDTO{}, err
+-	}
+-	if err := r.insertMedia(ctx, tx, familyID, recordID, request.MediaAssetIDs); err != nil {
+-		return CompleteReminderDTO{}, err
+-	}
+ 	var nextReminderID string
+ 	if repeatType != "once" {
+ 		nextDate, err := nextReminderDate(completedAt, repeatType, repeatInterval)

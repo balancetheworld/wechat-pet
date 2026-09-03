@@ -3,9 +3,9 @@ package middleware
 import (
 	"strings"
 
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 	jwt "github.com/golang-jwt/jwt"
 )

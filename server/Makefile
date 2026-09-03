@@ -1,42 +1,37 @@
 SHELL := /bin/sh
 
-GO := go
-GOFMT := gofmt
-APP := api
-MIGRATE_STEPS ?= 1
-GO_FILES := $(shell find . -type d -name vendor -prune -o -type f -name '*.go' -print)
+GO_FILES := $(shell find cmd internal -type d -name vendor -prune -o -type f -name '*.go' -print)
 
-.PHONY: run build binary fmt fmt-check vet test check migrate-up migrate-down
+.PHONY: run build fmt fmt-check vet test check migrate-up migrate-down
 
 run:
-	$(GO) run ./cmd/$(APP)
+	go run ./cmd/api
 
 build:
 	mkdir -p bin
-	$(GO) build -o bin/$(APP) ./cmd/$(APP)
-
-# for internal use
-# typically called from Dockerfiles
-binary:
-	cd cmd/$(WHAT) && $(GO) build -o ../../bin/$(WHAT) .
+	go build -o bin/api ./cmd/api
 
 fmt:
-	$(GOFMT) -w $(GO_FILES)
+	gofmt -w $(GO_FILES)
 
 fmt-check:
-	@unformatted="$$($(GOFMT) -l $(GO_FILES))"; \
+	@unformatted="$$(gofmt -l $(GO_FILES))"; \
 	if [ -n "$$unformatted" ]; then \
 		printf '%s\n' "$$unformatted"; \
 		exit 1; \
 	fi
 
 vet:
-	$(GO) vet ./...
+	go vet ./...
 
 test:
-	$(GO) test ./...
+	go test ./...
 
-check: fmt-check vet test build
+check:
+	$(MAKE) fmt-check
+	$(MAKE) vet
+	$(MAKE) test
+	$(MAKE) build
 
 migrate-up:
 	./scripts/migrate-up.sh

@@ -23,6 +23,11 @@ export function openPetEdit(petId: string) {
   return navigateTo(withQuery(routes.pages.petEdit, { petId }))
 }
 
+// 「我的」页暂未挂 tabBar 入口，保留导航函数备后续使用
+export function openProfile() {
+  return navigateTo(routes.pages.profile)
+}
+
 export function openProfileEdit() {
   return navigateTo(routes.pages.profileEdit)
 }

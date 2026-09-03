@@ -1,0 +1,172 @@
+/**
+ * 自定义 tabBar 样式（自包含，最终层叠值取自文件二 proto.scss 编译产物）
+ *
+ * 说明：custom-tab-bar 是微信隔离组件，common.wxss 的全局规则与 CSS 变量
+ * 均不会作用于此，因此这里直接写死最终层叠计算后的数值（玻璃胶囊主题）。
+ * 布局参考文件二原版：胶囊 absolute 居中底部，家庭按钮 absolute 左下角。
+ *
+ * 微信端健壮性（修复纵向堆叠）：
+ * 1. 根容器填满微信 custom-tabBar 区域，全部子元素 absolute/flex，绝不依赖
+ *    全局样式、Button 原生样式或隐式尺寸；
+ * 2. 容器与 tab 全部使用 flex 布局（不用 CSS grid，避免低版本 WebView 降级）；
+ * 3. 容器给定显式宽/高，滑块高度用 calc(100% - 2*padding) 才可解析；
+ * 4. 列步进 = 列宽 123.08 + 间距 7.69 = 130.77（tsx 中滑块按此平移）。
+ *
+ * 防覆盖：所有选择器加 .custom-tab-bar 前缀，把特异性提到 (0,2,0)，
+ *        高于 common.wxss 中 proto.scss 的 .app-tabs grid 定义 (0,1,0)。
+ */
+
+/* ===== 根容器：微信 custom-tab-bar 悬浮层 =====
+ * 微信官方范式：组件根 fixed 钉在视口底部（不随页面滚动）。
+ * 根 pointer-events:none —— 透明空带不拦截页面点击；
+ * 交互子元素（.app-tabs / .floating-family-button）需显式 pointer-events:auto
+ * （pointer-events 会被继承，子元素不写则一并失效）。
+ * 高度 ≥ 胶囊底距 19.23 + 胶囊高 142.31 = 161.54，取 173.08 留余量。 */
+.custom-tab-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 999;
+  width: 100%;
+  height: calc(173.08px + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+/* ===== 左下角家庭中心按钮（与胶囊上下对齐同高、偏方圆角） =====
+ * 用户要求：与导航条上下同宽 → 底距 19.23 相同、高度 142.31 相同；
+ * 宽 115.38，圆角 30.77（与胶囊一致，偏方造型）。 */
+.custom-tab-bar .floating-family-button {
+  position: absolute;
+  z-index: 46;
+  left: 19.23px;
+  bottom: calc(19.23px + env(safe-area-inset-bottom));
+  width: 115.38px;
+  height: 142.31px;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.92px solid rgba(255, 255, 255, 0.5);
+  border-radius: 30.77px;
+  color: rgba(74, 100, 137, 0.92);
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(42.31px) saturate(1.4);
+  -webkit-backdrop-filter: blur(42.31px) saturate(1.4);
+  box-shadow: 0 15.38px 50px rgba(74, 100, 137, 0.12), inset 0 1.92px 0 rgba(255, 255, 255, 0.5);
+  font-size: 42.31px;
+  line-height: 1;
+  transition: transform 0.15s ease, background 0.2s ease;
+  pointer-events: auto;
+}
+
+.custom-tab-bar .floating-family-button:active {
+  transform: scale(0.94);
+}
+
+/* ===== 玻璃导航条（占满家庭按钮右侧至屏幕右缘） =====
+ * 屏宽恒为 750（rpx 设计宽）：
+ *   左 = ⌂左 19.23 + ⌂宽 115.38 + 间距 19.24 = 153.85
+ *   宽 = 750 - 153.85 - 右缘 19.23 = 576.92
+ * 列宽 = (576.92 - 2*15.38(横padding) - 2*11.54(间距)) / 3 = 174.36
+ * 高 = 142.31（与 ⌂ 上下对齐同高）；圆角 30.77（用户要求偏方）。 */
+.custom-tab-bar .app-tabs {
+  position: absolute;
+  z-index: 45;
+  left: 153.85px;
+  bottom: calc(19.23px + env(safe-area-inset-bottom));
+  width: 576.92px;
+  height: 142.31px;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 11.54px;
+  padding: 19.23px 15.38px;
+  box-sizing: border-box;
+  border-radius: 30.77px;
+  color: rgba(74, 100, 137, 0.92);
+  background: rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(42.31px) saturate(1.4);
+  -webkit-backdrop-filter: blur(42.31px) saturate(1.4);
+  box-shadow: 0 15.38px 50px rgba(74, 100, 137, 0.12), inset 0 1.92px 0 rgba(255, 255, 255, 0.5);
+  pointer-events: auto;
+}
+
+/* ===== 蓝色滑动指示器 =====
+ * 左 = 容器横向 padding 15.38；上 = 容器纵向 padding 19.23；
+ * 宽 = 列宽 174.36；高 = 容器高 - 上下 padding（容器有显式高度，calc 可解析）。
+ * 位移步进 = 列宽 174.36 + 间距 11.54 = 185.9（tsx 中按此平移）。 */
+.custom-tab-bar .app-tab-indicator {
+  position: absolute;
+  z-index: 0;
+  top: 19.23px;
+  left: 15.38px;
+  width: 174.36px;
+  height: calc(100% - 38.46px);
+  border-radius: 26.92px;
+  background: rgba(127, 165, 214, 0.7);
+  box-shadow: inset 0 1.92px 0 rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+  transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+
+/* ===== 单个 tab（图标上 / 文案下，纵向居中） ===== */
+.custom-tab-bar .app-tab {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 174.36px;
+  width: 174.36px;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7.69px;
+  border: 0;
+  border-radius: 26.92px;
+  color: rgba(74, 100, 137, 0.92);
+  background: transparent;
+  font-family: 'Ma Shan Zheng', 'ZCOOL KuaiLe', cursive;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
+}
+
+.custom-tab-bar .app-tab:active {
+  transform: scale(0.94);
+}
+
+.custom-tab-bar .app-tab-icon {
+  width: 44.23px;
+  height: 44.23px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32.69px;
+  line-height: 1;
+}
+
+.custom-tab-bar .app-tab-label {
+  font-size: 19.23px;
+  line-height: 1;
+}
+
+.custom-tab-bar .app-tab.active {
+  color: #FFFEFB;
+  background: transparent;
+  box-shadow: none;
+}
+
+.custom-tab-bar .app-tab.active .app-tab-icon {
+  color: #FFFEFB;
+}
+
+.custom-tab-bar .app-tab.active .app-tab-label {
+  color: #FFFEFB;
+  font-weight: 700;
+}

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/config"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/config"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "github.com/mattn/go-sqlite3"
 )

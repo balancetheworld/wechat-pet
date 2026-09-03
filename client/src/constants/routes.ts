@@ -1,10 +1,9 @@
 export const routes = {
-  // tabs：存放底部tabBar对应的页面
+  // tabs：底部 tabBar 实际渲染的 3 个页面（与文件二原型一致）
   tabs: {
     home: '/pages/index/index',
     calendar: '/pages/calendar/index',
     ask: '/pages/ask/index',
-    profile: '/pages/profile/index',
   },
   // pages：普通非tab页面，需要navigateTo跳转打开的子页面
   pages: {
@@ -14,6 +13,9 @@ export const routes = {
     familyMembers: '/pages/family/members/index',
     petDetail: '/pages/pets/detail/index',
     petEdit: '/pages/pets/edit/index',
+    // 「我的」页代码保留、暂不使用（无 tabBar 入口），
+    // 从普通页面路由恢复，需要时用 navigateTo 打开。
+    profile: '/pages/profile/index',
     profileEdit: '/pages/profile/edit/index',
     profileOnboarding: '/pages/onboarding/profile',
     share: '/pages/share/index',

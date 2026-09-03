@@ -3,9 +3,9 @@ package middleware
 import (
 	"strings"
 
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 

@@ -3,7 +3,7 @@ package user
 import (
 	"strings"
 
-	"github.com/balancetheworld/wechat-pet/server/internal/model"
+	"github.com/balancetheworld/wechat-pet/internal/model"
 )
 
 type UserDTO struct {

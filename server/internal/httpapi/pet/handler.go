@@ -3,10 +3,10 @@ package pet
 import (
 	"errors"
 
-	petapp "github.com/balancetheworld/wechat-pet/server/internal/app/pet"
-	"github.com/balancetheworld/wechat-pet/server/internal/middleware"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
+	"github.com/balancetheworld/wechat-pet/internal/middleware"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 
@@ -98,6 +98,45 @@ func (h *Handler) Delete(c *gin.Context) {
 		return
 	}
 	response.Success(c, struct{}{})
+}
+
+func (h *Handler) Profile(c *gin.Context) {
+	familyID, ok := middleware.GetCurrentFamilyID(c)
+	if !ok {
+		response.Fail(c, appErrors.Forbidden())
+		return
+	}
+	result, err := h.service.Profile(c.Request.Context(), familyID, c.Param("pet_id"))
+	if err != nil {
+		response.Fail(c, asAppError(err))
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *Handler) Resource(c *gin.Context) {
+	familyID, ok := middleware.GetCurrentFamilyID(c)
+	if !ok {
+		response.Fail(c, appErrors.Forbidden())
+		return
+	}
+	payload := map[string]any{}
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&payload); err != nil {
+			response.Fail(c, appErrors.InvalidParam("档案参数无效"))
+			return
+		}
+	}
+	if id := c.Param("resource_id"); id != "" {
+		payload["id"] = id
+	}
+	method := c.Request.Method
+	result, err := h.service.Resource(c.Request.Context(), familyID, c.Param("pet_id"), c.Param("resource"), method, payload)
+	if err != nil {
+		response.Fail(c, asAppError(err))
+		return
+	}
+	response.Success(c, result)
 }
 
 func asAppError(err error) *appErrors.AppError {

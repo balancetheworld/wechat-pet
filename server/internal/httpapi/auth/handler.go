@@ -3,9 +3,9 @@ package auth
 import (
 	"errors"
 
-	appauth "github.com/balancetheworld/wechat-pet/server/internal/app/auth"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
 	"github.com/gin-gonic/gin"
 )
 

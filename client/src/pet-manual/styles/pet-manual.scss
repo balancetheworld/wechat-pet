@@ -1,0 +1,79 @@
+/* ============================================
+   宠物小册（Pet-Manual 原型模块）样式入口
+   —— 改编自 Pet-Manual 项目 src/app.scss
+
+   原项目通过全局 app.scss 引入本组样式；合并进 wechat-pet 时
+   为避免改动主工程 app.scss，改为由页面组件按需引入本入口文件。
+
+   资源路径已从 ../public/、./assets/ 统一改写为本模块内的 ../assets/。
+   ============================================ */
+@use './proto.scss';
+@use './design-tokens.scss';
+
+/* Taro H5 容器适配：让页面容器 behave like body */
+page,
+taro-page-core {
+  display: block;
+  min-height: 100%;
+}
+
+/* 用户指定：AI 板块使用 ai-bg.jpg 作为背景，整页拉通 */
+#aiModuleScreen {
+  background: url('../assets/ai-bg.jpg') center / cover no-repeat;
+}
+
+/* 宠物档案整页背景 */
+#albumModuleScreen {
+  background: url('../assets/export.jpg') center / cover no-repeat;
+}
+
+/* 宠物日历整页背景：28.jpg 黄底蓝点 */
+#calendarModuleScreen {
+  background: #FFFEFB url('../assets/export.jpg') center / cover no-repeat;
+}
+
+/* 首次使用引导背景 */
+#onboardingScreen {
+  background: url('../assets/onboarding-bg.jpg') center / cover no-repeat;
+}
+
+/* 用户指定：日历下拉展开时，猫爪书签紧贴下拉下边沿一起下移。
+   现由纯 CSS 实现（.cal-dropdown .cal-bookmark { top: 100% }，逐帧跟随），
+   此处不可给 top 加过渡——过渡会让猫爪滞后于边沿，无法紧贴 */
+.cal-bookmark {
+  transition: transform .18s ease, background .2s;
+}
+
+/* 小程序端适配：页面根容器撑满整屏。
+   H5 原型的 .app 是「750px 宽 + 1623.08px 高的居中画布」（见 proto.scss，用于模拟手机屏），
+   在小程序模拟器/真机里照搬会缩成中间一坨、四周露底。
+   用 #app（页面根 View 的 id）覆盖，特异性高于类选择器 .app，避免与 proto.scss 的
+   .app 合并冲突导致规则丢失。 */
+#app {
+  width: 100%;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100vh;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+  /* weapp 端：让页面根容器透明，由子元素（module-screen / #app.gate）自带背景。
+     这能避免 proto.scss 中多个 .app 主题定义（深色/米色等）污染当前页面视觉。 */
+  background: transparent;
+}
+
+/* #ifdef weapp */
+/* proto.scss 在 H5 原型里准备了多套主题/画布的 .app 定义，weapp 端只需要
+   一个干净的根容器：透明背景、无圆角/阴影/边框，避免主题定义互相覆盖
+   导致页面只剩背景色、组件排版丢失。 */
+.app {
+  position: relative;
+  overflow: hidden;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* #endif */

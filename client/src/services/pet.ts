@@ -1,4 +1,4 @@
-import type { CreatePetRequest, Pet, UpdatePetRequest } from '../types/pet'
+import type { CreatePetRequest, Pet, PetProfile, UpdatePetRequest } from '../types/pet'
 import { request } from './request'
 
 export function getPets() {
@@ -33,5 +33,17 @@ export function deletePet(petID: string) {
   return request<void>({
     path: `/api/v1/pets/${encodeURIComponent(petID)}`,
     method: 'DELETE',
+  })
+}
+
+export function getPetProfile(petID: string) {
+  return request<PetProfile>({
+    path: `/api/v1/pets/${encodeURIComponent(petID)}/profile`,
+  })
+}
+
+export function getPetResource<T>(petID: string, resource: string) {
+  return request<T>({
+    path: `/api/v1/pets/${encodeURIComponent(petID)}/${resource}`,
   })
 }

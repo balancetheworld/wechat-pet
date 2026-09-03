@@ -1,7 +1,21 @@
 #!/bin/sh
 set -eu
 
-SERVER_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$ROOT_DIR"
+
+if [ -f "$ROOT_DIR/.env" ]; then
+	set -a
+	. "$ROOT_DIR/.env"
+	set +a
+fi
+
+if [ -z "${MIGRATE_BIN+x}" ] && command -v go >/dev/null 2>&1; then
+	GO_MIGRATE_BIN="$(go env GOPATH)/bin/migrate"
+	if [ -x "$GO_MIGRATE_BIN" ]; then
+		MIGRATE_BIN=$GO_MIGRATE_BIN
+	fi
+fi
 MIGRATE_BIN=${MIGRATE_BIN:-migrate}
 DATABASE_DRIVER=${DATABASE_DRIVER:-postgres}
 DATABASE_DSN=${DATABASE_DSN:-}
@@ -17,8 +31,11 @@ case "$DATABASE_DRIVER" in
 		;;
 	sqlite|sqlite3)
 		case "$DATABASE_DSN" in
-			sqlite3://*) DATABASE_URL=$DATABASE_DSN ;;
-			*) DATABASE_URL="sqlite3://$DATABASE_DSN" ;;
+			:memory:|file:*|sqlite3://*) DATABASE_URL=${DATABASE_DSN#sqlite3://} ;;
+			*)
+				mkdir -p "$(dirname "$DATABASE_DSN")"
+				DATABASE_URL="sqlite3://$DATABASE_DSN"
+				;;
 		esac
 		;;
 	*)
@@ -27,4 +44,4 @@ case "$DATABASE_DRIVER" in
 		;;
 esac
 
-"$MIGRATE_BIN" -source "file://$SERVER_DIR/migrations" -database "$DATABASE_URL" up
+"$MIGRATE_BIN" -source "file://$ROOT_DIR/migrations" -database "$DATABASE_URL" up

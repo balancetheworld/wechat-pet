@@ -3,12 +3,14 @@ package httpapi
 import (
 	"log/slog"
 
-	appauth "github.com/balancetheworld/wechat-pet/server/internal/app/auth"
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	petapp "github.com/balancetheworld/wechat-pet/server/internal/app/pet"
-	appuser "github.com/balancetheworld/wechat-pet/server/internal/app/user"
-	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
-	"github.com/balancetheworld/wechat-pet/server/internal/pkg/response"
+	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
+	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
+	appuser "github.com/balancetheworld/wechat-pet/internal/app/user"
+	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
+	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
+	fileservice "github.com/balancetheworld/wechat-pet/internal/service/file"
 	"github.com/gin-gonic/gin"
 )
 
@@ -19,7 +21,10 @@ type Dependencies struct {
 	FamilyRepository familyapp.Repository
 	PetService       *petapp.Service
 	PetRepository    petapp.Repository
+	CalendarService  *calendarapp.Service
 	TokenSigner      *jwtpkg.Signer
+	FileService      *fileservice.Service
+	LocalUploadDir   string
 }
 
 // New creates the API router and installs process-level middleware.
@@ -37,6 +42,9 @@ func NewWithDependencies(dependencies Dependencies, loggers ...*slog.Logger) *gi
 	router.GET("/healthz", func(c *gin.Context) {
 		response.Success(c, map[string]string{"status": "ok"})
 	})
+	if dependencies.LocalUploadDir != "" {
+		router.Static("/uploads", dependencies.LocalUploadDir)
+	}
 	v1 := router.Group("/api/v1")
 	registerV1Routes(v1, dependencies)
 

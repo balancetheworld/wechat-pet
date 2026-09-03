@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	userapp "github.com/balancetheworld/wechat-pet/server/internal/app/user"
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
-	"github.com/balancetheworld/wechat-pet/server/internal/platform/wechat"
+	userapp "github.com/balancetheworld/wechat-pet/internal/app/user"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	"github.com/balancetheworld/wechat-pet/internal/platform/wechat"
 )
 
 type TokenIssuer interface {
@@ -16,17 +16,22 @@ type TokenIssuer interface {
 }
 
 type Service struct {
-	wechat wechat.Client
-	users  UserRepository
-	family FamilyRepository
-	tokens TokenIssuer
+	wechat     wechat.Client
+	users      UserRepository
+	family     FamilyRepository
+	tokens     TokenIssuer
+	avatarURLs userapp.AvatarURLResolver
 }
 
-func NewService(client wechat.Client, users UserRepository, family FamilyRepository, tokens TokenIssuer) (*Service, error) {
+func NewService(client wechat.Client, users UserRepository, family FamilyRepository, tokens TokenIssuer, avatarURLs ...userapp.AvatarURLResolver) (*Service, error) {
 	if client == nil || users == nil || family == nil || tokens == nil {
 		return nil, stderrors.New("auth service dependencies are required")
 	}
-	return &Service{wechat: client, users: users, family: family, tokens: tokens}, nil
+	var avatarURLResolver userapp.AvatarURLResolver
+	if len(avatarURLs) > 0 {
+		avatarURLResolver = avatarURLs[0]
+	}
+	return &Service{wechat: client, users: users, family: family, tokens: tokens, avatarURLs: avatarURLResolver}, nil
 }
 
 func (s *Service) LoginWithWeChat(ctx context.Context, code string) (LoginResponse, error) {
@@ -63,9 +68,19 @@ func (s *Service) LoginWithWeChat(ctx context.Context, code string) (LoginRespon
 		}
 		familyDTO = &FamilySummaryDTO{ID: family.ID, Name: family.Name}
 	}
-	avatar := ""
-	if user.AvatarAssetID != nil {
-		avatar = *user.AvatarAssetID
+	avatar, err := s.avatarURL(ctx, user.AvatarAssetID)
+	if err != nil {
+		return LoginResponse{}, appErrors.Internal(err)
 	}
 	return LoginResponse{Token: token, User: userapp.NewUserDTO(user, avatar), Family: familyDTO, Identity: identity}, nil
+}
+
+func (s *Service) avatarURL(ctx context.Context, assetID *string) (string, error) {
+	if assetID == nil || strings.TrimSpace(*assetID) == "" {
+		return "", nil
+	}
+	if s.avatarURLs == nil {
+		return *assetID, nil
+	}
+	return s.avatarURLs.URL(ctx, *assetID)
 }

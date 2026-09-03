@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
 )
 
 type Service struct {
@@ -50,6 +50,15 @@ func (s *Service) Create(ctx context.Context, familyID string, userID string, re
 	value, err := s.repository.Create(ctx, familyID, userID, name)
 	if err != nil {
 		return PetDTO{}, appErrors.Internal(err)
+	}
+	if request.AvatarAssetID != "" {
+		if creator, ok := s.repository.(interface {
+			SetAvatar(context.Context, string, string, string) error
+		}); ok {
+			if err := creator.SetAvatar(ctx, familyID, value.ID, request.AvatarAssetID); err != nil {
+				return PetDTO{}, appErrors.Internal(err)
+			}
+		}
 	}
 	return toDTO(value), nil
 }

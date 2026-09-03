@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	appErrors "github.com/balancetheworld/wechat-pet/server/internal/pkg/errors"
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
 )
 

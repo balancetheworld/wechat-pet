@@ -1,6 +1,6 @@
 package auth
 
-import userdto "github.com/balancetheworld/wechat-pet/server/internal/app/user"
+import userdto "github.com/balancetheworld/wechat-pet/internal/app/user"
 
 type LoginRequest struct {
 	Code string `json:"code" binding:"required,min=1,max=512"`

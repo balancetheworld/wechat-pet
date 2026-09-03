@@ -2,7 +2,7 @@
   "miniprogramRoot": "dist/",
   "projectname": "client",
   "description": "宠物家庭管理微信小程序",
-  "appid": "wxd9aa392313fde6d9",
+  "appid": "wx624d392d9e90f4d9",
   "setting": {
     "urlCheck": true,
     "es6": false,
@@ -33,5 +33,6 @@
     "ignore": [],
     "include": []
   },
-  "editorSetting": {}
+  "editorSetting": {},
+  "isGameTourist": false
 }

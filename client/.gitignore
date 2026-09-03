@@ -1,4 +1,6 @@
 dist/
+# 构建前的旧产物备份目录（safe-delete 环境无法直接清 dist，改名备份后由本规则忽略）
+dist.old-*/
 deploy_versions/
 .temp/
 .rn_temp/

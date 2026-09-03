@@ -1,0 +1,24 @@
+/* ============================================================
+   家庭相关页（members / create / join / pending）补写样式
+   ------------------------------------------------------------
+   视觉完全复刻「文件二 Pet-Manual」，家庭中心 / 问询向导 / 成员抽屉 /
+   移除确认等组件样式均由 pet-manual/styles/proto.scss 提供（已按
+   ×750/390 放大为 rpx），本文件只补写原型中不存在、由文件一独立页
+   改造引入的类：
+
+   - 问询屏（create/join/pending）根容器背景补写：onboarding-screen
+     顶部让出 84.62px（状态栏+topbar 高度），该条带会露出 .app 的
+     深色默认底，需与问询屏同色 #F5EFE6 保持视觉连续。
+   - 家庭中心屏（members）根容器：create-screen 自带白底铺满，无需
+     额外背景，但需确保根容器继承 proto 的 .app 定位上下文。
+   ============================================================ */
+
+/* 问询屏根容器：与 onboarding-screen 同色，遮住顶部让出的条带 */
+#app.onboarding-root {
+  background: #F5EFE6;
+}
+
+/* 家庭中心根容器：无额外背景，create-screen 已白底铺满 */
+#app.family-app {
+  background: #fff;
+}

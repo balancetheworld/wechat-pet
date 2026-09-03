@@ -1,3 +1,5 @@
 export default definePageConfig({
-  navigationBarTitleText: '首页',
+  navigationBarTitleText: '宠物档案',
+  navigationStyle: 'custom',
+  disableScroll: true,
 })

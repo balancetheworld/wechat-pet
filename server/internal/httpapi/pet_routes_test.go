@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	familyapp "github.com/balancetheworld/wechat-pet/server/internal/app/family"
-	petapp "github.com/balancetheworld/wechat-pet/server/internal/app/pet"
-	jwtpkg "github.com/balancetheworld/wechat-pet/server/internal/pkg/jwt"
+	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
+	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
+	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
 )
 
 func TestPetRoutesCompleteCRUDFlow(t *testing.T) {

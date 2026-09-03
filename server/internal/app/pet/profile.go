@@ -1,0 +1,297 @@
+package pet
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"strings"
+	"time"
+
+	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+)
+
+type PetProfile struct {
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	AvatarAssetID    string  `json:"avatar_asset_id"`
+	CoverAssetID     string  `json:"cover_asset_id"`
+	Breed            string  `json:"breed"`
+	Gender           string  `json:"gender"`
+	Sterilized       bool    `json:"sterilized"`
+	Birthday         *string `json:"birthday"`
+	HomeDate         *string `json:"home_date"`
+	Age              int     `json:"age"`
+	CompanionDays    int     `json:"companion_days"`
+	NextBirthdayDays *int    `json:"next_birthday_days"`
+}
+
+type ProfileRepository interface {
+	GetProfile(context.Context, string, string) (PetProfile, error)
+	Resource(context.Context, string, string, string, string, map[string]any) (any, error)
+}
+
+func (s *Service) Profile(ctx context.Context, familyID, petID string) (PetProfile, error) {
+	r, ok := s.repository.(ProfileRepository)
+	if !ok {
+		return PetProfile{}, appErrors.Internal(errors.New("pet profile repository unavailable"))
+	}
+	v, err := r.GetProfile(ctx, familyID, petID)
+	if err != nil {
+		return PetProfile{}, mapError(err)
+	}
+	return v, nil
+}
+
+func (s *Service) Resource(ctx context.Context, familyID, petID, resource, method string, payload map[string]any) (any, error) {
+	r, ok := s.repository.(ProfileRepository)
+	if !ok {
+		return nil, appErrors.Internal(errors.New("pet profile repository unavailable"))
+	}
+	v, err := r.Resource(ctx, familyID, petID, resource, method, payload)
+	if err != nil {
+		return nil, mapError(err)
+	}
+	return v, nil
+}
+
+func (r *SQLRepository) GetProfile(ctx context.Context, familyID, petID string) (PetProfile, error) {
+	var p PetProfile
+	var birthday, home sql.NullString
+	err := r.db.QueryRowContext(ctx, r.query("SELECT id,name,COALESCE(avatar_asset_id,''),COALESCE(cover_asset_id,''),COALESCE(breed,''),COALESCE(gender,''),sterilized,birthday,home_date FROM pets WHERE id=? AND family_id=? AND deleted_at IS NULL"), petID, familyID).Scan(&p.ID, &p.Name, &p.AvatarAssetID, &p.CoverAssetID, &p.Breed, &p.Gender, &p.Sterilized, &birthday, &home)
+	if err != nil {
+		return p, err
+	}
+	if birthday.Valid {
+		birthday.String = dateOnlyString(birthday.String)
+		p.Birthday = &birthday.String
+	}
+	if home.Valid {
+		home.String = dateOnlyString(home.String)
+		p.HomeDate = &home.String
+	}
+	now := time.Now()
+	if p.Birthday != nil {
+		if d, e := time.Parse("2006-01-02", *p.Birthday); e == nil {
+			p.Age = now.Year() - d.Year()
+			if now.YearDay() < d.YearDay() {
+				p.Age--
+			}
+			next := time.Date(now.Year(), d.Month(), d.Day(), 0, 0, 0, 0, now.Location())
+			if !next.After(now) {
+				next = next.AddDate(1, 0, 0)
+			}
+			days := int(next.Sub(now).Hours() / 24)
+			p.NextBirthdayDays = &days
+		}
+	}
+	if p.HomeDate != nil {
+		if d, e := time.Parse("2006-01-02", *p.HomeDate); e == nil {
+			p.CompanionDays = int(now.Sub(d).Hours() / 24)
+			if p.CompanionDays < 0 {
+				p.CompanionDays = 0
+			}
+		}
+	}
+	return p, nil
+}
+
+func (r *SQLRepository) Resource(ctx context.Context, familyID, petID, resource, method string, payload map[string]any) (any, error) {
+	if _, err := r.Get(ctx, familyID, petID); err != nil {
+		return nil, err
+	}
+	if resource == "profile" {
+		if method != "PATCH" {
+			return r.GetProfile(ctx, familyID, petID)
+		}
+		allowed := []string{"name", "avatar_asset_id", "cover_asset_id", "breed", "gender", "sterilized", "birthday", "home_date"}
+		sets := []string{}
+		args := []any{}
+		for _, k := range allowed {
+			if v, ok := payload[k]; ok {
+				sets = append(sets, k+"=?")
+				args = append(args, v)
+			}
+		}
+		if len(sets) == 0 {
+			return nil, appErrors.InvalidParam("没有可更新字段")
+		}
+		args = append(args, petID, familyID)
+		if _, e := r.db.ExecContext(ctx, r.query("UPDATE pets SET "+strings.Join(sets, ",")+",updated_at=CURRENT_TIMESTAMP WHERE id=? AND family_id=?"), args...); e != nil {
+			return nil, e
+		}
+		return r.GetProfile(ctx, familyID, petID)
+	}
+	if resource == "dates" {
+		p, e := r.GetProfile(ctx, familyID, petID)
+		if e != nil {
+			return nil, e
+		}
+		return map[string]any{"birthday": p.Birthday, "home_date": p.HomeDate, "age": p.Age, "companion_days": p.CompanionDays, "next_birthday_days": p.NextBirthdayDays}, nil
+	}
+	if resource == "health" {
+		return r.health(ctx, familyID, petID, method, payload)
+	}
+	table, fields, err := resourceSpec(resource)
+	if err != nil {
+		return nil, err
+	}
+	if method == "GET" {
+		rows, e := r.db.QueryContext(ctx, r.query("SELECT id,"+fields+" FROM "+table+" WHERE pet_id=? AND family_id=? ORDER BY created_at,id"), petID, familyID)
+		if e != nil {
+			return nil, e
+		}
+		defer rows.Close()
+		out := []map[string]any{}
+		parts := strings.Split(fields, ",")
+		for rows.Next() {
+			vals := make([]any, len(parts)+1)
+			ptrs := make([]any, len(vals))
+			for i := range vals {
+				ptrs[i] = &vals[i]
+			}
+			if e := rows.Scan(ptrs...); e != nil {
+				return nil, e
+			}
+			m := map[string]any{"id": vals[0]}
+			for i, k := range parts {
+				if dateOnlyFields[k] {
+					m[k] = dateOnly(vals[i+1])
+				} else {
+					m[k] = vals[i+1]
+				}
+			}
+			out = append(out, m)
+		}
+		return out, rows.Err()
+	}
+	if method == "POST" {
+		id, _ := newID()
+		cols := []string{"id", "pet_id", "family_id"}
+		args := []any{id, petID, familyID}
+		for _, f := range strings.Split(fields, ",") {
+			v, ok := payload[f]
+			if !ok {
+				return nil, appErrors.InvalidParam("缺少字段: " + f)
+			}
+			cols = append(cols, f)
+			args = append(args, v)
+		}
+		qs := make([]string, len(cols))
+		for i := range qs {
+			qs[i] = "?"
+		}
+		_, e := r.db.ExecContext(ctx, r.query("INSERT INTO "+table+" ("+strings.Join(cols, ",")+") VALUES ("+strings.Join(qs, ",")+")"), args...)
+		if e != nil {
+			return nil, e
+		}
+		payload["id"] = id
+		return payload, nil
+	}
+	if method == "PATCH" || method == "DELETE" {
+		id, ok := payload["id"].(string)
+		if !ok || id == "" {
+			return nil, appErrors.InvalidParam("档案 ID 不能为空")
+		}
+		if method == "DELETE" {
+			_, e := r.db.ExecContext(ctx, r.query("DELETE FROM "+table+" WHERE id=? AND pet_id=? AND family_id=?"), id, petID, familyID)
+			return map[string]any{}, e
+		}
+		sets := []string{}
+		args := []any{}
+		for _, f := range strings.Split(fields, ",") {
+			if v, ok := payload[f]; ok {
+				sets = append(sets, f+"=?")
+				args = append(args, v)
+			}
+		}
+		if len(sets) == 0 {
+			return nil, appErrors.InvalidParam("没有可更新字段")
+		}
+		args = append(args, id, petID, familyID)
+		_, e := r.db.ExecContext(ctx, r.query("UPDATE "+table+" SET "+strings.Join(sets, ",")+",updated_at=CURRENT_TIMESTAMP WHERE id=? AND pet_id=? AND family_id=?"), args...)
+		return payload, e
+	}
+	return nil, appErrors.InvalidParam("不支持的操作")
+}
+
+// dateOnlyFields: 泛化资源表中 DATE 类型的列。pgx 驱动会把 DATE 返回成
+// time.Time（JSON 序列化为 RFC3339 带 T00:00:00Z 后缀），统一归一为
+// YYYY-MM-DD 输出 —— 前端展示与 GetProfile 派生字段计算都依赖该格式。
+var dateOnlyFields = map[string]bool{
+	"vaccinated_at": true,
+	"measured_at":   true,
+	"occurred_at":   true,
+}
+
+// dateOnlyString 把 "2024-03-15T00:00:00Z" 之类的字符串截取为 "2024-03-15"。
+func dateOnlyString(v string) string {
+	if len(v) > 10 {
+		return v[:10]
+	}
+	return v
+}
+
+// dateOnly 归一化任意类型的日期值（time.Time / string）。
+func dateOnly(value any) any {
+	switch v := value.(type) {
+	case time.Time:
+		return v.Format("2006-01-02")
+	case string:
+		return dateOnlyString(v)
+	}
+	return value
+}
+
+func resourceSpec(resource string) (string, string, error) {
+	switch resource {
+	case "certificates":
+		return "pet_certificates", "type,name,number", nil
+	case "personality":
+		return "pet_personality", "trait,value", nil
+	case "questions":
+		return "pet_questions", "question,answer", nil
+	case "diseases":
+		return "pet_diseases", "name,status,details", nil
+	case "vaccines":
+		return "pet_vaccines", "name,vaccinated_at,details", nil
+	case "birthday-records":
+		return "pet_birthday_records", "year,age,summary", nil
+	case "birthday-media":
+		return "pet_birthday_media", "record_id,type,asset_id", nil
+	case "birthday-blessings":
+		return "pet_birthday_blessings", "record_id,user_id,content", nil
+	case "weights":
+		return "pet_weights", "measured_at,weight", nil
+	case "growth-events":
+		return "pet_growth_events", "type,occurred_at,recorder,content", nil
+	case "growth-media":
+		return "pet_growth_media", "event_id,asset_id", nil
+	}
+	return "", "", appErrors.InvalidParam("未知档案资源")
+}
+
+func (r *SQLRepository) health(ctx context.Context, familyID, petID, method string, p map[string]any) (any, error) {
+	if method == "GET" {
+		var status, allergy, med string
+		e := r.db.QueryRowContext(ctx, r.query("SELECT status,allergies,long_term_medication FROM pet_health WHERE pet_id=? AND family_id=?"), petID, familyID).Scan(&status, &allergy, &med)
+		if errors.Is(e, sql.ErrNoRows) {
+			return map[string]any{"status": "", "allergies": "", "long_term_medication": ""}, nil
+		}
+		return map[string]any{"status": status, "allergies": allergy, "long_term_medication": med}, e
+	}
+	if method != "PUT" {
+		return nil, appErrors.InvalidParam("不支持的操作")
+	}
+	status, _ := p["status"].(string)
+	allergies, _ := p["allergies"].(string)
+	med, _ := p["long_term_medication"].(string)
+	_, e := r.db.ExecContext(ctx, r.query("INSERT INTO pet_health(pet_id,family_id,status,allergies,long_term_medication) VALUES(?,?,?,?,?) ON CONFLICT(pet_id) DO UPDATE SET status=excluded.status,allergies=excluded.allergies,long_term_medication=excluded.long_term_medication,updated_at=CURRENT_TIMESTAMP"), petID, familyID, status, allergies, med)
+	return p, e
+}
+
+var _ ProfileRepository = (*SQLRepository)(nil)
+
+func (r *SQLRepository) SetAvatar(ctx context.Context, familyID, petID, assetID string) error {
+	_, err := r.db.ExecContext(ctx, r.query("UPDATE pets SET avatar_asset_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND family_id=?"), assetID, petID, familyID)
+	return err
+}

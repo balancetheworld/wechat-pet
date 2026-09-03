@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 390 844" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <!-- 小花：5 个圆瓣 + 中心圆，白色填充 + 彩色描边 -->
+    <g id="flower">
+      <g opacity="0.95">
+        <circle cx="0" cy="-16" r="11" fill="#FFFFFF" stroke="currentColor" stroke-width="3"/>
+        <circle cx="15.2" cy="-4.9" r="11" fill="#FFFFFF" stroke="currentColor" stroke-width="3"/>
+        <circle cx="9.4" cy="12.9" r="11" fill="#FFFFFF" stroke="currentColor" stroke-width="3"/>
+        <circle cx="-9.4" cy="12.9" r="11" fill="#FFFFFF" stroke="currentColor" stroke-width="3"/>
+        <circle cx="-15.2" cy="-4.9" r="11" fill="#FFFFFF" stroke="currentColor" stroke-width="3"/>
+      </g>
+      <circle cx="0" cy="0" r="6.5" fill="#FFFFFF" stroke="currentColor" stroke-width="3"/>
+    </g>
+    <pattern id="dot" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
+      <circle cx="16" cy="16" r="1.6" fill="#A3C2E8" opacity="0.5">
+        <animate attributeName="opacity" values="0.35;0.65;0.35" dur="2.6s" repeatCount="indefinite"/>
+      </circle>
+    </pattern>
+  </defs>
+  <rect width="100%" height="100%" fill="#FFFEFB"/>
+  <rect width="100%" height="100%" fill="url(#dot)"/>
+  <g transform="translate(129,488)" style="color: #A3C2E8">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="3.95s" repeatCount="indefinite" begin="0.81s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-8; 0,0" dur="5.48s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="-1;1;-1" dur="6.47s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.0)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <g transform="translate(288,584)" style="color: #FFE082">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="3.25s" repeatCount="indefinite" begin="0.49s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-10; 0,0" dur="5.25s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="5;-5;5" dur="5.21s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.05)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <g transform="translate(315,301)" style="color: #7FA5D6">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="3.77s" repeatCount="indefinite" begin="1.55s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-9; 0,0" dur="4.47s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="-11;11;-11" dur="7.56s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.05)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <g transform="translate(80,208)" style="color: #7FA5D6">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="3.59s" repeatCount="indefinite" begin="0.07s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-11; 0,0" dur="4.0s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="-10;10;-10" dur="7.61s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.05)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <g transform="translate(299,770)" style="color: #FFE082">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="3.57s" repeatCount="indefinite" begin="0.29s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-11; 0,0" dur="3.8s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="-11;11;-11" dur="5.76s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.05)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <g transform="translate(233,83)" style="color: #FFD54F">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="3.95s" repeatCount="indefinite" begin="1.05s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-8; 0,0" dur="4.96s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="-6;6;-6" dur="7.7s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.05)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <g transform="translate(119,608)" style="color: #A3C2E8">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="3.24s" repeatCount="indefinite" begin="0.31s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-11; 0,0" dur="4.24s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="3;-3;3" dur="6.74s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.2)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <g transform="translate(264,443)" style="color: #FFE082">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="3.82s" repeatCount="indefinite" begin="0.62s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-9; 0,0" dur="4.57s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="-8;8;-8" dur="7.3s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.05)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <g transform="translate(63,752)" style="color: #FFD54F">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="2.81s" repeatCount="indefinite" begin="1.37s"/>
+    <animateTransform attributeName="transform" type="translate" values="0,0; 0,-8; 0,0" dur="5.41s" repeatCount="indefinite" additive="sum"/>
+    <animateTransform attributeName="transform" type="rotate" values="-4;4;-4" dur="6.78s" repeatCount="indefinite" additive="sum"/>
+    <g transform="scale(1.0)">
+      <use href="#flower" x="-22" y="-22" width="44" height="44"/>
+    </g>
+  </g>
+  <circle cx="349" cy="355" r="7" fill="#B7CFF0" opacity="0.55">
+    <animate attributeName="cy" values="355;341;355" dur="2.26s" repeatCount="indefinite" begin="0.61s"/>
+    <animate attributeName="opacity" values="0.4;0.75;0.4" dur="2.26s" repeatCount="indefinite" begin="0.61s"/>
+  </circle>
+  <circle cx="90" cy="236" r="5" fill="#A3C2E8" opacity="0.55">
+    <animate attributeName="cy" values="236;222;236" dur="2.4s" repeatCount="indefinite" begin="0.28s"/>
+    <animate attributeName="opacity" values="0.4;0.75;0.4" dur="2.4s" repeatCount="indefinite" begin="0.28s"/>
+  </circle>
+  <circle cx="348" cy="557" r="5" fill="#A3C2E8" opacity="0.55">
+    <animate attributeName="cy" values="557;543;557" dur="2.87s" repeatCount="indefinite" begin="0.98s"/>
+    <animate attributeName="opacity" values="0.4;0.75;0.4" dur="2.87s" repeatCount="indefinite" begin="0.98s"/>
+  </circle>
+  <circle cx="84" cy="411" r="7" fill="#B7CFF0" opacity="0.55">
+    <animate attributeName="cy" values="411;397;411" dur="2.4s" repeatCount="indefinite" begin="1.33s"/>
+    <animate attributeName="opacity" values="0.4;0.75;0.4" dur="2.4s" repeatCount="indefinite" begin="1.33s"/>
+  </circle>
+</svg>

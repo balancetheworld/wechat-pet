@@ -1,0 +1,320 @@
+.archive-page {
+  position: relative;
+  min-height: 100vh;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 136rpx 24rpx 160rpx;
+  background: #F5EFE6;
+}
+
+.archive-background {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.manual-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.book-container {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  flex-shrink: 0;
+  perspective: 1600rpx;
+}
+
+.book-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  transform-origin: 0 50%;
+  transform-style: preserve-3d;
+  backface-visibility: hidden;
+  transition: transform 260ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  will-change: transform;
+}
+
+.book-card-next {
+  z-index: 0;
+}
+
+.book-card-current {
+  z-index: 1;
+}
+
+.book-card.dragging {
+  transition: none;
+}
+
+.book-cover,
+.book-page {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 6rpx solid #2A2520;
+  border-radius: 28rpx;
+  box-shadow: 6rpx 8rpx 0 #2A2520;
+}
+
+.book-cover {
+  background: #F5C6C0;
+}
+
+.cover-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.book-page {
+  display: flex;
+  flex-direction: column;
+  background: #FFFEFB;
+}
+
+.page-content {
+  flex: 1;
+  box-sizing: border-box;
+  padding: 60rpx 40rpx 36rpx;
+}
+
+.pet-heading {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  margin-bottom: 28rpx;
+}
+
+.pet-avatar {
+  display: flex;
+  width: 104rpx;
+  height: 104rpx;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 4rpx solid #2A2520;
+  border-radius: 50%;
+  color: #2A2520;
+  background: #F5D68A;
+  font-size: 44rpx;
+  font-weight: 700;
+}
+
+.page-title,
+.page-subtitle,
+.section-title,
+.item-label,
+.item-value,
+.info-cell text,
+.birthday-date text,
+.birthday-year text,
+.weight-item text,
+.event-meta,
+.event-content,
+.question-text,
+.answer-text {
+  display: block;
+}
+
+.page-title {
+  margin-bottom: 8rpx;
+  color: #C8423A;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 44rpx;
+}
+
+.page-subtitle {
+  color: #8A8278;
+  font-size: 24rpx;
+}
+
+.page-divider {
+  height: 4rpx;
+  margin: 28rpx 0;
+  border-radius: 4rpx;
+  background: #EDE5D8;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16rpx;
+}
+
+.info-cell {
+  padding: 18rpx 20rpx;
+  border: 3rpx solid #EDE5D8;
+  border-radius: 12rpx;
+  background: #FAF6EF;
+}
+
+.info-cell text:first-child {
+  margin-bottom: 8rpx;
+  color: #8A8278;
+  font-size: 22rpx;
+}
+
+.info-cell text:last-child {
+  color: #2A2520;
+  font-size: 28rpx;
+}
+
+.page-items,
+.question-list,
+.birthday-list,
+.weight-list,
+.event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16rpx;
+}
+
+.page-item,
+.question-item,
+.birthday-item,
+.weight-item,
+.event-item {
+  padding: 18rpx 22rpx;
+  border: 3rpx solid #EDE5D8;
+  border-radius: 12rpx;
+  background: #FAF6EF;
+}
+
+.page-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 24rpx;
+}
+
+.item-label,
+.event-meta {
+  color: #8A8278;
+  font-size: 22rpx;
+}
+
+.item-value,
+.event-content,
+.answer-text,
+.birthday-summary {
+  color: #2A2520;
+  font-size: 27rpx;
+}
+
+.section-title {
+  margin-bottom: 18rpx;
+  color: #2A2520;
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  margin-bottom: 32rpx;
+}
+
+.personality-tag {
+  padding: 12rpx 18rpx;
+  border: 3rpx solid #2A2520;
+  border-radius: 999rpx;
+  color: #2A2520;
+  background: #F5D68A;
+  font-size: 24rpx;
+}
+
+.question-text {
+  margin-bottom: 10rpx;
+  color: #C8423A;
+  font-size: 27rpx;
+}
+
+.birthday-date,
+.weight-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 28rpx;
+  padding: 18rpx 22rpx;
+  border: 3rpx solid #EDE5D8;
+  border-radius: 12rpx;
+  background: #FFF8E8;
+}
+
+.birthday-date text:first-child,
+.weight-item text:first-child {
+  color: #8A8278;
+  font-size: 24rpx;
+}
+
+.birthday-date text:last-child,
+.weight-item text:last-child {
+  color: #2A2520;
+  font-size: 28rpx;
+}
+
+.birthday-item {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+}
+
+.birthday-year {
+  min-width: 100rpx;
+  padding-right: 20rpx;
+  border-right: 3rpx solid #EDE5D8;
+}
+
+.birthday-year text:first-child {
+  color: #C8423A;
+  font-size: 30rpx;
+  font-weight: 700;
+}
+
+.birthday-year text:last-child {
+  margin-top: 4rpx;
+  color: #8A8278;
+  font-size: 22rpx;
+}
+
+.event-content {
+  margin-top: 10rpx;
+  line-height: 1.6;
+}
+
+.empty-text {
+  display: block;
+  color: #8A8278;
+  font-size: 24rpx;
+}
+
+.book-loading {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  border: 6rpx solid #2A2520;
+  border-radius: 28rpx;
+  box-sizing: border-box;
+  color: #5A504A;
+  background: rgba(255, 254, 251, 0.92);
+  font-size: 28rpx;
+}
