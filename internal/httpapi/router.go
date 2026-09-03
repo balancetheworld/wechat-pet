@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
+	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
 	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
 	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
 	appuser "github.com/balancetheworld/wechat-pet/internal/app/user"
@@ -20,6 +21,7 @@ type Dependencies struct {
 	FamilyRepository familyapp.Repository
 	PetService       *petapp.Service
 	PetRepository    petapp.Repository
+	CalendarService  *calendarapp.Service
 	TokenSigner      *jwtpkg.Signer
 	FileService      *fileservice.Service
 	LocalUploadDir   string

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
+	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
 	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
 	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
 	userapp "github.com/balancetheworld/wechat-pet/internal/app/user"
@@ -97,11 +98,21 @@ func main() {
 		logger.Error("create pet service", "error", err)
 		os.Exit(1)
 	}
+	calendarRepository, err := calendarapp.NewRepository(db, cfg.DatabaseDriver)
+	if err != nil {
+		logger.Error("create calendar repository", "error", err)
+		os.Exit(1)
+	}
+	calendarService, err := calendarapp.NewService(calendarRepository)
+	if err != nil {
+		logger.Error("create calendar service", "error", err)
+		os.Exit(1)
+	}
 	localUploadDir := ""
 	if cfg.StorageDriver == "local" {
 		localUploadDir = cfg.LocalUploadDir
 	}
-	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, FamilyService: familyService, FamilyRepository: familyRepository, PetService: petService, PetRepository: petRepository, TokenSigner: tokenSigner, FileService: fileService, LocalUploadDir: localUploadDir}, logger)
+	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, FamilyService: familyService, FamilyRepository: familyRepository, PetService: petService, PetRepository: petRepository, CalendarService: calendarService, TokenSigner: tokenSigner, FileService: fileService, LocalUploadDir: localUploadDir}, logger)
 	logger.Info("api server starting", "addr", cfg.HTTPAddr)
 	if err := server.Run(cfg.HTTPAddr); err != nil {
 		logger.Error("api server stopped", "error", err)

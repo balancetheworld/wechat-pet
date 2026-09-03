@@ -1,7 +1,7 @@
 import type { ButtonProps } from '@tarojs/components'
 import { Button, Image, Input, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import backgroundImage from '../../assets/background2.png'
 import { routes } from '../../constants/routes'
 import { silentLogin } from '../../services/auth'
@@ -19,8 +19,10 @@ export default function ProfileOnboarding() {
   const [nickname, setNickname] = useState('')
   const [avatarPath, setAvatarPath] = useState('')
   const [avatarAssetID, setAvatarAssetID] = useState('')
+  const [choosingAvatar, setChoosingAvatar] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const choosingAvatarRef = useRef(false)
 
   function handleLogin() {
     if (loading) {
@@ -84,11 +86,26 @@ export default function ProfileOnboarding() {
   }, [avatarAssetID, avatarPath, loginCompleted, uploading])
 
   function handleChooseAvatar(event: ChooseAvatarEvent) {
+    choosingAvatarRef.current = false
+    setChoosingAvatar(false)
     const avatarUrl = event.detail?.avatarUrl
     if (avatarUrl) {
       setAvatarPath(avatarUrl)
       setAvatarAssetID('')
     }
+  }
+
+  function handleAvatarClick() {
+    if (choosingAvatarRef.current) {
+      return
+    }
+    choosingAvatarRef.current = true
+    setChoosingAvatar(true)
+  }
+
+  function handleChooseAvatarError() {
+    choosingAvatarRef.current = false
+    setChoosingAvatar(false)
   }
 
   async function handleSubmit() {
@@ -124,10 +141,12 @@ export default function ProfileOnboarding() {
               {loading && <Text className="profile-onboarding__login-hint">正在绑定微信账号...</Text>}
               <Button
                 className="profile-onboarding__avatar-button"
-                disabled={uploading || submitting}
-                loading={uploading}
+                disabled={choosingAvatar || uploading || submitting || Boolean(avatarPath && !avatarAssetID)}
+                loading={choosingAvatar || uploading}
                 openType="chooseAvatar"
+                onClick={handleAvatarClick}
                 onChooseAvatar={handleChooseAvatar}
+                onError={handleChooseAvatarError}
               >
                 {avatarPath ? <Image className="profile-onboarding__avatar" src={avatarPath} /> : '选择头像'}
               </Button>
