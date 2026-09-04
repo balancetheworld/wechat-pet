@@ -1,9 +1,19 @@
+/* ============================================
+   宠物档案 - 书页样式（主题蓝配色）
+   主题蓝（与底部导航栏一致）：
+     #5B84BE 标题蓝 | rgba(127,165,214,·) 蓝玻璃
+     #FFFEFB 纸面   | #2A2520 深色文字
+     #8A8278 副文字 | #EDE5D8 浅米边
+   章节结构：封面 / 身份名片 / 个性说明书 / 健康资料 / 生日纪念册 / 成长足迹 / 封底
+   内容超出单页容量时自动拆分为多页（页面本身不可滚动）
+   ============================================ */
+
 .archive-page {
   position: relative;
   min-height: 100vh;
   box-sizing: border-box;
   overflow: hidden;
-  padding: 136rpx 24rpx 160rpx;
+  padding: 168rpx 24rpx 280rpx;
   background: #F5EFE6;
 }
 
@@ -16,6 +26,7 @@
   pointer-events: none;
 }
 
+/* --- 右上角添加宠物按钮（同事新增） --- */
 .archive-add-pet {
   position: absolute;
   z-index: 2;
@@ -39,6 +50,7 @@
   align-items: center;
 }
 
+/* --- 书本容器 + 3D 翻页 --- */
 .book-container {
   position: relative;
   z-index: 1;
@@ -60,264 +72,689 @@
   will-change: transform;
 }
 
-.book-card-next {
-  z-index: 0;
-}
+.book-card-next { z-index: 0; }
+.book-card-current { z-index: 1; }
+.book-card.dragging { transition: none; }
 
-.book-card-current {
-  z-index: 1;
-}
-
-.book-card.dragging {
-  transition: none;
-}
-
-.book-cover,
-.book-page {
+/* --- 通用页面 / 封面 / 封底 --- */
+.page {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
   height: 100%;
-  box-sizing: border-box;
-  overflow: hidden;
-  border: 6rpx solid #2A2520;
-  border-radius: 28rpx;
-  box-shadow: 6rpx 8rpx 0 #2A2520;
-}
-
-.book-cover {
-  background: #F5C6C0;
-}
-
-.cover-image {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.book-page {
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 28rpx;
+  box-shadow: 0 10rpx 30rpx rgba(74, 100, 137, 0.16), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  background: rgba(255, 254, 251, 0.88);
+}
+
+/* 封面页：图片彻底铺满整页(背景图 100% 100% 强制填满,无法露出蓝色) */
+.cover-page {
+  position: absolute !important;
+  inset: 0 !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  cursor: pointer;
+  overflow: hidden;
+  /* 底层兜底蓝色(理论上不会露出,但保留以防图片加载失败) */
+  background-color: rgba(127, 165, 214, 0.75);
+  background-repeat: no-repeat;
+  background-position: center center;
+  background-size: 100% 100% !important;
+}
+
+/* 内容页：固定一屏，不滚动（超出内容由多页承载） */
+.content-page {
   background: #FFFEFB;
 }
 
-.page-content {
+.page-body {
   flex: 1;
   box-sizing: border-box;
-  padding: 60rpx 40rpx 36rpx;
+  padding: 52rpx 40rpx 32rpx;
+  overflow: hidden;
 }
 
-.pet-heading {
+/* 封底（最后一页）：半透明蓝底，透出下层背景 */
+.back-cover {
+  position: relative;
+  background: rgba(127, 165, 214, 0.62);
+  align-items: center;
+  justify-content: center;
+  padding: 60rpx 48rpx;
+  text-align: center;
+}
+
+.back-cover .h2,
+.back-cover .pet-name {
+  color: #FFFEFB;
+}
+
+.back-cover .p {
+  color: rgba(255, 254, 251, 0.85);
+}
+
+.back-cover .back-family {
+  color: rgba(255, 254, 251, 0.75);
+}
+
+.back-cover-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16rpx;
+}
+
+.back-mark {
   display: flex;
   align-items: center;
-  gap: 20rpx;
+  justify-content: center;
+  width: 96rpx;
+  height: 96rpx;
+  margin-bottom: 16rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.65);
+  border-radius: 50%;
+  color: #FFFEFB;
+  background: rgba(91, 132, 190, 0.88);
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 56rpx;
+  font-weight: 700;
+  box-shadow: 0 8rpx 22rpx rgba(74, 100, 137, 0.28), inset 0 1rpx 0 rgba(255, 255, 255, 0.35);
+}
+
+.back-family {
+  display: block;
+  margin-top: 24rpx;
+  color: #5A504A;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 24rpx;
+}
+
+/* --- 页头 --- */
+.page-head {
+  display: flex;
+  flex-direction: column;
   margin-bottom: 28rpx;
 }
 
-.pet-avatar {
-  display: flex;
-  width: 104rpx;
-  height: 104rpx;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border: 4rpx solid #2A2520;
-  border-radius: 50%;
-  color: #2A2520;
-  background: #F5D68A;
-  font-size: 44rpx;
-  font-weight: 700;
-}
-
-.page-title,
-.page-subtitle,
-.section-title,
-.item-label,
-.item-value,
-.info-cell text,
-.birthday-date text,
-.birthday-year text,
-.weight-item text,
-.event-meta,
-.event-content,
-.question-text,
-.answer-text {
+.page-eyebrow {
   display: block;
+  margin-bottom: 10rpx;
+  color: #8A8278;
+  font-size: 28rpx;
+  letter-spacing: 4rpx;
+  font-weight: 700;
+  font-family: 'Ma Shan Zheng', cursive;
 }
 
-.page-title {
-  margin-bottom: 8rpx;
-  color: #C8423A;
+/* 标题: 强制粗体覆盖 proto.scss 的 font-weight: 400 默认 */
+.page-title,
+.archive-page .page-title,
+.archive-page .page-head .page-title {
+  display: block;
   font-family: 'Ma Shan Zheng', cursive;
-  font-size: 44rpx;
+  font-size: 72rpx;
+  font-weight: 900 !important;
+  color: #5B84BE;
+  margin-bottom: 12rpx;
+  line-height: 1.1;
+  letter-spacing: 2rpx;
 }
 
 .page-subtitle {
-  color: #8A8278;
-  font-size: 24rpx;
-}
-
-.page-divider {
-  height: 4rpx;
-  margin: 28rpx 0;
-  border-radius: 4rpx;
-  background: #EDE5D8;
-}
-
-.info-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16rpx;
-}
-
-.info-cell {
-  padding: 18rpx 20rpx;
-  border: 3rpx solid #EDE5D8;
-  border-radius: 12rpx;
-  background: #FAF6EF;
-}
-
-.info-cell text:first-child {
-  margin-bottom: 8rpx;
-  color: #8A8278;
-  font-size: 22rpx;
-}
-
-.info-cell text:last-child {
-  color: #2A2520;
+  display: block;
   font-size: 28rpx;
+  color: #8A8278;
+  margin: 0;
+  line-height: 1.5;
 }
 
-.page-items,
-.question-list,
-.birthday-list,
-.weight-list,
-.event-list {
+/* --- 身份名片 --- */
+.identity-hero {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  padding: 24rpx;
+  margin-bottom: 24rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 20rpx;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8rpx 26rpx rgba(74, 100, 137, 0.12), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+}
+
+.identity-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 128rpx;
+  height: 128rpx;
+  flex-shrink: 0;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 24rpx;
+  background: rgba(127, 165, 214, 0.5);
+  color: #2A2520;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 64rpx;
+  font-weight: 700;
+  box-shadow: 0 6rpx 18rpx rgba(74, 100, 137, 0.14);
+}
+
+.identity-meta {
   display: flex;
   flex-direction: column;
-  gap: 16rpx;
+  gap: 6rpx;
+  min-width: 0;
+  flex: 1;
 }
 
-.page-item,
-.question-item,
-.birthday-item,
-.weight-item,
-.event-item {
-  padding: 18rpx 22rpx;
-  border: 3rpx solid #EDE5D8;
-  border-radius: 12rpx;
-  background: #FAF6EF;
-}
-
-.page-item {
-  display: flex;
-  justify-content: space-between;
-  gap: 24rpx;
-}
-
-.item-label,
-.event-meta {
-  color: #8A8278;
-  font-size: 22rpx;
-}
-
-.item-value,
-.event-content,
-.answer-text,
-.birthday-summary {
+.identity-name {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 40rpx;
   color: #2A2520;
-  font-size: 27rpx;
 }
 
-.section-title {
-  margin-bottom: 18rpx;
-  color: #2A2520;
-  font-size: 30rpx;
-  font-weight: 600;
-}
-
-.tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 14rpx;
-  margin-bottom: 32rpx;
-}
-
-.personality-tag {
-  padding: 12rpx 18rpx;
-  border: 3rpx solid #2A2520;
-  border-radius: 999rpx;
-  color: #2A2520;
-  background: #F5D68A;
+.identity-type {
+  display: block;
   font-size: 24rpx;
+  color: #8A8278;
 }
 
-.question-text {
-  margin-bottom: 10rpx;
-  color: #C8423A;
-  font-size: 27rpx;
+/* --- 统计行 --- */
+.stat-row {
+  display: flex;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
 }
 
-.birthday-date,
-.weight-item {
+.stat {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+  padding: 18rpx 8rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+.stat .strong {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 38rpx;
+  color: #5B84BE;
+  text-align: center;
+}
+
+.stat .span {
+  display: block;
+  font-size: 20rpx;
+  color: #8A8278;
+  text-align: center;
+}
+
+/* --- 信息行（出生信息等三行：标题加大、无图标） --- */
+.info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-bottom: 24rpx;
+}
+
+.info-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 28rpx;
-  padding: 18rpx 22rpx;
-  border: 3rpx solid #EDE5D8;
-  border-radius: 12rpx;
-  background: #FFF8E8;
+  gap: 16rpx;
+  padding: 20rpx 24rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.45);
+  text-align: left;
 }
 
-.birthday-date text:first-child,
-.weight-item text:first-child {
-  color: #8A8278;
-  font-size: 24rpx;
+.info-row .span {
+  flex-shrink: 0;
+  color: #5B84BE;
 }
 
-.birthday-date text:last-child,
-.weight-item text:last-child {
+/* 身份名片页"出生信息/到家日期/身份与证件"左侧标题 - 与右侧 strong 字号一致(26rpx 普通字) */
+.archive-page .info-row .span,
+.archive-page .info-row .info-static > .span {
+  font-size: 26rpx !important;
+  font-weight: 400 !important;
+  font-family: inherit;
+  letter-spacing: 0;
+}
+
+.info-row .strong {
+  flex: 1;
+  text-align: right;
+  font-size: 26rpx;
   color: #2A2520;
+}
+
+.info-row .i {
+  font-style: normal;
+  color: #8A8278;
   font-size: 28rpx;
 }
 
-.birthday-item {
+.info-static .strong { text-align: right; }
+
+/* --- 标签（性格） --- */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin-bottom: 24rpx;
+}
+
+.tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 8rpx 18rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 999rpx;
+  background: rgba(127, 165, 214, 0.42);
+  color: #2A2520;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 24rpx;
+}
+
+.tag:nth-child(3n+2) { background: rgba(255, 255, 255, 0.55); }
+.tag:nth-child(3n)   { background: rgba(127, 165, 214, 0.26); }
+
+/* --- 个性问答 --- */
+.manual-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+}
+
+.manual-item {
   display: flex;
   align-items: center;
-  gap: 20rpx;
+  gap: 16rpx;
+  padding: 18rpx 20rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.45);
+  text-align: left;
 }
 
-.birthday-year {
-  min-width: 100rpx;
-  padding-right: 20rpx;
-  border-right: 3rpx solid #EDE5D8;
+.manual-item .h3 {
+  display: block;
+  font-size: 28rpx;
+  color: #5B84BE;
+  font-weight: 600;
+  margin: 0 0 6rpx;
 }
 
-.birthday-year text:first-child {
-  color: #C8423A;
-  font-size: 30rpx;
+.manual-item .p {
+  display: block;
+  font-size: 24rpx;
+  color: #2A2520;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.manual-index {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56rpx;
+  height: 56rpx;
+  flex-shrink: 0;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  background: rgba(91, 132, 190, 0.85);
+  color: #FFFEFB;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 26rpx;
   font-weight: 700;
 }
 
-.birthday-year text:last-child {
-  margin-top: 4rpx;
+.manual-item-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.manual-item .i {
   color: #8A8278;
-  font-size: 22rpx;
+  font-style: normal;
+  font-size: 28rpx;
 }
 
-.event-content {
-  margin-top: 10rpx;
-  line-height: 1.6;
+/* --- 健康资料 --- */
+.health-lead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18rpx 22rpx;
+  margin-bottom: 20rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-left: 6rpx solid rgba(91, 132, 190, 0.85);
+  border-radius: 14rpx;
+  background: rgba(127, 165, 214, 0.22);
 }
 
-.empty-text {
+.health-lead-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+}
+
+.health-lead .span { color: #8A8278; font-size: 22rpx; }
+.health-lead .strong { color: #2A2520; font-size: 28rpx; font-weight: 600; }
+.health-lead-tip { color: #8A8278; font-size: 20rpx; }
+
+.health-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14rpx;
+  margin-bottom: 18rpx;
+}
+
+.health-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  padding: 18rpx 22rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.45);
+  text-align: left;
+}
+
+.health-label {
   display: block;
+  font-size: 22rpx;
   color: #8A8278;
-  font-size: 24rpx;
 }
 
+.health-value {
+  display: block;
+  font-size: 30rpx;
+  color: #5B84BE;
+  font-weight: 600;
+  font-family: 'Ma Shan Zheng', cursive;
+}
+
+.health-note {
+  display: block;
+  font-size: 22rpx;
+  color: #8A8278;
+}
+
+.updated {
+  display: block;
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #8A8278;
+  text-align: right;
+}
+
+/* --- 生日纪念册 --- */
+.birthday-feature {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 18rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 20rpx;
+  background: rgba(127, 165, 214, 0.55);
+  box-shadow: 0 8rpx 26rpx rgba(74, 100, 137, 0.14), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.media-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 260rpx;
+  background: rgba(127, 165, 214, 0.3);
+  font-size: 80rpx;
+}
+
+.birthday-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  padding: 20rpx 24rpx 24rpx;
+  background: #FFFEFB;
+}
+
+.birthday-copy .span {
+  display: block;
+  font-size: 22rpx;
+  color: #8A8278;
+}
+
+.birthday-copy .h3 {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 36rpx;
+  color: #5B84BE;
+  margin: 0;
+}
+
+.birthday-copy .p {
+  display: block;
+  margin: 0;
+  font-size: 24rpx;
+  color: #2A2520;
+  line-height: 1.5;
+}
+
+.year-row {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 18rpx 22rpx;
+  margin-bottom: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+}
+
+.year-row .strong {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 32rpx;
+  color: #5B84BE;
+}
+
+.year-row .span {
+  flex: 1;
+  font-size: 24rpx;
+  color: #2A2520;
+}
+
+/* --- 成长足迹 --- */
+.growth-section-title {
+  display: block;
+  margin: 18rpx 0 14rpx;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 40rpx;
+  font-weight: 700;
+  color: #5B84BE;
+  letter-spacing: 2rpx;
+}
+
+.weight-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12rpx;
+  padding: 20rpx 22rpx;
+  margin-bottom: 20rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 18rpx;
+  background: rgba(127, 165, 214, 0.24);
+  box-shadow: 0 8rpx 26rpx rgba(74, 100, 137, 0.12), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+}
+
+.weight-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12rpx;
+}
+
+.weight-head-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2rpx;
+}
+
+.weight-head .span {
+  font-size: 22rpx;
+  color: #8A8278;
+}
+
+.weight-value {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 44rpx;
+  color: #5B84BE;
+  font-weight: 700;
+}
+
+.weight-value--empty {
+  font-size: 24rpx !important;
+  color: #8A8278 !important;
+  font-weight: 400 !important;
+}
+
+.weight-change {
+  padding: 4rpx 14rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.55);
+  font-size: 22rpx;
+  color: #2A2520;
+  font-family: 'Ma Shan Zheng', cursive;
+}
+
+.chart {
+  position: relative;
+  width: 100%;
+  height: 110rpx;
+  border-radius: 10rpx;
+  background: rgba(127, 165, 214, 0.16);
+  overflow: hidden;
+}
+
+.chart-line {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: 36rpx;
+  height: 4rpx;
+  background: #5B84BE;
+  border-radius: 4rpx;
+  transform: rotate(-2deg);
+}
+
+.chart-line::before,
+.chart-line::after {
+  content: '';
+  position: absolute;
+  width: 16rpx;
+  height: 16rpx;
+  border-radius: 50%;
+  background: #5B84BE;
+  top: -6rpx;
+}
+
+.chart-line::before { left: 0; }
+.chart-line::after  { right: 0; }
+
+.growth-events-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8rpx;
+}
+
+.timeline {
+  position: relative;
+  padding: 8rpx 0 16rpx 28rpx;
+  border-left: 4rpx dashed #EDE5D8;
+  margin: 0 0 24rpx 12rpx;
+}
+
+.moment {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  padding: 20rpx 24rpx;
+  margin-bottom: 18rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.45);
+  cursor: pointer;
+}
+
+.moment::before {
+  content: '';
+  position: absolute;
+  left: -22rpx;
+  top: 30rpx;
+  width: 18rpx;
+  height: 18rpx;
+  border: 4rpx solid #5B84BE;
+  border-radius: 50%;
+  background: #FFFEFB;
+}
+
+.moment .time {
+  display: block;
+  font-size: 22rpx;
+  color: #8A8278;
+  font-family: 'Ma Shan Zheng', cursive;
+  letter-spacing: 1rpx;
+}
+
+.moment .h3 {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 34rpx;
+  font-weight: 700;
+  color: #5B84BE;
+  margin: 0;
+}
+
+.moment .p {
+  display: block;
+  margin: 0;
+  font-size: 26rpx;
+  color: #2A2520;
+  line-height: 1.5;
+}
+
+/* --- 加载占位 --- */
 .book-loading {
   position: absolute;
   z-index: 2;
@@ -330,10 +767,168 @@
   align-items: center;
   justify-content: center;
   gap: 24rpx;
-  border: 6rpx solid #2A2520;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
   border-radius: 28rpx;
   box-sizing: border-box;
   color: #5A504A;
   background: rgba(255, 254, 251, 0.92);
   font-size: 28rpx;
+}
+
+/* --- 通用文字类（覆盖 proto.scss 玻璃主题） --- */
+.archive-page .p { color: #2A2520; font-size: 24rpx; margin: 0; }
+.archive-page .span { color: #8A8278; font-size: 24rpx; }
+.archive-page .strong { color: #2A2520; font-weight: 600; }
+.archive-page .h2 { font-family: 'Ma Shan Zheng', cursive; font-size: 40rpx; color: #5B84BE; margin: 0; }
+.archive-page .h3 { font-family: 'Ma Shan Zheng', cursive; font-size: 32rpx; color: #5B84BE; margin: 0; }
+.archive-page .i { font-style: normal; color: #8A8278; }
+.archive-page .empty-text { display: block; padding: 24rpx; color: #8A8278; font-size: 24rpx; text-align: center; }
+
+/* ============================================
+   左上角宠物切换胶囊（仅宠物名 + 三角标）
+   ============================================ */
+.pet-switcher-button {
+  position: fixed;
+  z-index: 12;
+  top: 88rpx;
+  left: 24rpx;
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 12rpx 24rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 8rpx 26rpx rgba(74, 100, 137, 0.12), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  line-height: 1;
+  font-family: 'Ma Shan Zheng', cursive;
+}
+
+.pet-switcher-button::after { display: none; }
+
+.pet-switcher-name {
+  display: block;
+  max-width: 220rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 30rpx;
+  color: #5B84BE;
+  font-weight: 700;
+}
+
+.pet-switcher-caret {
+  font-size: 22rpx;
+  color: #8A8278;
+  font-style: normal;
+}
+
+/* 顶部下拉遮罩：覆盖默认居中样式 */
+.overlay.overlay--top {
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding: 184rpx 24rpx 0;
+}
+
+.overlay.overlay--top .pet-switcher-panel {
+  position: relative;
+  width: 100%;
+  max-width: 640rpx;
+  margin: 0 auto;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 28rpx;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 12rpx 40rpx rgba(74, 100, 137, 0.18), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  padding-bottom: 24rpx;
+  transform: translateY(-24rpx);
+  opacity: 0;
+  transition: transform 0.22s ease, opacity 0.22s ease;
+}
+
+.overlay.overlay--top.open .pet-switcher-panel {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.pet-switcher-list {
+  flex: 1;
+  max-height: 56vh;
+  padding: 12rpx 24rpx 0;
+}
+
+.pet-switcher-item {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  width: 100%;
+  padding: 16rpx 20rpx;
+  margin-bottom: 12rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 16rpx;
+  background: rgba(255, 255, 255, 0.5);
+  text-align: left;
+  line-height: 1.2;
+}
+
+.pet-switcher-item::after { display: none; }
+
+.pet-switcher-item-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72rpx;
+  height: 72rpx;
+  flex-shrink: 0;
+  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border-radius: 50%;
+  background: rgba(127, 165, 214, 0.5);
+  color: #2A2520;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.pet-switcher-item-meta {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4rpx;
+  min-width: 0;
+}
+
+.pet-switcher-item-meta .strong {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 30rpx;
+  color: #2A2520;
+}
+
+.pet-switcher-item-meta .span {
+  display: block;
+  font-size: 22rpx;
+  color: #8A8278;
+}
+
+.pet-switcher-check {
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: 32rpx;
+  color: #5B84BE;
+  font-weight: 700;
+}
+
+.pet-switcher-item.active {
+  border-color: rgba(255, 255, 255, 0.72);
+  background: rgba(127, 165, 214, 0.45);
+  box-shadow: 0 6rpx 18rpx rgba(74, 100, 137, 0.14);
+}
+
+.pet-switcher-empty {
+  padding: 40rpx 24rpx;
+  text-align: center;
+  color: #8A8278;
+  font-size: 24rpx;
 }

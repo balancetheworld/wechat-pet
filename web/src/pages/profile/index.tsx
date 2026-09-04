@@ -1,7 +1,7 @@
 import type { Pet, PetProfile } from '../../types/pet'
 import { Button, Image, ScrollView, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import backgroundImage from '../../assets/background1.png'
 import passportImage from '../../assets/passport.png'
 import { routes } from '../../constants/routes'
@@ -9,6 +9,7 @@ import { getPetProfile, getPetResource, getPets } from '../../services/pet'
 import { usePetStore } from '../../stores/pet-store'
 import { navigateTo } from '../../utils/navigation'
 import './index.scss'
+import '../manual.scss'
 
 interface PersonalityItem {
   id: string
@@ -43,7 +44,34 @@ interface GrowthEvent {
   content: string
 }
 
-const pageCount = 4
+/* 章节（书固定 7 个章节；内容多的章节自动拆成多页） */
+const CHAPTERS = [
+  { key: 'cover', name: '封面' },
+  { key: 'identity', name: '身份名片' },
+  { key: 'personality', name: '个性说明书' },
+  { key: 'health', name: '健康资料' },
+  { key: 'birthday', name: '生日纪念册' },
+  { key: 'growth', name: '成长足迹' },
+  { key: 'back', name: '封底' },
+] as const
+
+type ChapterKey = typeof CHAPTERS[number]['key']
+
+/* 每页可容纳的条数（超出自动开新页） */
+const PERSONALITY_PER_PAGE = 3
+const BIRTHDAY_PER_PAGE = 3
+const GROWTH_FIRST_PAGE_EVENTS = 2
+const GROWTH_PER_PAGE = 3
+
+/* 书本长宽比（拉长版） */
+const BOOK_RATIO = '1086 / 1620'
+
+interface BookPage {
+  chapter: ChapterKey
+  name: string
+  part: number
+  parts: number
+}
 
 function formatDate(value?: string) {
   return value || '暂无记录'
@@ -63,6 +91,7 @@ export default function Profile() {
   const pets = usePetStore(state => state.pets)
   const currentPetId = usePetStore(state => state.currentPetId)
   const setPets = usePetStore(state => state.setPets)
+  const setCurrentPetId = usePetStore(state => state.setCurrentPetId)
   const [profile, setProfile] = useState<PetProfile | null>(null)
   const [personality, setPersonality] = useState<PersonalityItem[]>([])
   const [questions, setQuestions] = useState<QuestionItem[]>([])
@@ -74,12 +103,49 @@ export default function Profile() {
   const [touchStartX, setTouchStartX] = useState<number | null>(null)
   const [touchDeltaX, setTouchDeltaX] = useState(0)
   const [turning, setTurning] = useState(false)
-  const [coverRatio, setCoverRatio] = useState('1086 / 1448')
   const [turnDirection, setTurnDirection] = useState<'next' | 'previous' | null>(null)
   const [turnTargetPage, setTurnTargetPage] = useState<number | null>(null)
   const [resetting, setResetting] = useState(false)
+  /* 目录弹层 */
+  const [tocOpen, setTocOpen] = useState(false)
+  /* 详情弹层 */
+  const [detail, setDetail] = useState<{ title: string; subtitle: string; body: string } | null>(null)
+  /* 宠物切换弹层 */
+  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   const selectedPet = pets.find(item => item.id === currentPetId) || pets[0]
+
+  /* ===== 动态分页：按数据量把每个章节拆成若干页 ===== */
+  const pages = useMemo<BookPage[]>(() => {
+    const list: BookPage[] = []
+    const personalityParts = Math.max(1, Math.ceil(questions.length / PERSONALITY_PER_PAGE))
+    const birthdayParts = Math.max(1, Math.ceil(birthdayRecords.length / BIRTHDAY_PER_PAGE))
+    const growthParts = growthEvents.length <= GROWTH_FIRST_PAGE_EVENTS
+      ? 1
+      : 1 + Math.ceil((growthEvents.length - GROWTH_FIRST_PAGE_EVENTS) / GROWTH_PER_PAGE)
+
+    const push = (chapter: ChapterKey, name: string, part: number, parts: number) => {
+      list.push({ chapter, name, part, parts })
+    }
+
+    push('cover', '封面', 1, 1)
+    push('identity', '身份名片', 1, 1)
+    for (let i = 1; i <= personalityParts; i++) push('personality', '个性说明书', i, personalityParts)
+    push('health', '健康资料', 1, 1)
+    for (let i = 1; i <= birthdayParts; i++) push('birthday', '生日纪念册', i, birthdayParts)
+    for (let i = 1; i <= growthParts; i++) push('growth', '成长足迹', i, growthParts)
+    push('back', '封底', 1, 1)
+    return list
+  }, [questions.length, birthdayRecords.length, growthEvents.length])
+
+  const pageCount = pages.length
+
+  /* 数据变化导致页数变少时，收回越界的当前页 */
+  useEffect(() => {
+    if (currentPage > pageCount - 1) {
+      setCurrentPage(0)
+    }
+  }, [pageCount, currentPage])
 
   const loadProfile = useCallback(async (pet: Pet) => {
     setLoading(true)
@@ -135,8 +201,8 @@ export default function Profile() {
   }, [loadProfile, selectedPet, setPets])
 
   const goToPage = useCallback((page: number) => {
-    setCurrentPage(Math.max(0, Math.min(pageCount, page)))
-  }, [])
+    setCurrentPage(Math.max(0, Math.min(pageCount - 1, page)))
+  }, [pageCount])
 
   const handleTouchStart = useCallback((event: any) => {
     if (turning) {
@@ -152,14 +218,14 @@ export default function Profile() {
       return
     }
     const deltaX = event.touches[0].clientX - touchStartX
-    if ((deltaX < 0 && currentPage >= pageCount) || (deltaX > 0 && currentPage <= 0)) {
+    if ((deltaX < 0 && currentPage >= pageCount - 1) || (deltaX > 0 && currentPage <= 0)) {
       setTouchDeltaX(0)
       setTurnDirection(null)
       return
     }
     setTouchDeltaX(Math.max(-360, Math.min(360, deltaX)))
     setTurnDirection(deltaX < 0 ? 'next' : 'previous')
-  }, [currentPage, touchStartX])
+  }, [currentPage, pageCount, touchStartX])
 
   const handleTouchEnd = useCallback((event: any) => {
     if (touchStartX === null) {
@@ -168,7 +234,7 @@ export default function Profile() {
     const deltaX = event.changedTouches[0].clientX - touchStartX
     setTouchStartX(null)
     const rotation = Math.max(-180, Math.min(180, deltaX * 0.5))
-    const canTurnNext = rotation <= -35 && currentPage < pageCount
+    const canTurnNext = rotation <= -35 && currentPage < pageCount - 1
     const canTurnPrevious = rotation >= 35 && currentPage > 0
     if (!canTurnNext && !canTurnPrevious) {
       setTouchDeltaX(0)
@@ -192,198 +258,378 @@ export default function Profile() {
         setTurning(false)
       }, 16)
     }, 260)
-  }, [currentPage, goToPage, touchStartX])
+  }, [currentPage, goToPage, pageCount, touchStartX])
 
-  const handleCoverLoad = useCallback((event: any) => {
-    const width = event.detail?.width
-    const height = event.detail?.height
-    if (width && height) {
-      setCoverRatio(`${width} / ${height}`)
+  const openDetail = (title: string, subtitle: string, body: string) => setDetail({ title, subtitle, body })
+
+  const handleSwitchPet = useCallback((petId: string) => {
+    if (petId === currentPetId) {
+      setSwitcherOpen(false)
+      return
     }
-  }, [])
+    setSwitcherOpen(false)
+    setCurrentPetId(petId)
+    /* 切回第 1 页（封面）等待新档案加载 */
+    setCurrentPage(0)
+  }, [currentPetId, setCurrentPetId])
 
+  /* ===== 翻页辅助 ===== */
+  const adjacentPage = turnTargetPage ?? (turnDirection === 'previous'
+    ? (currentPage > 0 ? currentPage - 1 : null)
+    : (currentPage < pageCount - 1 ? currentPage + 1 : null))
+
+  /* ===== 页面: 封面 ===== */
+  const renderCover = () => (
+    <View
+      className="page cover-page"
+      onClick={() => goToPage(1)}
+      style={{ backgroundImage: `url(${passportImage})` }}
+    />
+  )
+
+  /* ===== 章节: 身份名片 ===== */
   const renderProfilePage = () => (
-    <View className="book-page">
-      <ScrollView className="page-content" scrollY>
-        <View className="pet-heading">
-          <View className="pet-avatar">
-            <Text>{profile?.name.slice(0, 1) || '宠'}</Text>
-          </View>
-          <View>
-            <Text className="page-title">{profile?.name || selectedPet?.name || '宠物档案'}</Text>
-            <Text className="page-subtitle">基本资料</Text>
+    <View className="page content-page">
+      <View className="page-body">
+        <View className="page-head">
+          <Text className="page-eyebrow">PROFILE</Text>
+          <Text className="page-title">{profile?.name || selectedPet?.name || '身份名片'}</Text>
+          <Text className="page-subtitle">它的基本档案，一页看全</Text>
+        </View>
+        <View className="identity-hero">
+          <Button className="identity-photo" onClick={() => openDetail('头像', '点击上传新头像', '在这里可以上传或更换宠物的头像照片，作为这本档案的封面留念。')}>
+            {profile?.name?.slice(0, 1) || '宠'}
+          </Button>
+          <View className="identity-meta">
+            <Text className="identity-name">{profile?.name || selectedPet?.name || '宠'}</Text>
+            <Text className="identity-type">{profile?.breed || '品种待补充'} · {formatGender(profile?.gender || '')}</Text>
           </View>
         </View>
-        <View className="info-grid">
-          <View className="info-cell">
-            <Text>品种</Text>
-            <Text>{profile?.breed || '暂无记录'}</Text>
+        <View className="stat-row">
+          <View className="stat">
+            <Text className="strong">{profile?.birthday ? `${profile.age}` : '—'}</Text>
+            <Text className="span">当前年龄（岁）</Text>
           </View>
-          <View className="info-cell">
-            <Text>性别</Text>
-            <Text>{formatGender(profile?.gender || '')}</Text>
+          <View className="stat">
+            <Text className="strong">{profile?.home_date ? `${profile.companion_days.toLocaleString()}` : '—'}</Text>
+            <Text className="span">陪伴天数</Text>
           </View>
-          <View className="info-cell">
-            <Text>绝育</Text>
-            <Text>{profile ? (profile.sterilized ? '已绝育' : '未绝育') : '暂无记录'}</Text>
-          </View>
-          <View className="info-cell">
-            <Text>年龄</Text>
-            <Text>{profile?.birthday ? `${profile.age} 岁` : '暂无记录'}</Text>
+          <View className="stat">
+            <Text className="strong">{profile?.next_birthday_days === undefined ? '—' : `${profile.next_birthday_days}`}</Text>
+            <Text className="span">下次生日（天）</Text>
           </View>
         </View>
-        <View className="page-divider" />
-        <View className="page-items">
-          <View className="page-item">
-            <Text className="item-label">生日</Text>
-            <Text className="item-value">{formatDate(profile?.birthday)}</Text>
+        <View className="info-list">
+          <View className="info-row info-static">
+            <Text className="span">出生信息</Text>
+            <Text className="strong">{formatDate(profile?.birthday)}</Text>
           </View>
-          <View className="page-item">
-            <Text className="item-label">到家日期</Text>
-            <Text className="item-value">{formatDate(profile?.home_date)}</Text>
+          <View className="info-row info-static">
+            <Text className="span">到家日期</Text>
+            <Text className="strong">{formatDate(profile?.home_date)}</Text>
           </View>
-          <View className="page-item">
-            <Text className="item-label">陪伴天数</Text>
-            <Text className="item-value">{profile?.home_date ? `${profile.companion_days} 天` : '暂无记录'}</Text>
-          </View>
-          <View className="page-item">
-            <Text className="item-label">下次生日</Text>
-            <Text className="item-value">{profile?.next_birthday_days === undefined ? '暂无记录' : `${profile.next_birthday_days} 天后`}</Text>
-          </View>
+          <Button className="info-row" onClick={() => openDetail('身份与证件', '已收纳 2 项', '在这里集中管理宠物的疫苗本、芯片号、繁育证明等证件信息，仅家庭成员可见。')}>
+            <Text className="span">身份与证件</Text>
+            <Text className="strong">已收纳 2 项</Text>
+          </Button>
         </View>
-      </ScrollView>
+      </View>
     </View>
   )
 
-  const renderPersonalityPage = () => (
-    <View className="book-page">
-      <ScrollView className="page-content" scrollY>
-        <Text className="page-title">性格与偏好</Text>
-        <Text className="page-subtitle">TA 独一无二的小世界</Text>
-        <View className="page-divider" />
-        <Text className="section-title">性格标签</Text>
-        <View className="tag-list">
-          {personality.length > 0
-            ? personality.map(item => (
-              <Text className="personality-tag" key={item.id}>
-                {item.trait}
-                {' · '}
-                {item.value}
-              </Text>
-            ))
-            : <Text className="empty-text">暂无性格记录</Text>}
-        </View>
-        <Text className="section-title">事件问答</Text>
-        <View className="question-list">
-          {questions.length > 0
-            ? questions.map(item => (
-              <View className="question-item" key={item.id}>
-                <Text className="question-text">{item.question}</Text>
-                <Text className="answer-text">{item.answer}</Text>
-              </View>
-            ))
-            : <Text className="empty-text">暂无事件问答</Text>}
-        </View>
-      </ScrollView>
-    </View>
-  )
-
-  const renderBirthdayPage = () => (
-    <View className="book-page">
-      <ScrollView className="page-content" scrollY>
-        <Text className="page-title">生日纪念册</Text>
-        <Text className="page-subtitle">每一岁，都值得珍藏</Text>
-        <View className="page-divider" />
-        <View className="birthday-date">
-          <Text>生日</Text>
-          <Text>{formatDate(profile?.birthday)}</Text>
-        </View>
-        <View className="birthday-list">
-          {birthdayRecords.length > 0
-            ? birthdayRecords.map(item => (
-              <View className="birthday-item" key={item.id}>
-                <View className="birthday-year">
-                  <Text>{item.year}</Text>
-                  <Text>
-                    {item.age}
-                    {' 岁'}
-                  </Text>
+  /* ===== 章节: 个性说明书（每页 3 条问答，超出自动开新页） ===== */
+  const renderPersonalityPage = (part: number) => {
+    const start = (part - 1) * PERSONALITY_PER_PAGE
+    const partQuestions = questions.slice(start, start + PERSONALITY_PER_PAGE)
+    return (
+      <View className="page content-page">
+        <View className="page-body">
+          <View className="page-head">
+            <Text className="page-eyebrow">PERSONALITY</Text>
+            <Text className="page-title">个性说明书</Text>
+            <Text className="page-subtitle">性格标签，加上一份读懂它的说明书</Text>
+          </View>
+          {part === 1 && (
+            <View className="tags">
+              {personality.length > 0
+                ? personality.map(item => <Text className="tag" key={item.id}>{item.trait}{item.value ? ` · ${item.value}` : ''}</Text>)
+                : <Text className="empty-text">还没有性格标签</Text>}
+            </View>
+          )}
+          <View className="manual-list">
+            {partQuestions.length === 0 && (
+              <View className="manual-item" style={{ opacity: 0.6, pointerEvents: 'none' }}>
+                <Text className="manual-index">—</Text>
+                <View>
+                  <Text className="h3">正在补充中</Text>
+                  <Text className="p">相处一段时间后，这里会记录它的性格特点。</Text>
                 </View>
-                <Text className="birthday-summary">{item.summary || '暂无简介'}</Text>
               </View>
-            ))
-            : <Text className="empty-text">暂无生日纪念</Text>}
+            )}
+            {partQuestions.map((q, i) => (
+              <Button
+                key={q.id}
+                className="manual-item detail-trigger"
+                onClick={() => openDetail(q.question, q.answer || '暂无回答', q.answer || '可以点击编辑补充更多关于它的描述。')}
+              >
+                <Text className="manual-index">{String(start + i + 1).padStart(2, '0')}</Text>
+                <View className="manual-item-body">
+                  <Text className="h3">{q.question}</Text>
+                  {q.answer && <Text className="p">{q.answer}</Text>}
+                </View>
+                <Text className="i">›</Text>
+              </Button>
+            ))}
+          </View>
         </View>
-      </ScrollView>
-    </View>
-  )
+      </View>
+    )
+  }
 
-  const renderGrowthPage = () => (
-    <View className="book-page">
-      <ScrollView className="page-content" scrollY>
-        <Text className="page-title">成长足迹</Text>
-        <Text className="page-subtitle">点滴成长，都是回忆</Text>
-        <View className="page-divider" />
-        <Text className="section-title">体重记录</Text>
-        <View className="weight-list">
-          {weights.length > 0
-            ? weights.map(item => (
-              <View className="weight-item" key={item.id}>
-                <Text>{item.measured_at}</Text>
-                <Text>
-                  {item.weight}
-                  {' kg'}
-                </Text>
-              </View>
-            ))
-            : <Text className="empty-text">暂无体重记录</Text>}
+  /* ===== 章节: 健康资料 ===== */
+  const renderHealthPage = () => {
+    return (
+      <View className="page content-page">
+        <View className="page-body">
+          <View className="page-head">
+            <Text className="page-eyebrow">HEALTH</Text>
+            <Text className="page-title">健康资料</Text>
+            <Text className="page-subtitle">健康档案仅对家庭成员可见</Text>
+          </View>
+          <View className="health-lead">
+            <View className="health-lead-main">
+              <Text className="span">整体状态</Text>
+              <Text className="strong">{profile ? (profile.sterilized ? '已绝育 · 状态稳定' : '未绝育 · 状态稳定') : '暂无资料'}</Text>
+            </View>
+            <Text className="span health-lead-tip">仅家庭可见</Text>
+          </View>
+          <View className="health-grid">
+            <Button
+              className="health-item detail-trigger"
+              onClick={() => openDetail('过敏信息', profile?.breed ? `${profile.breed} 品种` : '暂无记录', '过敏信息由家庭成员补充。常见包括食物、环境与药物，记录后会显示在这里。')}
+            >
+              <Text className="health-label">过敏信息</Text>
+              <Text className="health-value">{profile ? '待补充' : '—'}</Text>
+              <Text className="health-note">点击查看详情</Text>
+            </Button>
+            <Button
+              className="health-item detail-trigger"
+              onClick={() => openDetail('既往疾病', '暂无记录', '在这里汇总既往病史、检查报告与治疗过程，方便家庭医生快速了解情况。')}
+            >
+              <Text className="health-label">既往疾病</Text>
+              <Text className="health-value">暂无</Text>
+              <Text className="health-note">点击查看详情</Text>
+            </Button>
+            <Button
+              className="health-item detail-trigger"
+              onClick={() => openDetail('长期用药', '目前无用药', '本模块只保存档案，不提供药物剂量建议；具体用药请遵医嘱。')}
+            >
+              <Text className="health-label">长期用药</Text>
+              <Text className="health-value">无</Text>
+              <Text className="health-note">点击查看详情</Text>
+            </Button>
+            <Button
+              className="health-item detail-trigger"
+              onClick={() => openDetail('最近疫苗', '待补充', '记录最近一次疫苗的种类、接种时间与医院，凭证仅家庭成员可见。')}
+            >
+              <Text className="health-label">最近疫苗</Text>
+              <Text className="health-value">—</Text>
+              <Text className="health-note">点击查看详情</Text>
+            </Button>
+          </View>
+          <Text className="updated">档案由家庭成员维护</Text>
         </View>
-        <Text className="section-title">成长事件</Text>
-        <View className="event-list">
-          {growthEvents.length > 0
-            ? growthEvents.map(item => (
-              <View className="event-item" key={item.id}>
-                <Text className="event-meta">
-                  {item.occurred_at}
-                  {' · '}
-                  {item.type}
-                  {' · '}
-                  {item.recorder}
-                </Text>
-                <Text className="event-content">{item.content}</Text>
+      </View>
+    )
+  }
+
+  /* ===== 章节: 生日纪念册（每页 3 条记录，超出自动开新页） ===== */
+  const renderBirthdayPage = (part: number) => {
+    const start = (part - 1) * BIRTHDAY_PER_PAGE
+    const partRecords = birthdayRecords.slice(start, start + BIRTHDAY_PER_PAGE)
+    return (
+      <View className="page content-page">
+        <View className="page-body">
+          <View className="page-head">
+            <Text className="page-eyebrow">BIRTHDAYS</Text>
+            <Text className="page-title">生日纪念册</Text>
+            <Text className="page-subtitle">一起数过的每一岁，都值得好好收藏。</Text>
+          </View>
+          {birthdayRecords.length === 0 && part === 1 && (
+            <View className="birthday-feature" style={{ opacity: 0.6, textAlign: 'center' }}>
+              <View className="birthday-copy">
+                <Text className="span">还没有生日记录</Text>
+                <Text className="h3">期待第一个生日</Text>
+                <Text className="p">每年的生日都会记录在这里。</Text>
               </View>
-            ))
-            : <Text className="empty-text">暂无成长事件</Text>}
+            </View>
+          )}
+          {partRecords.map((r, i) => {
+            const open = () => openDetail(`${r.age} 生日`, r.summary || '暂无简介', `出生于 ${r.year} 年。这一年的故事是：${r.summary || '正在补充中'}。`)
+            if (start + i === 0) {
+              return (
+                <View className="birthday-feature" key={r.id} onClick={open}>
+                  <View className="media-placeholder">📷</View>
+                  <View className="birthday-copy">
+                    <Text className="span">{r.year} · {r.age} 岁</Text>
+                    <Text className="h3">{r.summary || '一起记录这一岁'}</Text>
+                    <Text className="p">“{r.summary || '新的一岁，希望你健健康康。'}”</Text>
+                  </View>
+                </View>
+              )
+            }
+            return (
+              <View className="year-row" key={r.id} onClick={open}>
+                <Text className="strong">{r.year}</Text>
+                <Text className="span">{r.age} 岁 · {r.summary || '暂无简介'}</Text>
+              </View>
+            )
+          })}
         </View>
-      </ScrollView>
+      </View>
+    )
+  }
+
+  /* ===== 章节: 成长足迹（第 1 页：体重卡 + 2 条事件；之后每页 3 条） ===== */
+  const renderGrowthPage = (part: number) => {
+    const sortedWeights = [...weights].sort((a, b) => b.measured_at.localeCompare(a.measured_at))
+    const wLatest = sortedWeights[0]
+    const wPrev = sortedWeights[1]
+    const wDiff = wLatest && wPrev ? wLatest.weight - wPrev.weight : 0
+
+    const sortedEvents = [...growthEvents].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+    const partEvents = part === 1
+      ? sortedEvents.slice(0, GROWTH_FIRST_PAGE_EVENTS)
+      : sortedEvents.slice(
+          GROWTH_FIRST_PAGE_EVENTS + (part - 2) * GROWTH_PER_PAGE,
+          GROWTH_FIRST_PAGE_EVENTS + (part - 1) * GROWTH_PER_PAGE,
+        )
+
+    return (
+      <View className="page content-page">
+        <View className="page-body">
+          <View className="page-head">
+            <Text className="page-eyebrow">GROWTH</Text>
+            <Text className="page-title">成长足迹</Text>
+            <Text className="page-subtitle">把日子里的小事，慢慢连成它的一生。</Text>
+          </View>
+          {part === 1 && (
+            <>
+              <Text className="growth-section-title">体重记录</Text>
+              <View
+                className="weight-card detail-trigger"
+                onClick={() => wLatest
+                  ? openDetail('体重记录', `当前 ${wLatest.weight} kg，比上次${wDiff < 0 ? '减少' : '增加'} ${Math.abs(wDiff).toFixed(1)} kg`, `最近记录：${sortedWeights.map(w => `${w.measured_at} ${w.weight} kg`).join('；')}。`)
+                  : openDetail('体重记录', '暂无记录', '还没有体重记录，添加后这里会展示体重变化趋势。')
+                }
+              >
+                {wLatest ? (
+                  <>
+                    <View className="weight-head">
+                      <View className="weight-head-main">
+                        <Text className="span">当前体重</Text>
+                        <Text className="weight-value">{wLatest.weight} kg</Text>
+                      </View>
+                      <View className="weight-change">{wPrev ? `较上次 ${wDiff < 0 ? '−' : '+'}${Math.abs(wDiff).toFixed(1)}` : '首次记录'}</View>
+                    </View>
+                    <View className="chart">
+                      <View className="chart-line" />
+                    </View>
+                  </>
+                ) : (
+                  <View className="weight-head">
+                    <View className="weight-head-main">
+                      <Text className="span">当前体重</Text>
+                      <Text className="weight-value weight-value--empty">暂无记录</Text>
+                    </View>
+                  </View>
+                )}
+              </View>
+              <View className="growth-events-head">
+                <Text className="growth-section-title">事件记录</Text>
+              </View>
+            </>
+          )}
+          <View className="timeline">
+            {partEvents.length === 0 && part === 1 && (
+              <View className="moment" style={{ textAlign: 'center', opacity: 0.6 }}>
+                <Text className="p">还没有事件记录，添加后这里会展示成长时间线。</Text>
+              </View>
+            )}
+            {partEvents.map(ev => (
+              <View
+                className="moment"
+                key={ev.id}
+                onClick={() => openDetail(ev.type, ev.content, `${ev.occurred_at} · ${ev.recorder || '我'}。${ev.content}`)}
+              >
+                <Text className="time">{ev.occurred_at} · {ev.recorder || '我'}</Text>
+                <Text className="h3">{ev.type}</Text>
+                <Text className="p">{ev.content}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+    )
+  }
+
+  /* ===== 章节: 封底 ===== */
+  const renderBackCover = () => (
+    <View className="page back-cover">
+      <View className="back-cover-content">
+        <View className="back-mark">M</View>
+        <Text className="h2"><Text className="pet-name">{profile?.name || selectedPet?.name || '宠'}</Text>，下页见</Text>
+        <Text className="p">新的故事会继续发生，而家会一直把它们好好收着。</Text>
+      </View>
+      <Text className="back-family">宠物小册 · 由家人共同维护</Text>
     </View>
   )
 
   const renderBookPage = (pageIndex: number) => {
-    if (pageIndex === 0) {
-      return <View className="book-cover"><Image className="cover-image" src={passportImage} mode="scaleToFill" onLoad={handleCoverLoad} /></View>
+    const info = pages[pageIndex]
+    if (!info) {
+      return renderCover()
     }
-    if (pageIndex === 1) {
-      return renderProfilePage()
+    switch (info.chapter) {
+      case 'cover':
+        return renderCover()
+      case 'identity':
+        return renderProfilePage()
+      case 'personality':
+        return renderPersonalityPage(info.part)
+      case 'health':
+        return renderHealthPage()
+      case 'birthday':
+        return renderBirthdayPage(info.part)
+      case 'growth':
+        return renderGrowthPage(info.part)
+      default:
+        return renderBackCover()
     }
-    if (pageIndex === 2) {
-      return renderPersonalityPage()
-    }
-    if (pageIndex === 3) {
-      return renderBirthdayPage()
-    }
-    return renderGrowthPage()
   }
 
-  const adjacentPage = turnTargetPage ?? (turnDirection === 'previous'
-    ? (currentPage > 0 ? currentPage - 1 : null)
-    : (currentPage < pageCount ? currentPage + 1 : null))
+  /* 目录：按章节跳转（跳到该章节的第 1 页） */
+  const chapterStartPage = (key: ChapterKey) => pages.findIndex(p => p.chapter === key)
+  const currentPageInfo = pages[currentPage] || pages[0]
 
   return (
-    <View className="archive-page manual-page">
+    <View className="archive-page">
       <Image className="archive-background" src={backgroundImage} mode="aspectFill" />
+
+      {/* 右上角：添加宠物（同事新增） */}
       <Button className="archive-add-pet" onClick={() => navigateTo(routes.pages.petEdit)}>添加宠物</Button>
-      <View className="book-container" style={{ aspectRatio: coverRatio }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+
+      {/* 左上角宠物切换：仅宠物名 + 三角标 */}
+      <Button
+        className="pet-switcher-button"
+        onClick={() => setSwitcherOpen(true)}
+        disabled={pets.length === 0}
+      >
+        <Text className="pet-switcher-name">{selectedPet?.name || '暂未选择'}</Text>
+        <Text className="pet-switcher-caret">▾</Text>
+      </Button>
+
+      <View className="book-container" style={{ aspectRatio: BOOK_RATIO }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
         {adjacentPage !== null && <View className="book-card book-card-next">{renderBookPage(adjacentPage)}</View>}
         <View className={`book-card book-card-current${touchStartX === null && !resetting ? '' : ' dragging'}`} style={{ transform: `rotateY(${Math.max(-180, Math.min(180, touchDeltaX * 0.5))}deg)` }}>
           {renderBookPage(currentPage)}
@@ -394,6 +640,99 @@ export default function Profile() {
             <Text>还没有宠物档案</Text>
           </View>
         )}
+      </View>
+
+      {/* 底部页码状态：点击打开目录 */}
+      <Button className="page-status" onClick={() => setTocOpen(true)}>
+        <Text className="span">{currentPageInfo?.name || '封面'}</Text>
+        <Text className="page-dot" />
+        <Text className="span">{currentPage + 1} / {pageCount}</Text>
+      </Button>
+
+      {/* 目录弹层 */}
+      <View className={`overlay${tocOpen ? ' open' : ''}`} onClick={() => setTocOpen(false)}>
+        <View className="sheet toc-sheet" onClick={event => event.stopPropagation()}>
+          <View className="handle" />
+          <View className="sheet-head">
+            <View className="sheet-head-main">
+              <Text className="h2">目录</Text>
+              <Text className="p">{profile?.name || selectedPet?.name || '宠物'} · 共 {pageCount} 页</Text>
+            </View>
+            <Button className="close-button" onClick={() => setTocOpen(false)}>×</Button>
+          </View>
+          <View className="chapter-list">
+            {CHAPTERS.map(ch => {
+              const startPage = chapterStartPage(ch.key)
+              const parts = pages.filter(p => p.chapter === ch.key).length
+              const active = currentPageInfo?.chapter === ch.key
+              return (
+                <Button
+                  className={`chapter-item${active ? ' active' : ''}`}
+                  key={ch.key}
+                  onClick={() => { goToPage(startPage); setTocOpen(false) }}
+                >
+                  <Text className="chapter-number">{String(startPage + 1).padStart(2, '0')}</Text>
+                  <Text className="strong">{ch.name}{parts > 1 ? `（${parts} 页）` : ''}</Text>
+                  <Text className="chapter-page-num">{startPage + 1} / {pageCount}</Text>
+                </Button>
+              )
+            })}
+          </View>
+        </View>
+      </View>
+
+      {/* 详情弹层 */}
+      <View className={`overlay${detail ? ' open' : ''}`} onClick={() => setDetail(null)}>
+        <View className="detail-card" onClick={event => event.stopPropagation()}>
+          <View className="detail-card-head">
+            <View className="detail-card-head-main">
+              <Text className="h2">{detail?.title || '详情'}</Text>
+              {!!detail?.subtitle && <Text className="p">{detail.subtitle}</Text>}
+            </View>
+            <Button className="close-button" onClick={() => setDetail(null)}>×</Button>
+          </View>
+          <View className="detail-block">
+            <Text className="span">记录内容</Text>
+            <Text className="p">{detail?.body || ''}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* 宠物切换弹层（顶部下拉） */}
+      <View className={`overlay overlay--top${switcherOpen ? ' open' : ''}`} onClick={() => setSwitcherOpen(false)}>
+        <View className="pet-switcher-panel" onClick={event => event.stopPropagation()}>
+          <View className="handle" />
+          <View className="sheet-head">
+            <View className="sheet-head-main">
+              <Text className="h2">切换宠物</Text>
+              <Text className="p">共 {pets.length} 只 · 选择后将翻开新档案</Text>
+            </View>
+            <Button className="close-button" onClick={() => setSwitcherOpen(false)}>×</Button>
+          </View>
+          <ScrollView className="pet-switcher-list" scrollY>
+            {pets.length === 0 && (
+              <View className="pet-switcher-empty">
+                <Text className="p">家里还没有宠物档案，先去首页创建一只吧。</Text>
+              </View>
+            )}
+            {pets.map(pet => (
+              <Button
+                key={pet.id}
+                className={`pet-switcher-item${pet.id === currentPetId ? ' active' : ''}`}
+                onClick={() => handleSwitchPet(pet.id)}
+              >
+                <View className="pet-switcher-item-avatar">
+                  {pet.name.slice(0, 1)}
+                </View>
+                <View className="pet-switcher-item-meta">
+                  <Text className="strong">{pet.name}</Text>
+                  <Text className="span">{pet.id === currentPetId ? '当前展示中' : '点击翻开此档案'}</Text>
+                </View>
+                {pet.id === currentPetId && <Text className="pet-switcher-check">✓</Text>}
+              </Button>
+            ))}
+          </ScrollView>
+        </View>
       </View>
     </View>
   )
