@@ -114,7 +114,7 @@ func (r *SQLRepository) CreateRecord(ctx context.Context, familyID, userID strin
 	if err != nil {
 		return RecordDTO{}, err
 	}
-	if err := r.insertRecord(ctx, tx, recordID, familyID, userID, request.PetID, request.Category, request.MedicalType, request.Content, occurredAt); err != nil {
+	if err := r.insertRecord(ctx, tx, recordID, familyID, userID, request.PetID, request.Category, request.MedicalType, request.CustomMedicalType, request.Content, occurredAt); err != nil {
 		return RecordDTO{}, err
 	}
 	if err := r.insertMedia(ctx, tx, familyID, recordID, request.MediaAssetIDs); err != nil {
@@ -122,6 +122,11 @@ func (r *SQLRepository) CreateRecord(ctx context.Context, familyID, userID strin
 	}
 	if request.Reminder != nil {
 		if _, err := r.insertReminder(ctx, tx, familyID, userID, request.PetID, recordID, "", *request.Reminder); err != nil {
+			return RecordDTO{}, err
+		}
+	}
+	for _, reminder := range request.Reminders {
+		if _, err := r.insertReminder(ctx, tx, familyID, userID, request.PetID, recordID, "", reminder); err != nil {
 			return RecordDTO{}, err
 		}
 	}
@@ -137,10 +142,10 @@ func (r *SQLRepository) CompleteReminder(ctx context.Context, familyID, userID, 
 		return CompleteReminderDTO{}, err
 	}
 	defer tx.Rollback()
-	var sourceRecordID, petID, sourceContent, medicalType, repeatType, channels string
+	var sourceRecordID, petID, sourceContent, medicalType, customMedicalType, repeatType, channels string
 	var repeatInterval sql.NullInt64
 	var advanceDays int
-	err = tx.QueryRowContext(ctx, r.query("SELECT m.source_record_id, m.pet_id, r.content, COALESCE(r.medical_type, ''), m.repeat_type, m.repeat_interval_days, m.advance_days, m.notification_channels FROM calendar_reminders m JOIN calendar_records r ON r.id = m.source_record_id AND r.family_id = m.family_id AND r.deleted_at IS NULL WHERE m.id = ? AND m.family_id = ?"), reminderID, familyID).Scan(&sourceRecordID, &petID, &sourceContent, &medicalType, &repeatType, &repeatInterval, &advanceDays, &channels)
+	err = tx.QueryRowContext(ctx, r.query("SELECT m.source_record_id, m.pet_id, r.content, COALESCE(r.medical_type, ''), COALESCE(r.custom_medical_type, ''), m.repeat_type, m.repeat_interval_days, m.advance_days, m.notification_channels FROM calendar_reminders m JOIN calendar_records r ON r.id = m.source_record_id AND r.family_id = m.family_id AND r.deleted_at IS NULL WHERE m.id = ? AND m.family_id = ?"), reminderID, familyID).Scan(&sourceRecordID, &petID, &sourceContent, &medicalType, &customMedicalType, &repeatType, &repeatInterval, &advanceDays, &channels)
 	if err != nil {
 		return CompleteReminderDTO{}, err
 	}
@@ -163,7 +168,10 @@ func (r *SQLRepository) CompleteReminder(ctx context.Context, familyID, userID, 
 	if content == "" {
 		content = sourceContent
 	}
-	if err := r.insertRecord(ctx, tx, recordID, familyID, userID, petID, "medical", medicalType, content, completedAt); err != nil {
+	if content == "" && len(request.MediaAssetIDs) == 0 {
+		content = "完成医疗待办"
+	}
+	if err := r.insertRecord(ctx, tx, recordID, familyID, userID, petID, "medical", medicalType, customMedicalType, content, completedAt); err != nil {
 		return CompleteReminderDTO{}, err
 	}
 	if err := r.insertMedia(ctx, tx, familyID, recordID, request.MediaAssetIDs); err != nil {
@@ -216,8 +224,8 @@ func (r *SQLRepository) requirePet(ctx context.Context, tx *sql.Tx, familyID, pe
 	return tx.QueryRowContext(ctx, r.query("SELECT id FROM pets WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), petID, familyID).Scan(&id)
 }
 
-func (r *SQLRepository) insertRecord(ctx context.Context, tx *sql.Tx, recordID, familyID, userID, petID, category, medicalType, content string, occurredAt time.Time) error {
-	_, err := tx.ExecContext(ctx, r.query("INSERT INTO calendar_records (id, family_id, pet_id, category, medical_type, content, occurred_at, occurred_on, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"), recordID, familyID, petID, category, medicalType, content, occurredAt, occurredAt.Format("2006-01-02"), userID, userID)
+func (r *SQLRepository) insertRecord(ctx context.Context, tx *sql.Tx, recordID, familyID, userID, petID, category, medicalType, customMedicalType, content string, occurredAt time.Time) error {
+	_, err := tx.ExecContext(ctx, r.query("INSERT INTO calendar_records (id, family_id, pet_id, category, medical_type, custom_medical_type, content, occurred_at, occurred_on, created_by, updated_by, created_at, updated_at) VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"), recordID, familyID, petID, category, medicalType, customMedicalType, content, occurredAt, occurredAt.Format("2006-01-02"), userID, userID)
 	return err
 }
 
@@ -255,32 +263,43 @@ func (r *SQLRepository) insertReminder(ctx context.Context, tx *sql.Tx, familyID
 }
 
 func (r *SQLRepository) listDayRecords(ctx context.Context, familyID, date string) ([]RecordDTO, error) {
-	rows, err := r.db.QueryContext(ctx, r.query("SELECT r.id, r.category, COALESCE(r.medical_type, ''), r.content, r.occurred_at, p.id, p.name, COALESCE(p.avatar_asset_id, ''), u.id, COALESCE(u.nickname, ''), COALESCE(u.avatar_asset_id, '') FROM calendar_records r JOIN pets p ON p.id = r.pet_id AND p.family_id = r.family_id JOIN users u ON u.id = r.created_by WHERE r.family_id = ? AND r.occurred_on = ? AND r.deleted_at IS NULL ORDER BY r.occurred_at DESC, r.id DESC"), familyID, date)
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT r.id, r.category, COALESCE(r.medical_type, ''), COALESCE(r.custom_medical_type, ''), r.content, r.occurred_at, p.id, p.name, COALESCE(p.avatar_asset_id, ''), u.id, COALESCE(u.nickname, ''), COALESCE(u.avatar_asset_id, '') FROM calendar_records r JOIN pets p ON p.id = r.pet_id AND p.family_id = r.family_id JOIN users u ON u.id = r.created_by WHERE r.family_id = ? AND r.occurred_on = ? AND r.deleted_at IS NULL ORDER BY r.occurred_at DESC, r.id DESC"), familyID, date)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
 	result := make([]RecordDTO, 0)
 	for rows.Next() {
 		value, err := scanRecord(rows)
 		if err != nil {
-			return nil, err
-		}
-		value.Media, err = r.listMedia(ctx, familyID, value.ID)
-		if err != nil {
-			return nil, err
-		}
-		value.Reminder, err = r.getRecordReminder(ctx, familyID, value.ID)
-		if err != nil {
+			rows.Close()
 			return nil, err
 		}
 		result = append(result, value)
 	}
-	return result, rows.Err()
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	for index := range result {
+		value := &result[index]
+		media, err := r.listMedia(ctx, familyID, value.ID)
+		if err != nil {
+			return nil, err
+		}
+		value.Media = media
+		reminders, err := r.listRecordReminders(ctx, familyID, value.ID)
+		if err != nil {
+			return nil, err
+		}
+		value.Reminders = reminders
+		if len(reminders) > 0 {
+			value.Reminder = &reminders[0]
+		}
+	}
+	return result, nil
 }
 
 func (r *SQLRepository) getRecord(ctx context.Context, familyID, recordID string) (RecordDTO, error) {
-	row := r.db.QueryRowContext(ctx, r.query("SELECT r.id, r.category, COALESCE(r.medical_type, ''), r.content, r.occurred_at, p.id, p.name, COALESCE(p.avatar_asset_id, ''), u.id, COALESCE(u.nickname, ''), COALESCE(u.avatar_asset_id, '') FROM calendar_records r JOIN pets p ON p.id = r.pet_id AND p.family_id = r.family_id JOIN users u ON u.id = r.created_by WHERE r.id = ? AND r.family_id = ? AND r.deleted_at IS NULL"), recordID, familyID)
+	row := r.db.QueryRowContext(ctx, r.query("SELECT r.id, r.category, COALESCE(r.medical_type, ''), COALESCE(r.custom_medical_type, ''), r.content, r.occurred_at, p.id, p.name, COALESCE(p.avatar_asset_id, ''), u.id, COALESCE(u.nickname, ''), COALESCE(u.avatar_asset_id, '') FROM calendar_records r JOIN pets p ON p.id = r.pet_id AND p.family_id = r.family_id JOIN users u ON u.id = r.created_by WHERE r.id = ? AND r.family_id = ? AND r.deleted_at IS NULL"), recordID, familyID)
 	value, err := scanRecord(row)
 	if err != nil {
 		return RecordDTO{}, err
@@ -289,9 +308,12 @@ func (r *SQLRepository) getRecord(ctx context.Context, familyID, recordID string
 	if err != nil {
 		return RecordDTO{}, err
 	}
-	value.Reminder, err = r.getRecordReminder(ctx, familyID, value.ID)
+	value.Reminders, err = r.listRecordReminders(ctx, familyID, value.ID)
 	if err != nil {
 		return RecordDTO{}, err
+	}
+	if len(value.Reminders) > 0 {
+		value.Reminder = &value.Reminders[0]
 	}
 	return value, nil
 }
@@ -342,13 +364,30 @@ func (r *SQLRepository) getRecordReminder(ctx context.Context, familyID, recordI
 	return &value, nil
 }
 
+func (r *SQLRepository) listRecordReminders(ctx context.Context, familyID, recordID string) ([]ReminderDTO, error) {
+	rows, err := r.db.QueryContext(ctx, r.query(reminderSelect("m.family_id = ? AND m.source_record_id = ? ORDER BY m.reminder_date, m.created_at, m.id")), familyID, recordID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ReminderDTO, 0)
+	for rows.Next() {
+		value, err := scanReminder(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
 func (r *SQLRepository) getReminder(ctx context.Context, familyID, reminderID string) (ReminderDTO, error) {
 	row := r.db.QueryRowContext(ctx, r.query(reminderSelect("m.family_id = ? AND m.id = ?")), familyID, reminderID)
 	return scanReminder(row)
 }
 
 func reminderSelect(condition string) string {
-	return "SELECT m.id, m.source_record_id, m.reminder_date, p.id, p.name, COALESCE(p.avatar_asset_id, ''), r.content, COALESCE(r.medical_type, ''), u.id, COALESCE(u.nickname, ''), COALESCE(u.avatar_asset_id, ''), m.repeat_type, m.repeat_interval_days, m.advance_days, m.notification_channels, m.status FROM calendar_reminders m JOIN calendar_records r ON r.id = m.source_record_id AND r.family_id = m.family_id JOIN pets p ON p.id = m.pet_id AND p.family_id = m.family_id JOIN users u ON u.id = m.created_by WHERE " + condition
+	return "SELECT m.id, m.source_record_id, m.reminder_date, p.id, p.name, COALESCE(p.avatar_asset_id, ''), r.content, COALESCE(r.medical_type, ''), COALESCE(r.custom_medical_type, ''), u.id, COALESCE(u.nickname, ''), COALESCE(u.avatar_asset_id, ''), m.repeat_type, m.repeat_interval_days, m.advance_days, m.notification_channels, m.status FROM calendar_reminders m JOIN calendar_records r ON r.id = m.source_record_id AND r.family_id = m.family_id JOIN pets p ON p.id = m.pet_id AND p.family_id = m.family_id JOIN users u ON u.id = m.created_by WHERE " + condition
 }
 
 type scanner interface {
@@ -358,7 +397,7 @@ type scanner interface {
 func scanRecord(row scanner) (RecordDTO, error) {
 	var value RecordDTO
 	var occurredAt time.Time
-	err := row.Scan(&value.ID, &value.Category, &value.MedicalType, &value.Content, &occurredAt, &value.Pet.ID, &value.Pet.Name, &value.Pet.AvatarAssetID, &value.CreatedBy.UserID, &value.CreatedBy.Nickname, &value.CreatedBy.AvatarAssetID)
+	err := row.Scan(&value.ID, &value.Category, &value.MedicalType, &value.CustomMedicalType, &value.Content, &occurredAt, &value.Pet.ID, &value.Pet.Name, &value.Pet.AvatarAssetID, &value.CreatedBy.UserID, &value.CreatedBy.Nickname, &value.CreatedBy.AvatarAssetID)
 	if err != nil {
 		return RecordDTO{}, err
 	}
@@ -370,7 +409,7 @@ func scanReminder(row scanner) (ReminderDTO, error) {
 	var value ReminderDTO
 	var interval sql.NullInt64
 	var channels string
-	err := row.Scan(&value.ID, &value.SourceRecordID, &value.ReminderDate, &value.Pet.ID, &value.Pet.Name, &value.Pet.AvatarAssetID, &value.Content, &value.MedicalType, &value.CreatedBy.UserID, &value.CreatedBy.Nickname, &value.CreatedBy.AvatarAssetID, &value.RepeatType, &interval, &value.AdvanceDays, &channels, &value.Status)
+	err := row.Scan(&value.ID, &value.SourceRecordID, &value.ReminderDate, &value.Pet.ID, &value.Pet.Name, &value.Pet.AvatarAssetID, &value.Content, &value.MedicalType, &value.CustomMedicalType, &value.CreatedBy.UserID, &value.CreatedBy.Nickname, &value.CreatedBy.AvatarAssetID, &value.RepeatType, &interval, &value.AdvanceDays, &channels, &value.Status)
 	if err != nil {
 		return ReminderDTO{}, err
 	}

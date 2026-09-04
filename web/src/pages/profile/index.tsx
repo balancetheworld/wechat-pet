@@ -1,11 +1,13 @@
 import type { Pet, PetProfile } from '../../types/pet'
-import { Image, ScrollView, Text, View } from '@tarojs/components'
+import { Button, Image, ScrollView, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useState } from 'react'
 import backgroundImage from '../../assets/background1.png'
 import passportImage from '../../assets/passport.png'
+import { routes } from '../../constants/routes'
 import { getPetProfile, getPetResource, getPets } from '../../services/pet'
 import { usePetStore } from '../../stores/pet-store'
+import { navigateTo } from '../../utils/navigation'
 import './index.scss'
 
 interface PersonalityItem {
@@ -82,8 +84,8 @@ export default function Profile() {
   const loadProfile = useCallback(async (pet: Pet) => {
     setLoading(true)
     try {
-      const [petProfile, personalityItems, questionItems, records, weightItems, eventItems] = await Promise.all([
-        getPetProfile(pet.id),
+      const petProfile = await getPetProfile(pet.id)
+      const [personalityItems, questionItems, records, weightItems, eventItems] = await Promise.all([
         getPetResource<PersonalityItem[]>(pet.id, 'personality'),
         getPetResource<QuestionItem[]>(pet.id, 'questions'),
         getPetResource<BirthdayRecord[]>(pet.id, 'birthday-records'),
@@ -380,13 +382,18 @@ export default function Profile() {
   return (
     <View className="archive-page manual-page">
       <Image className="archive-background" src={backgroundImage} mode="aspectFill" />
+      <Button className="archive-add-pet" onClick={() => navigateTo(routes.pages.petEdit)}>添加宠物</Button>
       <View className="book-container" style={{ aspectRatio: coverRatio }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
         {adjacentPage !== null && <View className="book-card book-card-next">{renderBookPage(adjacentPage)}</View>}
         <View className={`book-card book-card-current${touchStartX === null && !resetting ? '' : ' dragging'}`} style={{ transform: `rotateY(${Math.max(-180, Math.min(180, touchDeltaX * 0.5))}deg)` }}>
           {renderBookPage(currentPage)}
         </View>
         {loading && <View className="book-loading"><Text>正在加载档案</Text></View>}
-        {!loading && !selectedPet && <View className="book-loading"><Text>还没有宠物档案</Text></View>}
+        {!loading && !selectedPet && (
+          <View className="book-loading">
+            <Text>还没有宠物档案</Text>
+          </View>
+        )}
       </View>
     </View>
   )

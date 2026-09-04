@@ -1,5 +1,7 @@
 import { Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
+import { useEffect, useState } from 'react'
+import { useAppStore } from '../stores/app-store'
 import './index.scss'
 
 const tabs = [
@@ -10,6 +12,18 @@ const tabs = [
 
 export default function CustomTabBar() {
   const activePath = Taro.getCurrentInstance()?.router?.path || ''
+  const calendarFormVisible = useAppStore(state => state.calendarFormVisible)
+  const [eventHidden, setEventHidden] = useState(false)
+
+  useEffect(() => {
+    const handleCalendarFormVisibility = (visible: boolean) => {
+      setEventHidden(visible)
+    }
+    Taro.eventCenter.on('calendar-form-visibility', handleCalendarFormVisibility)
+    return () => {
+      Taro.eventCenter.off('calendar-form-visibility', handleCalendarFormVisibility)
+    }
+  }, [])
 
   function switchTab(pagePath: string) {
     if (pagePath === activePath)
@@ -19,7 +33,7 @@ export default function CustomTabBar() {
   }
 
   return (
-    <View className="pet-tab-bar">
+    <View className={`pet-tab-bar${calendarFormVisible || eventHidden ? ' hidden' : ''}`}>
       <View className="pet-tab-bar__tabs">
         {tabs.map(tab => (
           <View

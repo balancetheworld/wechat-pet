@@ -84,6 +84,26 @@ func TestCalendarRoutesRecordReminderFlow(t *testing.T) {
 	if repeated.Code != http.StatusConflict || !strings.Contains(repeated.Body.String(), `"code":40901`) {
 		t.Fatalf("repeated completion response: status=%d body=%s", repeated.Code, repeated.Body.String())
 	}
+
+	multiple := petRouteRequest(t, router, signer, http.MethodPost, "/api/v1/calendar/records", "owner-calendar", `{"category":"medical","medical_type":"other","custom_medical_type":"过敏复查","pet_id":"`+pet.ID+`","content":"皮肤过敏复查","occurred_at":"2026-09-03T16:00:00+08:00","reminders":[{"reminder_date":"2026-09-22","repeat_type":"once","advance_days":3,"notification_channels":["in_app"]},{"reminder_date":"2026-10-22","repeat_type":"monthly","advance_days":3,"notification_channels":["in_app"]}]}`)
+	if multiple.Code != http.StatusOK || !strings.Contains(multiple.Body.String(), `"custom_medical_type":"过敏复查"`) || !strings.Contains(multiple.Body.String(), `"reminders":[`) || !strings.Contains(multiple.Body.String(), `"reminder_date":"2026-09-22"`) || !strings.Contains(multiple.Body.String(), `"reminder_date":"2026-10-22"`) {
+		t.Fatalf("multiple reminders response: status=%d body=%s", multiple.Code, multiple.Body.String())
+	}
+
+	emptyMedical := petRouteRequest(t, router, signer, http.MethodPost, "/api/v1/calendar/records", "owner-calendar", `{"category":"medical","medical_type":"checkup","pet_id":"`+pet.ID+`","occurred_at":"2026-09-03T17:00:00+08:00"}`)
+	if emptyMedical.Code != http.StatusOK {
+		t.Fatalf("empty medical response: status=%d body=%s", emptyMedical.Code, emptyMedical.Body.String())
+	}
+
+	emptyDaily := petRouteRequest(t, router, signer, http.MethodPost, "/api/v1/calendar/records", "owner-calendar", `{"category":"daily","pet_id":"`+pet.ID+`","occurred_at":"2026-09-03T18:00:00+08:00"}`)
+	if emptyDaily.Code != http.StatusBadRequest || !strings.Contains(emptyDaily.Body.String(), "记录内容和图片至少填写一项") {
+		t.Fatalf("empty daily response: status=%d body=%s", emptyDaily.Code, emptyDaily.Body.String())
+	}
+
+	multipleMonth := petRouteRequest(t, router, signer, http.MethodGet, "/api/v1/calendar/months/2026-10?pet_id="+pet.ID, "owner-calendar", "")
+	if multipleMonth.Code != http.StatusOK || !strings.Contains(multipleMonth.Body.String(), `"date":"2026-10-22"`) || !strings.Contains(multipleMonth.Body.String(), `"has_pending_reminder":true`) {
+		t.Fatalf("multiple reminders month response: status=%d body=%s", multipleMonth.Code, multipleMonth.Body.String())
+	}
 }
 
 func extractCalendarReminderID(body string) string {
@@ -100,6 +120,6 @@ func extractCalendarReminderID(body string) string {
 	return body[start : start+end]
 }
 
-const calendarRouteSchema = `CREATE TABLE calendar_records (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, category TEXT NOT NULL, medical_type TEXT, content TEXT NOT NULL, occurred_at TIMESTAMP NOT NULL, occurred_on DATE NOT NULL, created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP);
+const calendarRouteSchema = `CREATE TABLE calendar_records (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, category TEXT NOT NULL, medical_type TEXT, custom_medical_type TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, occurred_at TIMESTAMP NOT NULL, occurred_on DATE NOT NULL, created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP);
 CREATE TABLE calendar_record_media (id TEXT PRIMARY KEY, record_id TEXT NOT NULL, family_id TEXT NOT NULL, asset_id TEXT NOT NULL, sort_order INTEGER NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE calendar_reminders (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, source_record_id TEXT NOT NULL, previous_reminder_id TEXT, reminder_date DATE NOT NULL, repeat_type TEXT NOT NULL, repeat_interval_days INTEGER, advance_days INTEGER NOT NULL, notification_channels TEXT NOT NULL, status TEXT NOT NULL, completed_at TIMESTAMP, completed_by TEXT, completed_record_id TEXT, created_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);`

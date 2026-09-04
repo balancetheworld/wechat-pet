@@ -5,9 +5,11 @@ interface AppStore {
   globalLoading: boolean
   bootstrapError: string
   retryKey: number
+  calendarFormVisible: boolean
   setBootstrapCompleted: (completed: boolean) => void
   setGlobalLoading: (loading: boolean) => void
   setBootstrapError: (message: string) => void
+  setCalendarFormVisible: (visible: boolean) => void
   retryBootstrap: () => void
 }
 
@@ -16,6 +18,7 @@ export const useAppStore = create<AppStore>(set => ({
   globalLoading: false,
   bootstrapError: '',
   retryKey: 0,
+  calendarFormVisible: false,
 
   setBootstrapCompleted(completed) {
     set({
@@ -32,6 +35,12 @@ export const useAppStore = create<AppStore>(set => ({
   setBootstrapError(message) {
     set({
       bootstrapError: message,
+    })
+  },
+
+  setCalendarFormVisible(visible) {
+    set({
+      calendarFormVisible: visible,
     })
   },
 

@@ -15,6 +15,7 @@ type MemberDTO struct {
 type MediaDTO struct {
 	ID        string `json:"id"`
 	AssetID   string `json:"asset_id"`
+	URL       string `json:"url"`
 	SortOrder int    `json:"sort_order"`
 }
 
@@ -25,6 +26,7 @@ type ReminderDTO struct {
 	Pet                  PetDTO    `json:"pet"`
 	Content              string    `json:"content"`
 	MedicalType          string    `json:"medical_type"`
+	CustomMedicalType    string    `json:"custom_medical_type"`
 	CreatedBy            MemberDTO `json:"created_by"`
 	RepeatType           string    `json:"repeat_type"`
 	RepeatIntervalDays   *int      `json:"repeat_interval_days"`
@@ -34,15 +36,17 @@ type ReminderDTO struct {
 }
 
 type RecordDTO struct {
-	ID          string       `json:"id"`
-	Category    string       `json:"category"`
-	MedicalType string       `json:"medical_type"`
-	Content     string       `json:"content"`
-	OccurredAt  string       `json:"occurred_at"`
-	Pet         PetDTO       `json:"pet"`
-	Media       []MediaDTO   `json:"media"`
-	CreatedBy   MemberDTO    `json:"created_by"`
-	Reminder    *ReminderDTO `json:"reminder"`
+	ID                string        `json:"id"`
+	Category          string        `json:"category"`
+	MedicalType       string        `json:"medical_type"`
+	CustomMedicalType string        `json:"custom_medical_type"`
+	Content           string        `json:"content"`
+	OccurredAt        string        `json:"occurred_at"`
+	Pet               PetDTO        `json:"pet"`
+	Media             []MediaDTO    `json:"media"`
+	CreatedBy         MemberDTO     `json:"created_by"`
+	Reminder          *ReminderDTO  `json:"reminder"`
+	Reminders         []ReminderDTO `json:"reminders"`
 }
 
 type DayMarkerDTO struct {
@@ -79,13 +83,15 @@ type CreateReminderRequest struct {
 }
 
 type CreateRecordRequest struct {
-	Category      string                 `json:"category"`
-	MedicalType   string                 `json:"medical_type"`
-	PetID         string                 `json:"pet_id"`
-	Content       string                 `json:"content"`
-	MediaAssetIDs []string               `json:"media_asset_ids"`
-	OccurredAt    string                 `json:"occurred_at"`
-	Reminder      *CreateReminderRequest `json:"reminder"`
+	Category          string                  `json:"category"`
+	MedicalType       string                  `json:"medical_type"`
+	CustomMedicalType string                  `json:"custom_medical_type"`
+	PetID             string                  `json:"pet_id"`
+	Content           string                  `json:"content"`
+	MediaAssetIDs     []string                `json:"media_asset_ids"`
+	OccurredAt        string                  `json:"occurred_at"`
+	Reminder          *CreateReminderRequest  `json:"reminder"`
+	Reminders         []CreateReminderRequest `json:"reminders"`
 }
 
 type CompleteReminderRequest struct {
