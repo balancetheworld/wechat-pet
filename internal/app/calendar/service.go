@@ -21,13 +21,22 @@ type Repository interface {
 
 type Service struct {
 	repository Repository
+	assetURLs  AssetURLResolver
 }
 
-func NewService(repository Repository) (*Service, error) {
+type AssetURLResolver interface {
+	URL(ctx context.Context, key string) (string, error)
+}
+
+func NewService(repository Repository, assetURLs ...AssetURLResolver) (*Service, error) {
 	if repository == nil {
 		return nil, errors.New("calendar service repository is required")
 	}
-	return &Service{repository: repository}, nil
+	var assetURLResolver AssetURLResolver
+	if len(assetURLs) > 0 {
+		assetURLResolver = assetURLs[0]
+	}
+	return &Service{repository: repository, assetURLs: assetURLResolver}, nil
 }
 
 func (s *Service) ListMonth(ctx context.Context, familyID, month, petID string) (MonthDTO, error) {
@@ -49,6 +58,9 @@ func (s *Service) GetDay(ctx context.Context, familyID, date string) (DayDTO, er
 	if err != nil {
 		return DayDTO{}, mapError(err)
 	}
+	if err := s.resolveDayMedia(ctx, &value); err != nil {
+		return DayDTO{}, err
+	}
 	return value, nil
 }
 
@@ -64,6 +76,9 @@ func (s *Service) CreateRecord(ctx context.Context, familyID, userID string, req
 	if err != nil {
 		return RecordDTO{}, mapError(err)
 	}
+	if err := s.resolveRecordMedia(ctx, &value); err != nil {
+		return RecordDTO{}, err
+	}
 	return value, nil
 }
 
@@ -74,6 +89,10 @@ func (s *Service) CompleteReminder(ctx context.Context, familyID, userID, remind
 	if err := validateMedia(request.MediaAssetIDs); err != nil {
 		return CompleteReminderDTO{}, err
 	}
+	request.Content = strings.TrimSpace(request.Content)
+	if len(request.Content) > 2000 {
+		return CompleteReminderDTO{}, appErrors.InvalidParam("记录内容不能超过 2000 个字符")
+	}
 	completedAt, err := parseDateTime(request.CompletedAt)
 	if err != nil {
 		return CompleteReminderDTO{}, err
@@ -82,12 +101,44 @@ func (s *Service) CompleteReminder(ctx context.Context, familyID, userID, remind
 	if err != nil {
 		return CompleteReminderDTO{}, mapError(err)
 	}
+	if err := s.resolveRecordMedia(ctx, &value.CompletedRecord); err != nil {
+		return CompleteReminderDTO{}, err
+	}
 	return value, nil
+}
+
+func (s *Service) resolveDayMedia(ctx context.Context, value *DayDTO) error {
+	for index := range value.Records {
+		if err := s.resolveRecordMedia(ctx, &value.Records[index]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) resolveRecordMedia(ctx context.Context, value *RecordDTO) error {
+	for index := range value.Media {
+		assetID := strings.TrimSpace(value.Media[index].AssetID)
+		if assetID == "" {
+			continue
+		}
+		if s.assetURLs == nil {
+			value.Media[index].URL = assetID
+			continue
+		}
+		url, err := s.assetURLs.URL(ctx, assetID)
+		if err != nil {
+			return appErrors.Internal(err)
+		}
+		value.Media[index].URL = url
+	}
+	return nil
 }
 
 func validateCreateRequest(request *CreateRecordRequest) error {
 	request.Category = strings.TrimSpace(request.Category)
 	request.MedicalType = strings.TrimSpace(request.MedicalType)
+	request.CustomMedicalType = strings.TrimSpace(request.CustomMedicalType)
 	request.PetID = strings.TrimSpace(request.PetID)
 	request.Content = strings.TrimSpace(request.Content)
 	if request.Category != "medical" && request.Category != "daily" {
@@ -96,7 +147,7 @@ func validateCreateRequest(request *CreateRecordRequest) error {
 	if request.PetID == "" {
 		return appErrors.InvalidParam("宠物 ID 不能为空")
 	}
-	if request.Content == "" && len(request.MediaAssetIDs) == 0 {
+	if request.Category == "daily" && request.Content == "" && len(request.MediaAssetIDs) == 0 {
 		return appErrors.InvalidParam("记录内容和图片至少填写一项")
 	}
 	if len(request.Content) > 2000 {
@@ -106,7 +157,7 @@ func validateCreateRequest(request *CreateRecordRequest) error {
 		return err
 	}
 	if request.Category == "daily" {
-		if request.MedicalType != "" || request.Reminder != nil {
+		if request.MedicalType != "" || request.CustomMedicalType != "" || request.Reminder != nil || len(request.Reminders) > 0 {
 			return appErrors.InvalidParam("日常记录不能设置医疗类型或待办提醒")
 		}
 		return nil
@@ -114,8 +165,25 @@ func validateCreateRequest(request *CreateRecordRequest) error {
 	if request.MedicalType != "" && !isMedicalType(request.MedicalType) {
 		return appErrors.InvalidParam("医疗类型无效")
 	}
+	if request.MedicalType != "other" && request.CustomMedicalType != "" {
+		return appErrors.InvalidParam("仅其他医疗类型可填写自定义名称")
+	}
+	if request.MedicalType == "other" && request.CustomMedicalType == "" {
+		return appErrors.InvalidParam("请填写自定义医疗类型")
+	}
+	if len(request.CustomMedicalType) > 50 {
+		return appErrors.InvalidParam("自定义医疗类型不能超过 50 个字符")
+	}
+	if request.Reminder != nil && len(request.Reminders) > 0 {
+		return appErrors.InvalidParam("提醒参数不能同时使用单个和多个提醒")
+	}
 	if request.Reminder != nil {
 		return validateReminder(request.Reminder)
+	}
+	for index := range request.Reminders {
+		if err := validateReminder(&request.Reminders[index]); err != nil {
+			return err
+		}
 	}
 	return nil
 }

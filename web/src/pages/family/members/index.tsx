@@ -5,6 +5,8 @@ import { useState } from 'react'
 import PageBackground from '../../../components/page-background'
 import { approveApplication, getMembers, getPendingApplications, rejectApplication, removeMember } from '../../../services/family'
 import { useAuthStore } from '../../../stores/auth-store'
+import { navigateBack } from '../../../utils/navigation'
+import './index.scss'
 
 export default function FamilyMembers() {
   const identity = useAuthStore(state => state.identity)
@@ -55,23 +57,29 @@ export default function FamilyMembers() {
   return (
     <View className="themed-page">
       <PageBackground />
-      <Button loading={loading} onClick={load}>刷新</Button>
-      {members.map(member => (
-        <View key={member.id}>
-          <Text>{member.nickname || '未设置昵称'}</Text>
-          <Text>{member.role}</Text>
-          {identity === 'owner' && member.role !== 'owner' && (
-            <Button onClick={() => confirmAction('移除成员', () => removeMember(member.id))}>移除</Button>
-          )}
-        </View>
-      ))}
-      {identity === 'owner' && applications.map(application => (
-        <View key={application.id}>
-          <Text>{application.nickname || '未设置昵称'}</Text>
-          <Button onClick={() => confirmAction('同意申请', () => approveApplication(application.id))}>同意</Button>
-          <Button onClick={() => confirmAction('拒绝申请', () => rejectApplication(application.id))}>拒绝</Button>
-        </View>
-      ))}
+      <View className="family-members-header">
+        <Button className="family-members-back" onClick={() => navigateBack()}>返回</Button>
+        <Text className="family-members-title">家庭成员</Text>
+        <Button className="family-members-refresh" loading={loading} onClick={load}>刷新</Button>
+      </View>
+      <View className="family-members-list">
+        {members.map(member => (
+          <View key={member.id}>
+            <Text>{member.nickname || '未设置昵称'}</Text>
+            <Text>{member.role}</Text>
+            {identity === 'owner' && member.role !== 'owner' && (
+              <Button onClick={() => confirmAction('移除成员', () => removeMember(member.id))}>移除</Button>
+            )}
+          </View>
+        ))}
+        {identity === 'owner' && applications.map(application => (
+          <View key={application.id}>
+            <Text>{application.nickname || '未设置昵称'}</Text>
+            <Button onClick={() => confirmAction('同意申请', () => approveApplication(application.id))}>同意</Button>
+            <Button onClick={() => confirmAction('拒绝申请', () => rejectApplication(application.id))}>拒绝</Button>
+          </View>
+        ))}
+      </View>
     </View>
   )
 }

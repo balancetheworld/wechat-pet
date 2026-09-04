@@ -10,9 +10,15 @@ export type { UploadOptions } from '../types/request'
 
 const apiBaseURL = 'http://127.0.0.1:8080'
 const requestTimeout = 10_000
+let refreshingSession: Promise<void> | null = null
 
 function requestURL(path: string) {
   return `${apiBaseURL}${path}`
+}
+
+export function assetURL(assetID: string) {
+  const value = assetID.trim()
+  return value ? requestURL(`/uploads/${encodeURIComponent(value)}`) : ''
 }
 
 function errorFromNetwork(error: unknown) {
@@ -35,8 +41,19 @@ async function handleAuthFailure() {
 }
 
 async function refreshSession() {
-  const { silentLogin } = await import('./auth')
-  await silentLogin()
+  if (!refreshingSession) {
+    refreshingSession = (async () => {
+      const { silentLogin } = await import('./auth')
+      await silentLogin()
+    })()
+  }
+
+  try {
+    await refreshingSession
+  }
+  finally {
+    refreshingSession = null
+  }
 }
 
 async function requestWithRetry<T>(options: RequestOptions, retried: boolean): Promise<T> {

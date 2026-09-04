@@ -103,7 +103,7 @@ func main() {
 		logger.Error("create calendar repository", "error", err)
 		os.Exit(1)
 	}
-	calendarService, err := calendarapp.NewService(calendarRepository)
+	calendarService, err := calendarapp.NewService(calendarRepository, store)
 	if err != nil {
 		logger.Error("create calendar service", "error", err)
 		os.Exit(1)

@@ -1,0 +1,25 @@
+.family-members-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24rpx;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.family-members-header button {
+  min-width: 112rpx;
+  min-height: 68rpx;
+}
+
+.family-members-title {
+  color: var(--primary-deep);
+  font-size: 34rpx;
+  font-weight: 600;
+}
+
+.family-members-list {
+  margin-top: 8rpx;
+}
