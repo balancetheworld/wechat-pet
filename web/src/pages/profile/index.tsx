@@ -1,10 +1,12 @@
 import type { Pet, PetProfile } from '../../types/pet'
-import { Button, Image, ScrollView, Text, View } from '@tarojs/components'
+import type { CalendarRecordCategory, MedicalType } from '../../types/calendar'
+import { Button, Image, Input, Picker, ScrollView, Text, Textarea, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import backgroundImage from '../../assets/background1.png'
 import passportImage from '../../assets/passport.png'
 import { routes } from '../../constants/routes'
+import { createCalendarRecord } from '../../services/calendar'
 import { getPetProfile, getPetResource, getPets } from '../../services/pet'
 import { usePetStore } from '../../stores/pet-store'
 import { navigateTo } from '../../utils/navigation'
@@ -66,6 +68,16 @@ const GROWTH_PER_PAGE = 3
 /* 书本长宽比（拉长版） */
 const BOOK_RATIO = '1086 / 1620'
 
+/* 医疗类型标签(对应日历 GrowthEvent 标题) */
+const MEDICAL_TYPE_LABEL: Record<MedicalType, string> = {
+  vaccine: '疫苗',
+  deworming: '驱虫',
+  checkup: '体检',
+  visit: '就诊',
+  medication: '用药',
+  other: '其他',
+}
+
 interface BookPage {
   chapter: ChapterKey
   name: string
@@ -112,6 +124,18 @@ export default function Profile() {
   const [detail, setDetail] = useState<{ title: string; subtitle: string; body: string } | null>(null)
   /* 宠物切换弹层 */
   const [switcherOpen, setSwitcherOpen] = useState(false)
+  /* 成长足迹添加事件弹层 */
+  const [growthFormVisible, setGrowthFormVisible] = useState(false)
+  const [growthFormCategory, setGrowthFormCategory] = useState<CalendarRecordCategory>('daily')
+  const [growthFormMedicalType, setGrowthFormMedicalType] = useState<MedicalType>('checkup')
+  const [growthFormCustomMedicalType, setGrowthFormCustomMedicalType] = useState('')
+  const [growthFormContent, setGrowthFormContent] = useState('')
+  const [growthFormDate, setGrowthFormDate] = useState<string>(() => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  })
+  const [growthFormPetID, setGrowthFormPetID] = useState('')
+  const [growthSubmitting, setGrowthSubmitting] = useState(false)
 
   const selectedPet = pets.find(item => item.id === currentPetId) || pets[0]
 
@@ -272,6 +296,84 @@ export default function Profile() {
     /* 切回第 1 页（封面）等待新档案加载 */
     setCurrentPage(0)
   }, [currentPetId, setCurrentPetId])
+
+  /* ===== 成长足迹添加事件 ===== */
+  function openGrowthForm() {
+    const targetPetID = currentPetId || pets[0]?.id || ''
+    const today = new Date()
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
+    setGrowthFormCategory('daily')
+    setGrowthFormMedicalType('checkup')
+    setGrowthFormCustomMedicalType('')
+    setGrowthFormContent('')
+    setGrowthFormDate(todayStr)
+    setGrowthFormPetID(targetPetID)
+    setGrowthFormVisible(true)
+  }
+
+  function closeGrowthForm() {
+    setGrowthFormVisible(false)
+  }
+
+  async function handleCreateGrowthEvent() {
+    if (growthSubmitting) {
+      return
+    }
+    const petID = growthFormPetID
+    if (!petID) {
+      await Taro.showToast({ title: '请选择宠物', icon: 'none' })
+      return
+    }
+    if (growthFormCategory === 'daily' && !growthFormContent.trim()) {
+      await Taro.showToast({ title: '请写点内容', icon: 'none' })
+      return
+    }
+    if (growthFormCategory === 'medical' && growthFormMedicalType === 'other' && !growthFormCustomMedicalType.trim()) {
+      await Taro.showToast({ title: '请填写医疗类型', icon: 'none' })
+      return
+    }
+    setGrowthSubmitting(true)
+    const occurredAt = `${growthFormDate}T12:00:00+09:00`
+    /* 同步到日历所需字段: type 标题 */
+    const typeLabel = growthFormCategory === 'medical'
+      ? (growthFormMedicalType === 'other' ? growthFormCustomMedicalType.trim() : MEDICAL_TYPE_LABEL[growthFormMedicalType])
+      : '日常'
+    try {
+      /* 1) 写入后端日历记录(同步到日历) */
+      await createCalendarRecord({
+        category: growthFormCategory,
+        medical_type: growthFormCategory === 'medical' ? growthFormMedicalType : undefined,
+        custom_medical_type: growthFormCategory === 'medical' && growthFormMedicalType === 'other'
+          ? growthFormCustomMedicalType.trim()
+          : undefined,
+        pet_id: petID,
+        content: growthFormContent.trim() || undefined,
+        occurred_at: occurredAt,
+      })
+      /* 2) 立即在档案页成长足迹中追加一条(乐观更新,无需等后端推送) */
+      const newEvent: GrowthEvent = {
+        id: `local-${Date.now()}`,
+        type: typeLabel,
+        occurred_at: occurredAt,
+        recorder: '我',
+        content: growthFormContent.trim() || (growthFormCategory === 'medical' ? '已记录医疗事项' : '已记录今日小事'),
+      }
+      setGrowthEvents(previous => [newEvent, ...previous])
+      setGrowthFormVisible(false)
+      await Taro.showToast({ title: '已记一笔', icon: 'success' })
+      /* 3) 后台静默重拉一次成长足迹,以防后端做了转换映射 */
+      void getPetResource<GrowthEvent[]>(petID, 'growth-events')
+        .then(fresh => setGrowthEvents(fresh))
+        .catch(() => {})
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '保存事件失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setGrowthSubmitting(false)
+    }
+  }
 
   /* ===== 翻页辅助 ===== */
   const adjacentPage = turnTargetPage ?? (turnDirection === 'previous'
@@ -616,8 +718,7 @@ export default function Profile() {
     <View className="archive-page">
       <Image className="archive-background" src={backgroundImage} mode="aspectFill" />
 
-      {/* 右上角：添加宠物（同事新增） */}
-      <Button className="archive-add-pet" onClick={() => navigateTo(routes.pages.petEdit)}>添加宠物</Button>
+      {/* 右上角添加宠物按钮已移除：与切换弹层底部"点击添加宠物"入口重复 */}
 
       {/* 左上角宠物切换：仅宠物名 + 三角标 */}
       <Button
@@ -731,9 +832,78 @@ export default function Profile() {
                 {pet.id === currentPetId && <Text className="pet-switcher-check">✓</Text>}
               </Button>
             ))}
+            {/* 最底部一行: 点击添加宠物 (与档案右上角添加宠物按钮同路径) */}
+            <Button
+              className="pet-switcher-add"
+              onClick={() => {
+                setSwitcherOpen(false)
+                navigateTo(routes.pages.petEdit)
+              }}
+            >
+              <Text className="pet-switcher-add-plus">＋</Text>
+              <Text className="pet-switcher-add-text">点击添加宠物</Text>
+            </Button>
           </ScrollView>
         </View>
       </View>
+
+      {/* 成长足迹添加按钮(只在成长足迹章节显示) */}
+      {currentPageInfo?.chapter === 'growth' && (
+        <Button className="growth-add-button" onClick={openGrowthForm}>＋ 添加事件</Button>
+      )}
+
+      {/* 成长足迹添加事件弹层 */}
+      {growthFormVisible && (
+        <View className="growth-overlay" onClick={closeGrowthForm}>
+          <View className="growth-sheet" onClick={event => event.stopPropagation()}>
+            <View className="growth-sheet-handle" />
+            <Text className="growth-sheet-title">添加事件</Text>
+
+            <Text className="growth-field-label">分类</Text>
+            <View className="growth-segments">
+              <View className={`growth-segment${growthFormCategory === 'daily' ? ' selected' : ''}`} onClick={() => setGrowthFormCategory('daily')}>日常</View>
+              <View className={`growth-segment${growthFormCategory === 'medical' ? ' selected medical' : ''}`} onClick={() => setGrowthFormCategory('medical')}>医疗</View>
+            </View>
+
+            <Text className="growth-field-label">宠物</Text>
+            <View className="growth-pet-chips">
+              {pets.map(pet => (
+                <View key={pet.id} className={`growth-pet-chip${growthFormPetID === pet.id ? ' selected' : ''}`} onClick={() => setGrowthFormPetID(pet.id)}>{pet.name}</View>
+              ))}
+            </View>
+
+            <Text className="growth-field-label">发生日期</Text>
+            <Picker mode="date" value={growthFormDate} onChange={event => setGrowthFormDate(event.detail.value)}>
+              <View className="growth-picker-row">
+                <Text>{growthFormDate || '选择日期'}</Text>
+                <Text>选择</Text>
+              </View>
+            </Picker>
+
+            {growthFormCategory === 'medical' && (
+              <>
+                <Text className="growth-field-label">医疗类型</Text>
+                <View className="growth-type-chips">
+                  {(['vaccine', 'deworming', 'checkup', 'visit', 'medication', 'other'] as MedicalType[]).map(type => (
+                    <View key={type} className={`growth-type-chip${growthFormMedicalType === type ? ' selected' : ''}`} onClick={() => setGrowthFormMedicalType(type)}>{MEDICAL_TYPE_LABEL[type]}</View>
+                  ))}
+                </View>
+                {growthFormMedicalType === 'other' && (
+                  <Input className="growth-custom-medical-type" value={growthFormCustomMedicalType} maxlength={50} placeholder="请输入医疗类型" onInput={event => setGrowthFormCustomMedicalType(event.detail.value)} />
+                )}
+              </>
+            )}
+
+            <Text className="growth-field-label">记录内容</Text>
+            <Textarea className="growth-textarea" value={growthFormContent} maxlength={1000} placeholder={growthFormCategory === 'medical' ? '医院、药品等需要备注的写在这里哦～' : '写下今天发生的事'} onInput={event => setGrowthFormContent(event.detail.value)} />
+
+            <View className="growth-sheet-actions">
+              <View className="growth-cancel-button" onClick={closeGrowthForm}>取消</View>
+              <View className={`growth-save-button${growthSubmitting ? ' disabled' : ''}`} onClick={handleCreateGrowthEvent}>{growthSubmitting ? '保存中' : '保存'}</View>
+            </View>
+          </View>
+        </View>
+      )}
     </View>
   )
 }

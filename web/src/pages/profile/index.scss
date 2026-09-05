@@ -26,23 +26,7 @@
   pointer-events: none;
 }
 
-/* --- 右上角添加宠物按钮（同事新增） --- */
-.archive-add-pet {
-  position: absolute;
-  z-index: 2;
-  top: 40rpx;
-  right: 24rpx;
-  min-width: 144rpx;
-  height: 64rpx;
-  padding: 0 20rpx;
-  border: 3rpx solid #2A2520;
-  border-radius: 12rpx;
-  box-sizing: border-box;
-  color: #2A2520;
-  background: #F5D68A;
-  font-size: 24rpx;
-  line-height: 58rpx;
-}
+/* 右上角添加宠物按钮已移除：与切换弹层底部"点击添加宠物"入口重复 */
 
 .manual-page {
   display: flex;
@@ -926,9 +910,232 @@
   box-shadow: 0 6rpx 18rpx rgba(74, 100, 137, 0.14);
 }
 
+/* 切换弹层底部: 点击添加宠物 */
+.pet-switcher-add {
+  flex-shrink: 0;
+  display: flex !important;
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  width: 100%;
+  margin-top: 16rpx;
+  padding: 20rpx 24rpx;
+  border: 1rpx dashed rgba(91, 132, 190, 0.5);
+  border-radius: 16rpx;
+  background: rgba(255, 254, 251, 0.55);
+  box-shadow: none;
+}
+
+.pet-switcher-add-plus {
+  display: inline-block;
+  font-size: 36rpx;
+  line-height: 1;
+  color: #5B84BE;
+  font-weight: 600;
+}
+
+.pet-switcher-add-text {
+  display: inline-block;
+  font-size: 28rpx;
+  color: #5B84BE;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+}
+
+.pet-switcher-add:active {
+  background: rgba(127, 165, 214, 0.2);
+}
+
 .pet-switcher-empty {
   padding: 40rpx 24rpx;
   text-align: center;
   color: #8A8278;
   font-size: 24rpx;
+}
+
+/* ============================================
+   成长足迹 - 添加事件按钮 + 弹层
+   视觉与日历 cal-add-button / cal-sheet 保持一致
+   ============================================ */
+
+.growth-add-button {
+  position: fixed;
+  z-index: 9;
+  /* 档案书本外的右下, 略高于页码胶囊 (capsule 在 bottom: 220rpx) */
+  right: 24rpx;
+  bottom: 290rpx;
+  padding: 20rpx 32rpx;
+  color: #FFFEFB;
+  font-size: 28rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+  /* 玻璃质感: 偏白蓝 + 高透明度, 透出底层背景 */
+  background: rgba(170, 200, 230, 0.42);
+  border: 1rpx solid rgba(255, 255, 255, 0.7);
+  border-radius: 999rpx;
+  /* 外发光 + 顶高光 + 底反光 */
+  box-shadow:
+    0 14rpx 36rpx rgba(74, 100, 137, 0.28),
+    0 4rpx 12rpx rgba(91, 132, 190, 0.18),
+    inset 0 1rpx 0 rgba(255, 255, 255, 0.85),
+    inset 0 -1rpx 0 rgba(255, 255, 255, 0.18);
+  line-height: 1;
+  transition: opacity 0.18s ease;
+}
+
+.growth-add-button:active {
+  opacity: 0.78;
+}
+
+.growth-overlay {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  background: rgba(53, 80, 107, 0.42);
+}
+
+.growth-sheet {
+  width: 100%;
+  max-height: 80vh;
+  box-sizing: border-box;
+  padding: 0 28rpx calc(40rpx + env(safe-area-inset-bottom));
+  overflow-y: auto;
+  border-radius: 28rpx 28rpx 0 0;
+  border-top: 1rpx solid rgba(255, 255, 255, 0.78);
+  background: rgba(255, 254, 251, 0.92);
+  box-shadow: 0 -8rpx 28rpx rgba(74, 100, 137, 0.16);
+}
+
+.growth-sheet-handle {
+  width: 70rpx;
+  height: 8rpx;
+  margin: 16rpx auto;
+  border-radius: 8rpx;
+  background: rgba(163, 194, 232, 0.62);
+}
+
+.growth-sheet-title {
+  display: block;
+  text-align: center;
+  font-size: 33rpx;
+  font-weight: 700;
+  color: #7FA5D6;
+}
+
+.growth-field-label {
+  display: block;
+  margin: 24rpx 0 12rpx;
+  font-size: 25rpx;
+  font-weight: 600;
+  color: #2A2520;
+}
+
+.growth-segments,
+.growth-pet-chips,
+.growth-type-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12rpx;
+}
+
+.growth-segment,
+.growth-pet-chip,
+.growth-type-chip {
+  box-sizing: border-box;
+  padding: 12rpx 20rpx;
+  font-size: 25rpx;
+  color: rgba(74, 100, 137, 0.92);
+  border: 1rpx solid #D0E8F0;
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.growth-segment {
+  flex: 1;
+  text-align: center;
+}
+
+.growth-segment.selected,
+.growth-type-chip.selected {
+  color: #FFFEFB;
+  border-color: rgba(127, 165, 214, 0.65);
+  background: rgba(127, 165, 214, 0.86);
+}
+
+.growth-segment.medical.selected {
+  border-color: rgba(91, 184, 158, 0.7);
+  background: #5BB89E;
+}
+
+.growth-pet-chip.selected {
+  border-color: rgba(163, 194, 232, 0.7);
+  background: rgba(191, 224, 241, 0.58);
+  color: #3A7A92;
+}
+
+.growth-textarea,
+.growth-custom-medical-type {
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 26rpx;
+  color: #2A2520;
+  border: 1rpx solid #D0E8F0;
+  border-radius: 14rpx;
+  background: rgba(232, 244, 248, 0.62);
+}
+
+.growth-textarea {
+  min-height: 156rpx;
+  padding: 16rpx;
+}
+
+.growth-custom-medical-type {
+  height: 68rpx;
+  margin-top: 12rpx;
+  padding: 0 14rpx;
+}
+
+.growth-picker-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14rpx;
+  font-size: 24rpx;
+  color: rgba(74, 100, 137, 0.92);
+  border: 1rpx solid #D0E8F0;
+  border-radius: 10rpx;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.growth-sheet-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 34rpx;
+}
+
+.growth-cancel-button,
+.growth-save-button {
+  flex: 1;
+  box-sizing: border-box;
+  padding: 14rpx 20rpx;
+  text-align: center;
+  font-size: 25rpx;
+  font-weight: 700;
+  border-radius: 14rpx;
+  border: 1rpx solid #D0E8F0;
+  background: rgba(255, 255, 255, 0.6);
+  color: rgba(74, 100, 137, 0.92);
+}
+
+.growth-save-button {
+  color: #FFFEFB;
+  border-color: rgba(127, 165, 214, 0.65);
+  background: rgba(127, 165, 214, 0.86);
+}
+
+.growth-save-button.disabled {
+  opacity: 0.45;
 }
