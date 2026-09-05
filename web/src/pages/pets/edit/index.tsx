@@ -34,7 +34,7 @@ const HEALTH_OPTIONS = [
   { id: 'sick', label: '生病中' },
 ]
 
-const todayString = () => {
+function todayString() {
   const d = new Date()
   const m = String(d.getMonth() + 1).padStart(2, '0')
   const day = String(d.getDate()).padStart(2, '0')
@@ -54,7 +54,7 @@ export default function PetEdit() {
   const [formGender, setFormGender] = useState('unknown')
   const [formNeutered, setFormNeutered] = useState('unknown')
   const [formBirth, setFormBirth] = useState('2024-01-01')
-  const [formArrival, setFormArrival] = useState(todayString())
+  const [formArrival, setFormArrival] = useState(() => todayString())
   const [formHealth, setFormHealth] = useState('healthy')
   const [formBreed, setFormBreed] = useState('')
   const [formTags, setFormTags] = useState('')
@@ -88,7 +88,7 @@ export default function PetEdit() {
   /* --- 选择头像 --- */
   async function chooseAvatar() {
     try {
-      // @ts-ignore - Taro.chooseImage 在类型里需要扩展
+      // @ts-expect-error - Taro.chooseImage 在类型里需要扩展
       const res = await Taro.chooseImage({
         count: 1,
         sizeType: ['compressed'],

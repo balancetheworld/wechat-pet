@@ -1,5 +1,5 @@
-import type { Pet, PetProfile } from '../../types/pet'
 import type { CalendarRecordCategory, MedicalType } from '../../types/calendar'
+import type { Pet, PetProfile } from '../../types/pet'
 import { Button, Image, Input, Picker, ScrollView, Text, Textarea, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -121,7 +121,7 @@ export default function Profile() {
   /* 目录弹层 */
   const [tocOpen, setTocOpen] = useState(false)
   /* 详情弹层 */
-  const [detail, setDetail] = useState<{ title: string; subtitle: string; body: string } | null>(null)
+  const [detail, setDetail] = useState<{ title: string, subtitle: string, body: string } | null>(null)
   /* 宠物切换弹层 */
   const [switcherOpen, setSwitcherOpen] = useState(false)
   /* 成长足迹添加事件弹层 */
@@ -404,7 +404,13 @@ export default function Profile() {
           </Button>
           <View className="identity-meta">
             <Text className="identity-name">{profile?.name || selectedPet?.name || '宠'}</Text>
-            <Text className="identity-type">{profile?.breed || '品种待补充'} · {formatGender(profile?.gender || '')}</Text>
+            <Text className="identity-type">
+{profile?.breed || '品种待补充'}
+{' '}
+·
+{' '}
+{formatGender(profile?.gender || '')}
+            </Text>
           </View>
         </View>
         <View className="stat-row">
@@ -454,7 +460,12 @@ export default function Profile() {
           {part === 1 && (
             <View className="tags">
               {personality.length > 0
-                ? personality.map(item => <Text className="tag" key={item.id}>{item.trait}{item.value ? ` · ${item.value}` : ''}</Text>)
+                ? personality.map(item => (
+<Text className="tag" key={item.id}>
+{item.trait}
+{item.value ? ` · ${item.value}` : ''}
+</Text>
+))
                 : <Text className="empty-text">还没有性格标签</Text>}
             </View>
           )}
@@ -573,9 +584,21 @@ export default function Profile() {
                 <View className="birthday-feature" key={r.id} onClick={open}>
                   <View className="media-placeholder">📷</View>
                   <View className="birthday-copy">
-                    <Text className="span">{r.year} · {r.age} 岁</Text>
+                    <Text className="span">
+{r.year}
+{' '}
+·
+{' '}
+{r.age}
+{' '}
+岁
+                    </Text>
                     <Text className="h3">{r.summary || '一起记录这一岁'}</Text>
-                    <Text className="p">“{r.summary || '新的一岁，希望你健健康康。'}”</Text>
+                    <Text className="p">
+“
+{r.summary || '新的一岁，希望你健健康康。'}
+”
+                    </Text>
                   </View>
                 </View>
               )
@@ -583,7 +606,13 @@ export default function Profile() {
             return (
               <View className="year-row" key={r.id} onClick={open}>
                 <Text className="strong">{r.year}</Text>
-                <Text className="span">{r.age} 岁 · {r.summary || '暂无简介'}</Text>
+                <Text className="span">
+{r.age}
+{' '}
+岁 ·
+{' '}
+{r.summary || '暂无简介'}
+                </Text>
               </View>
             )
           })}
@@ -622,15 +651,19 @@ export default function Profile() {
                 className="weight-card detail-trigger"
                 onClick={() => wLatest
                   ? openDetail('体重记录', `当前 ${wLatest.weight} kg，比上次${wDiff < 0 ? '减少' : '增加'} ${Math.abs(wDiff).toFixed(1)} kg`, `最近记录：${sortedWeights.map(w => `${w.measured_at} ${w.weight} kg`).join('；')}。`)
-                  : openDetail('体重记录', '暂无记录', '还没有体重记录，添加后这里会展示体重变化趋势。')
-                }
+                  : openDetail('体重记录', '暂无记录', '还没有体重记录，添加后这里会展示体重变化趋势。')}
               >
-                {wLatest ? (
+                {wLatest
+? (
                   <>
                     <View className="weight-head">
                       <View className="weight-head-main">
                         <Text className="span">当前体重</Text>
-                        <Text className="weight-value">{wLatest.weight} kg</Text>
+                        <Text className="weight-value">
+{wLatest.weight}
+{' '}
+kg
+                        </Text>
                       </View>
                       <View className="weight-change">{wPrev ? `较上次 ${wDiff < 0 ? '−' : '+'}${Math.abs(wDiff).toFixed(1)}` : '首次记录'}</View>
                     </View>
@@ -638,7 +671,8 @@ export default function Profile() {
                       <View className="chart-line" />
                     </View>
                   </>
-                ) : (
+                )
+: (
                   <View className="weight-head">
                     <View className="weight-head-main">
                       <Text className="span">当前体重</Text>
@@ -664,7 +698,13 @@ export default function Profile() {
                 key={ev.id}
                 onClick={() => openDetail(ev.type, ev.content, `${ev.occurred_at} · ${ev.recorder || '我'}。${ev.content}`)}
               >
-                <Text className="time">{ev.occurred_at} · {ev.recorder || '我'}</Text>
+                <Text className="time">
+{ev.occurred_at}
+{' '}
+·
+{' '}
+{ev.recorder || '我'}
+                </Text>
                 <Text className="h3">{ev.type}</Text>
                 <Text className="p">{ev.content}</Text>
               </View>
@@ -680,7 +720,10 @@ export default function Profile() {
     <View className="page back-cover">
       <View className="back-cover-content">
         <View className="back-mark">M</View>
-        <Text className="h2"><Text className="pet-name">{profile?.name || selectedPet?.name || '宠'}</Text>，下页见</Text>
+        <Text className="h2">
+<Text className="pet-name">{profile?.name || selectedPet?.name || '宠'}</Text>
+，下页见
+        </Text>
         <Text className="p">新的故事会继续发生，而家会一直把它们好好收着。</Text>
       </View>
       <Text className="back-family">宠物小册 · 由家人共同维护</Text>
@@ -747,7 +790,13 @@ export default function Profile() {
       <Button className="page-status" onClick={() => setTocOpen(true)}>
         <Text className="span">{currentPageInfo?.name || '封面'}</Text>
         <Text className="page-dot" />
-        <Text className="span">{currentPage + 1} / {pageCount}</Text>
+        <Text className="span">
+{currentPage + 1}
+{' '}
+/
+{' '}
+{pageCount}
+        </Text>
       </Button>
 
       {/* 目录弹层 */}
@@ -757,12 +806,20 @@ export default function Profile() {
           <View className="sheet-head">
             <View className="sheet-head-main">
               <Text className="h2">目录</Text>
-              <Text className="p">{profile?.name || selectedPet?.name || '宠物'} · 共 {pageCount} 页</Text>
+              <Text className="p">
+{profile?.name || selectedPet?.name || '宠物'}
+{' '}
+· 共
+{' '}
+{pageCount}
+{' '}
+页
+              </Text>
             </View>
             <Button className="close-button" onClick={() => setTocOpen(false)}>×</Button>
           </View>
           <View className="chapter-list">
-            {CHAPTERS.map(ch => {
+            {CHAPTERS.map((ch) => {
               const startPage = chapterStartPage(ch.key)
               const parts = pages.filter(p => p.chapter === ch.key).length
               const active = currentPageInfo?.chapter === ch.key
@@ -770,11 +827,23 @@ export default function Profile() {
                 <Button
                   className={`chapter-item${active ? ' active' : ''}`}
                   key={ch.key}
-                  onClick={() => { goToPage(startPage); setTocOpen(false) }}
+                  onClick={() => {
+                    goToPage(startPage)
+                    setTocOpen(false)
+                  }}
                 >
                   <Text className="chapter-number">{String(startPage + 1).padStart(2, '0')}</Text>
-                  <Text className="strong">{ch.name}{parts > 1 ? `（${parts} 页）` : ''}</Text>
-                  <Text className="chapter-page-num">{startPage + 1} / {pageCount}</Text>
+                  <Text className="strong">
+{ch.name}
+{parts > 1 ? `（${parts} 页）` : ''}
+                  </Text>
+                  <Text className="chapter-page-num">
+{startPage + 1}
+{' '}
+/
+{' '}
+{pageCount}
+                  </Text>
                 </Button>
               )
             })}
@@ -806,7 +875,12 @@ export default function Profile() {
           <View className="sheet-head">
             <View className="sheet-head-main">
               <Text className="h2">切换宠物</Text>
-              <Text className="p">共 {pets.length} 只 · 选择后将翻开新档案</Text>
+              <Text className="p">
+共
+{pets.length}
+{' '}
+只 · 选择后将翻开新档案
+              </Text>
             </View>
             <Button className="close-button" onClick={() => setSwitcherOpen(false)}>×</Button>
           </View>
