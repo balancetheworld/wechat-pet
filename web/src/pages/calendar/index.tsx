@@ -31,6 +31,10 @@ function monthOf(date: string) {
 }
 
 function dateForRecord(date: string) {
+  if (date === currentDate()) {
+    const value = new Date()
+    return `${date}T${pad(value.getHours())}:${pad(value.getMinutes())}:${pad(value.getSeconds())}+09:00`
+  }
   return `${date}T12:00:00+09:00`
 }
 
@@ -123,7 +127,7 @@ export default function Calendar() {
   const [category, setCategory] = useState<CalendarRecordCategory>('daily')
   const [medicalType, setMedicalType] = useState<MedicalType>('vaccine')
   const [customMedicalType, setCustomMedicalType] = useState('')
-  const [recordPetID, setRecordPetID] = useState('')
+  const [recordPetIDs, setRecordPetIDs] = useState<string[]>([])
   const [content, setContent] = useState('')
   const [mediaAssetIDs, setMediaAssetIDs] = useState<string[]>([])
   const [localImagePaths, setLocalImagePaths] = useState<string[]>([])
@@ -292,7 +296,7 @@ export default function Calendar() {
     setCategory('daily')
     setMedicalType('vaccine')
     setCustomMedicalType('')
-    setRecordPetID(pets.length === 1 ? pets[0].id : '')
+    setRecordPetIDs(pets.length === 1 ? [pets[0].id] : [])
     setContent('')
     setMediaAssetIDs([])
     setLocalImagePaths([])
@@ -326,29 +330,31 @@ export default function Calendar() {
   }
 
   async function handleCreateRecord() {
-    if (!recordPetID || (category === 'daily' && !content.trim() && mediaAssetIDs.length === 0) || uploading || submitting || (category === 'medical' && medicalType === 'other' && !customMedicalType.trim()) || reminders.some(reminder => reminder.repeatType === 'custom_days' && Number(reminder.repeatIntervalDays) <= 0)) {
+    if (!recordPetIDs.length || (category === 'daily' && !content.trim() && mediaAssetIDs.length === 0) || uploading || submitting || (category === 'medical' && medicalType === 'other' && !customMedicalType.trim()) || reminders.some(reminder => reminder.repeatType === 'custom_days' && Number(reminder.repeatIntervalDays) <= 0)) {
       return
     }
     setSubmitting(true)
     try {
-      await createCalendarRecord({
-        category,
-        medical_type: category === 'medical' ? medicalType : undefined,
-        custom_medical_type: category === 'medical' && medicalType === 'other' ? customMedicalType.trim() : undefined,
-        pet_id: recordPetID,
-        content: content.trim() || undefined,
-        media_asset_ids: mediaAssetIDs.length ? mediaAssetIDs : undefined,
-        occurred_at: dateForRecord(selectedDate),
-        reminders: category === 'medical' && reminderEnabled
-          ? reminders.map(reminder => ({
-              reminder_date: reminder.reminderDate,
-              repeat_type: reminder.repeatType,
-              repeat_interval_days: reminder.repeatType === 'custom_days' ? Number(reminder.repeatIntervalDays) : undefined,
-              advance_days: 3,
-              notification_channels: ['in_app', 'push'],
-            }))
-          : undefined,
-      })
+      for (const petID of recordPetIDs) {
+        await createCalendarRecord({
+          category,
+          medical_type: category === 'medical' ? medicalType : undefined,
+          custom_medical_type: category === 'medical' && medicalType === 'other' ? customMedicalType.trim() : undefined,
+          pet_id: petID,
+          content: content.trim() || undefined,
+          media_asset_ids: mediaAssetIDs.length ? mediaAssetIDs : undefined,
+          occurred_at: dateForRecord(selectedDate),
+          reminders: category === 'medical' && reminderEnabled
+            ? reminders.map(reminder => ({
+                reminder_date: reminder.reminderDate,
+                repeat_type: reminder.repeatType,
+                repeat_interval_days: reminder.repeatType === 'custom_days' ? Number(reminder.repeatIntervalDays) : undefined,
+                advance_days: 3,
+                notification_channels: ['in_app', 'push'],
+              }))
+            : undefined,
+        })
+      }
       setFormVisible(false)
       await refreshCurrentData()
       await Taro.showToast({ title: '记录已保存', icon: 'success' })
@@ -382,10 +388,10 @@ export default function Calendar() {
   }
 
   const selectedPet = pets.find(pet => pet.id === selectedPetID)
-  const dayRecords = calendarDay?.records.filter(record => !selectedPetID || record.pet.id === selectedPetID) || []
+  const dayRecords = (calendarDay?.records.filter(record => !selectedPetID || record.pet.id === selectedPetID) || []).sort((left, right) => new Date(right.occurred_at).getTime() - new Date(left.occurred_at).getTime())
   const dayReminders = calendarDay?.reminders.filter(reminder => !selectedPetID || reminder.pet.id === selectedPetID) || []
   const hasRecords = Boolean(dayRecords.length || dayReminders.length)
-  const canSubmit = Boolean(recordPetID && (category === 'medical' || content.trim() || mediaAssetIDs.length) && !uploading && !submitting && (category !== 'medical' || medicalType !== 'other' || customMedicalType.trim()) && !reminders.some(reminder => reminder.repeatType === 'custom_days' && Number(reminder.repeatIntervalDays) <= 0))
+  const canSubmit = Boolean(recordPetIDs.length && (category === 'medical' || content.trim() || mediaAssetIDs.length) && !uploading && !submitting && (category !== 'medical' || medicalType !== 'other' || customMedicalType.trim()) && !reminders.some(reminder => reminder.repeatType === 'custom_days' && Number(reminder.repeatIntervalDays) <= 0))
 
   return (
     <View className="cal-page">
@@ -461,7 +467,7 @@ export default function Calendar() {
                 <View className="cal-record-dot medical" />
                 <View className="cal-record-main">
                   <View className="cal-record-head">
-                    <Text className="cal-record-category">待办提醒</Text>
+                    <Text className="cal-record-category reminder">待办提醒</Text>
                     <Text className="cal-record-pet">{reminder.pet.name}</Text>
                   </View>
                   <Text className="cal-record-content">{reminder.content || medicalTypeLabel(reminder.medical_type, reminder.custom_medical_type)}</Text>
@@ -487,7 +493,7 @@ export default function Calendar() {
                       <Text className={`cal-record-category ${record.category}`}>{record.category === 'medical' ? '医疗' : '日常'}</Text>
                       {record.medical_type && <Text className="cal-medical-type">{medicalTypeLabel(record.medical_type, record.custom_medical_type)}</Text>}
                       <Text className="cal-record-pet">{record.pet.name}</Text>
-                      <Text className="cal-record-time">{timeOf(record.occurred_at)}</Text>
+                      {selectedDate === today && <Text className="cal-record-time">{timeOf(record.occurred_at)}</Text>}
                     </View>
                     {record.content && <Text className="cal-record-content">{record.content}</Text>}
                     {media.length > 0 && (
@@ -529,7 +535,10 @@ export default function Calendar() {
         </View>
         </View>
 
-        <View className="cal-add-button" onClick={openRecordForm}>＋ 添加记录</View>
+        <View className="cal-add-button" hoverClass="cal-add-button-hover" onClick={openRecordForm}>
+          <View className="cal-add-icon">＋</View>
+          <Text>添加记录</Text>
+        </View>
 
         {formVisible && (
           <View className="cal-overlay">
@@ -543,7 +552,7 @@ export default function Calendar() {
             </View>
             <Text className="cal-field-label">宠物</Text>
             <View className="cal-pet-chips">
-              {pets.map(pet => <View key={pet.id} className={`cal-pet-chip${recordPetID === pet.id ? ' selected' : ''}`} onClick={() => setRecordPetID(pet.id)}>{pet.name}</View>)}
+              {pets.map(pet => <View key={pet.id} className={`cal-pet-chip${recordPetIDs.includes(pet.id) ? ' selected' : ''}`} onClick={() => setRecordPetIDs(value => value.includes(pet.id) ? value.filter(id => id !== pet.id) : [...value, pet.id])}>{pet.name}</View>)}
             </View>
             {category === 'medical' && (
               <>
