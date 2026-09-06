@@ -1,17 +1,69 @@
-import { Button, Input, Text, View } from '@tarojs/components'
+import { Button, Image, Input, Picker, Text, View } from '@tarojs/components'
 import Taro, { useRouter } from '@tarojs/taro'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import PageBackground from '../../../components/page-background'
 import { createPet, getPet, updatePet } from '../../../services/pet'
 import { navigateBack } from '../../../utils/navigation'
+import './index.scss'
+
+/* ============ 选项常量(沿用 Pet-Manual 模式) ============ */
+const SPECIES_OPTIONS = [
+  { id: 'cat', label: '猫' },
+  { id: 'dog', label: '狗' },
+  { id: 'bird', label: '鸟' },
+  { id: 'rabbit', label: '兔' },
+  { id: 'fish', label: '鱼' },
+  { id: 'other', label: '其他' },
+]
+
+const GENDER_OPTIONS = [
+  { id: 'male', label: '男孩' },
+  { id: 'female', label: '女孩' },
+  { id: 'unknown', label: '未知' },
+]
+
+const NEUTERED_OPTIONS = [
+  { id: 'yes', label: '已绝育' },
+  { id: 'no', label: '未绝育' },
+  { id: 'unknown', label: '未知' },
+]
+
+const HEALTH_OPTIONS = [
+  { id: 'healthy', label: '健康' },
+  { id: 'subhealthy', label: '亚健康' },
+  { id: 'sick', label: '生病中' },
+]
+
+function todayString() {
+  const d = new Date()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
 
 export default function PetEdit() {
   const { params } = useRouter<{ petId?: string }>()
   const petID = params.petId
-  const [name, setName] = useState('')
-  const [loading, setLoading] = useState(Boolean(petID))
+  const isEdit = Boolean(petID)
+
+  /* --- 表单字段 --- */
+  const [formName, setFormName] = useState('')
+  const [formAvatar, setFormAvatar] = useState('')
+  const [formSpecies, setFormSpecies] = useState('cat')
+  const [formSpeciesOther, setFormSpeciesOther] = useState('')
+  const [formGender, setFormGender] = useState('unknown')
+  const [formNeutered, setFormNeutered] = useState('unknown')
+  const [formBirth, setFormBirth] = useState('2024-01-01')
+  const [formArrival, setFormArrival] = useState(() => todayString())
+  const [formHealth, setFormHealth] = useState('healthy')
+  const [formBreed, setFormBreed] = useState('')
+  const [formTags, setFormTags] = useState('')
+  const [formQuote, setFormQuote] = useState('')
+
+  const [loading, setLoading] = useState(isEdit)
   const [submitting, setSubmitting] = useState(false)
 
+  /* --- 编辑模式: 拉取 --- */
   useEffect(() => {
     if (!petID) {
       return
@@ -20,7 +72,7 @@ export default function PetEdit() {
     async function load() {
       try {
         const pet = await getPet(id)
-        setName(pet.name)
+        setFormName(pet.name)
       }
       catch (error) {
         const message = error instanceof Error ? error.message : '加载宠物失败'
@@ -33,10 +85,30 @@ export default function PetEdit() {
     void load()
   }, [petID])
 
+  /* --- 选择头像 --- */
+  async function chooseAvatar() {
+    try {
+      // @ts-expect-error - Taro.chooseImage 在类型里需要扩展
+      const res = await Taro.chooseImage({
+        count: 1,
+        sizeType: ['compressed'],
+        sourceType: ['album', 'camera'],
+      })
+      const path = res.tempFilePaths?.[0]
+      if (path) {
+        setFormAvatar(path)
+      }
+    }
+    catch {
+      // 用户取消或权限拒绝, 静默
+    }
+  }
+
+  /* --- 提交 --- */
   async function handleSubmit() {
-    const value = name.trim()
-    if (value.length < 1 || value.length > 50) {
-      await Taro.showToast({ title: '宠物名称长度需为 1-50 个字符', icon: 'none' })
+    const value = formName.trim()
+    if (value.length < 1 || value.length > 12) {
+      await Taro.showToast({ title: '名字长度需为 1-12 个字符', icon: 'none' })
       return
     }
     if (submitting || loading) {
@@ -44,12 +116,34 @@ export default function PetEdit() {
     }
     setSubmitting(true)
     try {
+      // 后端目前只接收 name, 其他字段先本地缓存
+      const extraData = {
+        avatar: formAvatar,
+        species: formSpecies,
+        speciesOther: formSpeciesOther,
+        gender: formGender,
+        neutered: formNeutered,
+        birth: formBirth,
+        arrival: formArrival,
+        health: formHealth,
+        breed: formBreed,
+        tags: formTags,
+        quote: formQuote,
+      }
+      try {
+        await Taro.setStorage({ key: `pet-extra-${value}`, data: extraData })
+      }
+      catch {
+        /* 缓存失败不影响主流程 */
+      }
+
       if (petID) {
         await updatePet(petID, { name: value })
       }
       else {
         await createPet({ name: value })
       }
+      await Taro.showToast({ title: isEdit ? '已保存' : '已添加到家庭', icon: 'success' })
       await navigateBack()
     }
     catch (error) {
@@ -61,17 +155,190 @@ export default function PetEdit() {
     }
   }
 
+  /* --- 出生日期不能晚于今天 --- */
+  const maxDate = useMemo(() => todayString(), [])
+
   return (
-    <View className="themed-page">
+    <View className="themed-page pet-edit-page">
       <PageBackground />
-      <Text>{petID ? '编辑宠物' : '创建宠物'}</Text>
-      <Input
-        maxlength={50}
-        placeholder="请输入宠物名称"
-        value={name}
-        onInput={event => setName(event.detail.value)}
-      />
-      <Button loading={submitting || loading} disabled={submitting || loading} onClick={handleSubmit}>保存</Button>
+
+      {/* 标题区 */}
+      <View className="pet-edit-header">
+        <Text className="h2">{isEdit ? '编辑宠物' : '添加宠物'}</Text>
+        <Text className="p">{isEdit ? '更新档案信息' : '填写档案信息后加入家庭'}</Text>
+      </View>
+
+      <View className="add-pet-form">
+        {/* 头像 */}
+        <View className="form-field">
+          <Text className="label">头像</Text>
+          <View className="avatar-picker">
+            <View className={`avatar-preview${formAvatar ? ' has-photo' : ''}`}>
+              {formAvatar && <Image className="avatar-photo" src={formAvatar} mode="aspectFill" />}
+            </View>
+            <Button className="avatar-pick-button" onClick={chooseAvatar}>从相册选择</Button>
+          </View>
+        </View>
+
+        {/* 名字 */}
+        <View className="form-field">
+          <Text className="label">名字 *</Text>
+          <Input
+            className="capsule-input"
+            maxlength={12}
+            placeholder="给宠物起个名字"
+            value={formName}
+            onInput={event => setFormName(event.detail.value)}
+          />
+        </View>
+
+        {/* 物种 */}
+        <View className="form-field">
+          <Text className="label">物种</Text>
+          <View className="chip-group">
+            {SPECIES_OPTIONS.map(s => (
+              <Button
+                key={s.id}
+                className={`chip${formSpecies === s.id ? ' selected' : ''}`}
+                onClick={() => setFormSpecies(s.id)}
+              >
+                <Text className="span">{s.label}</Text>
+              </Button>
+            ))}
+          </View>
+          {formSpecies === 'other' && (
+            <Input
+              className="capsule-input species-other-input"
+              maxlength={8}
+              placeholder="填写物种，如：刺猬"
+              value={formSpeciesOther}
+              onInput={event => setFormSpeciesOther(event.detail.value)}
+            />
+          )}
+        </View>
+
+        {/* 品种 */}
+        <View className="form-field">
+          <Text className="label">品种（可选）</Text>
+          <Input
+            className="capsule-input"
+            maxlength={20}
+            placeholder="如：英国短毛猫"
+            value={formBreed}
+            onInput={event => setFormBreed(event.detail.value)}
+          />
+        </View>
+
+        {/* 性别 */}
+        <View className="form-field">
+          <Text className="label">性别</Text>
+          <View className="chip-group chip-group-tight">
+            {GENDER_OPTIONS.map(g => (
+              <Button
+                key={g.id}
+                className={`chip chip-sm${formGender === g.id ? ' selected' : ''}`}
+                onClick={() => setFormGender(g.id)}
+              >
+                <Text className="span">{g.label}</Text>
+              </Button>
+            ))}
+          </View>
+        </View>
+
+        {/* 绝育 */}
+        <View className="form-field">
+          <Text className="label">绝育</Text>
+          <View className="chip-group chip-group-tight">
+            {NEUTERED_OPTIONS.map(n => (
+              <Button
+                key={n.id}
+                className={`chip chip-sm${formNeutered === n.id ? ' selected' : ''}`}
+                onClick={() => setFormNeutered(n.id)}
+              >
+                <Text className="span">{n.label}</Text>
+              </Button>
+            ))}
+          </View>
+        </View>
+
+        {/* 出生 / 到家 */}
+        <View className="form-row">
+          <View className="form-field">
+            <Text className="label">出生日期</Text>
+            <Picker
+              mode="date"
+              value={formBirth}
+              max={maxDate}
+              onChange={event => setFormBirth(event.detail.value)}
+            >
+              <View className="capsule-input date-view">{formBirth || '选择日期'}</View>
+            </Picker>
+          </View>
+          <View className="form-field">
+            <Text className="label">到家日期</Text>
+            <Picker
+              mode="date"
+              value={formArrival}
+              max={maxDate}
+              onChange={event => setFormArrival(event.detail.value)}
+            >
+              <View className="capsule-input date-view">{formArrival || '选择日期'}</View>
+            </Picker>
+          </View>
+        </View>
+
+        {/* 健康 */}
+        <View className="form-field">
+          <Text className="label">健康状态</Text>
+          <View className="chip-group">
+            {HEALTH_OPTIONS.map(h => (
+              <Button
+                key={h.id}
+                className={`chip${formHealth === h.id ? ' selected' : ''}`}
+                onClick={() => setFormHealth(h.id)}
+              >
+                <Text className="span">{h.label}</Text>
+              </Button>
+            ))}
+          </View>
+        </View>
+
+        {/* 性格标签 */}
+        <View className="form-field">
+          <Text className="label">性格标签</Text>
+          <Input
+            className="capsule-input"
+            maxlength={40}
+            placeholder="多个用空格或逗号分隔，如：粘人 贪吃"
+            value={formTags}
+            onInput={event => setFormTags(event.detail.value)}
+          />
+        </View>
+
+        {/* 个性寄语 */}
+        <View className="form-field">
+          <Text className="label">个性寄语（可选）</Text>
+          <Input
+            className="capsule-input"
+            maxlength={30}
+            placeholder="一句话介绍它"
+            value={formQuote}
+            onInput={event => setFormQuote(event.detail.value)}
+          />
+        </View>
+
+        {/* 操作 */}
+        <View className="add-pet-form-actions">
+          <Button className="secondary-button" onClick={navigateBack}>取消</Button>
+          <Button
+            className="primary-button"
+            disabled={!formName.trim() || submitting || loading}
+            onClick={handleSubmit}
+          >
+            {isEdit ? '保存修改' : '添加到家庭'}
+          </Button>
+        </View>
+      </View>
     </View>
   )
 }

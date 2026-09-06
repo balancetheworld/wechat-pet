@@ -158,26 +158,30 @@ export default function ProfileOnboarding() {
                 value={nickname}
                 onInput={event => setNickname(event.detail.value)}
               />
-              <Button
-                className="profile-onboarding__submit"
-                disabled={!loginCompleted || uploading || submitting}
-                loading={submitting}
-                onClick={handleSubmit}
-              >
-                保存资料
-              </Button>
-              {loginFailed && (
-                <Button className="profile-onboarding__login" onClick={handleLogin}>
+              <View className="profile-onboarding__actions">
+                <Button
+                  className={`profile-onboarding__login${loginFailed ? '' : ' profile-onboarding__login--idle'}`}
+                  disabled={loading}
+                  onClick={handleLogin}
+                >
                   重新登录
                 </Button>
-              )}
+                <Button
+                  className="profile-onboarding__submit"
+                  disabled={!loginCompleted || uploading || submitting}
+                  loading={submitting}
+                  onClick={handleSubmit}
+                >
+                  保存资料
+                </Button>
+              </View>
             </>
           )
         : (
             <>
               <Text className="profile-onboarding__title">欢迎来到宠物小程序</Text>
               <Button
-                className="profile-onboarding__login"
+                className="profile-onboarding__login profile-onboarding__login--welcome"
                 onClick={handleLogin}
               >
                 登录

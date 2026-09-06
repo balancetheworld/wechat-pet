@@ -1,5 +1,7 @@
 /* ============================================
-   宠物问问 - 偏黄配色红绘主题
+   宠物问问 - 顶部删除,只留猫精灵 + 预设问题 + 提问框
+   整页毛玻璃: 背景图整体 blur,半透明白玻璃底
+   布局: 猫精灵垂直居中, 预设问题 + 提问框贴底避开 navtab
    ============================================ */
 
 .ask-page {
@@ -8,19 +10,24 @@
   display: flex;
   flex-direction: column;
   height: 100vh;
-  background: linear-gradient(180deg, #F5D68A 0%, #FAF6EF 40%, #F5EFE6 100%);
+  min-height: 100vh;
+  box-sizing: border-box;
+  /* 底部留 220rpx 避开 navtab(提问框与导航栏不重合) */
+  padding: 0 24rpx 220rpx;
+  /* 整体背景: 半透明白玻璃 */
+  background: rgba(255, 254, 251, 0.2);
 }
 
 .ask-background {
   position: absolute;
   z-index: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  inset: 0;
   width: 100%;
   height: 100%;
   pointer-events: none;
+  /* 真实毛玻璃: 把背景图本身模糊 */
+  filter: blur(36rpx);
+  transform: scale(1.08);
 }
 
 .ask-page > view {
@@ -28,349 +35,36 @@
   z-index: 1;
 }
 
-.ask-page {
-  min-height: 100vh;
-  height: auto;
-  box-sizing: border-box;
-  padding: 32rpx 24rpx 160rpx;
-}
-
-.ask-stage {
+/* --- ai 精灵(猫)— 偏右下: 整体下移并向右偏移 --- */
+.ask-cat-wrap {
+  flex: 1 1 auto;
   position: relative;
-  min-height: 640rpx;
-}
-
-.ask-welcome {
-  position: relative;
-  z-index: 1;
-  padding: 38rpx 36rpx;
-  background: rgba(255, 254, 251, 0.7);
-  border: 1rpx solid rgba(255, 255, 255, 0.88);
-  border-radius: 12rpx;
-  box-shadow: var(--glass-shadow);
-}
-
-.ask-welcome__eyebrow,
-.ask-welcome__title,
-.ask-welcome__subtitle {
-  display: block;
-}
-
-.ask-welcome__eyebrow {
-  color: #7FA5D6;
-  font-size: 20rpx;
-  font-weight: 600;
-  letter-spacing: 3rpx;
-}
-
-.ask-welcome__title {
-  margin-top: 22rpx;
-  color: #2A2520;
-  font-size: 46rpx;
-  font-weight: 600;
-  line-height: 1.25;
-}
-
-.ask-welcome__subtitle {
-  margin-top: 16rpx;
-  color: #8B7E70;
-  font-size: 26rpx;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  min-height: 360rpx;
+  /* 整体下移: 给顶距让猫精灵位于中下区域 */
+  padding-top: 140rpx;
+  /* 向右偏移: 整列靠右一些 */
+  padding-right: 0;
 }
 
 .ask-cat {
-  position: absolute;
-  right: 10rpx;
-  bottom: 0;
-  width: 450rpx;
-  height: 450rpx;
+  display: block;
+  width: 420rpx;
+  height: 420rpx;
+  /* 猫精灵本身向右下偏移 */
+  margin-top: 100rpx;
+  margin-left: 140rpx;
 }
 
-.ask-content {
-  background: linear-gradient(180deg, rgba(191,224,241,0.45) 0%, rgba(248,251,254,0.85) 35%, rgba(245,239,230,0.8) 100%);
-}
-
-.ask-input-bar {
-  border-color: rgba(163,194,232,0.3);
-  background: rgba(255,255,255,0.6);
-  box-shadow: var(--glass-shadow);
-}
-
-.ask-send-btn {
-  background: rgba(127,165,214,0.85);
-  color: #FFFEFB;
-}
-
-/* --- 顶部导航 --- */
-.ask-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24rpx;
-  height: 88rpx;
-  flex-shrink: 0;
-
-  .ask-header-spacer { width: 120rpx; }
-
-  .ask-title {
-    font-family: 'Ma Shan Zheng', cursive;
-    font-size: 34rpx;
-    color: #2A2520;
-  }
-
-  .ask-capsule {
-    display: flex;
-    align-items: center;
-    gap: 8rpx;
-    padding: 6rpx 16rpx;
-    border: 2rpx solid #2A2520;
-    border-radius: 30rpx;
-    background: #FFFEFB;
-
-    .capsule-more { font-size: 20rpx; letter-spacing: 2rpx; color: #2A2520; }
-    .capsule-divider { width: 2rpx; height: 16rpx; background: #2A2520; opacity: 0.3; }
-    .capsule-mark { width: 16rpx; height: 16rpx; border: 2rpx solid #2A2520; border-radius: 50%; }
-  }
-}
-
-/* --- 内容区 --- */
-.ask-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  position: relative;
-  overflow: hidden;
-}
-
-/* --- 猫头（CSS 绘制，fixed 居中） --- */
-.cat-container {
-  position: fixed;
-  left: 50%;
-  top: 50%;
-  width: 360rpx;
-  height: 360rpx;
-  transform: translate(-50%, -50%);
-  animation: cat-float 3s ease-in-out infinite;
-  z-index: 5;
-
-  &.thinking, &.no-float {
-    animation: none;
-  }
-}
-
-@keyframes cat-float {
-  0%, 100% { transform: translate(-50%, -50%) translateY(0); }
-  50% { transform: translate(-50%, -50%) translateY(-16rpx); }
-}
-
-.cat-svg {
-  width: 100%;
-  height: 100%;
-  position: relative;
-}
-
-/* 猫耳朵 */
-.cat-ear-l, .cat-ear-r {
-  position: absolute;
-  top: 20rpx;
-  width: 100rpx;
-  height: 120rpx;
-  background: linear-gradient(180deg, #FFE5C0, #F5C788);
-  border: 8rpx solid #1A1A1A;
-  border-radius: 50% 50% 30% 30%;
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: 40rpx;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 40rpx;
-    height: 50rpx;
-    background: #FFB3C1;
-    border: 4rpx solid #1A1A1A;
-    border-radius: 50% 50% 30% 30%;
-    opacity: 0.85;
-  }
-}
-
-.cat-ear-l {
-  left: 40rpx;
-  transform: rotate(-20deg);
-  animation: ear-twitch-l 5s ease-in-out infinite;
-}
-
-.cat-ear-r {
-  right: 40rpx;
-  transform: rotate(20deg);
-  animation: ear-twitch-r 5s ease-in-out infinite;
-}
-
-@keyframes ear-twitch-l {
-  0%, 90%, 100% { transform: rotate(-20deg); }
-  93% { transform: rotate(-28deg); }
-  96% { transform: rotate(-16deg); }
-}
-
-@keyframes ear-twitch-r {
-  0%, 85%, 100% { transform: rotate(20deg); }
-  88% { transform: rotate(28deg); }
-  91% { transform: rotate(16deg); }
-}
-
-/* 猫脸 */
-.cat-face {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 240rpx;
-  height: 220rpx;
-  background: linear-gradient(180deg, #FFF3DE, #FFE5C0);
-  border: 8rpx solid #1A1A1A;
-  border-radius: 50%;
-}
-
-/* 猫眼 */
-.cat-eye-l, .cat-eye-r {
-  position: absolute;
-  top: 70rpx;
-  width: 40rpx;
-  height: 48rpx;
-  background: #2A2A3A;
-  border-radius: 50%;
-  animation: cat-blink 4s infinite;
-
-  &::after {
-    content: '';
-    position: absolute;
-    top: 8rpx;
-    right: 8rpx;
-    width: 14rpx;
-    height: 14rpx;
-    background: #fff;
-    border-radius: 50%;
-  }
-}
-
-.cat-eye-l { left: 50rpx; }
-.cat-eye-r { right: 50rpx; }
-
-@keyframes cat-blink {
-  0%, 92%, 100% { transform: scaleY(1); }
-  94%, 98% { transform: scaleY(0.1); }
-}
-
-.cat-container.thinking {
-  .cat-eye-l, .cat-eye-r {
-    animation: cat-squint 1.5s ease-in-out infinite;
-  }
-}
-
-@keyframes cat-squint {
-  0%, 100% { transform: scaleY(0.5); }
-  50% { transform: scaleY(0.3); }
-}
-
-/* 猫鼻子 */
-.cat-nose {
-  position: absolute;
-  top: 120rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 28rpx;
-  height: 20rpx;
-  background: #FF8FA3;
-  border: 3rpx solid #1A1A1A;
-  border-radius: 50% 50% 40% 40%;
-}
-
-/* 猫嘴 */
-.cat-mouth {
-  position: absolute;
-  top: 150rpx;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 60rpx;
-  height: 30rpx;
-  border: 4rpx solid #1A1A1A;
-  border-top: none;
-  border-radius: 0 0 30rpx 30rpx;
-}
-
-/* 脸颊 */
-.cat-cheek-l, .cat-cheek-r {
-  position: absolute;
-  top: 110rpx;
-  width: 40rpx;
-  height: 24rpx;
-  background: #FFA7B8;
-  border-radius: 50%;
-  opacity: 0.55;
-}
-
-.cat-cheek-l { left: 10rpx; }
-.cat-cheek-r { right: 10rpx; }
-
-.cat-container.thinking {
-  .cat-cheek-l, .cat-cheek-r { opacity: 1; }
-}
-
-/* --- 回答框（fixed 于猫头上方） --- */
-.answer-wrap {
-  position: fixed;
-  left: 50%;
-  bottom: calc(50% + 204rpx);
-  transform: translateX(-50%);
-  width: calc(100% - 56rpx);
-  z-index: 10;
-  display: none;
-
-  &.show { display: block; }
-}
-
-.answer-box {
-  background: #FFFEFB;
-  border: 6rpx solid #2A2520;
-  border-radius: 28rpx;
-  padding: 24rpx 28rpx;
-  box-shadow: 6rpx 8rpx 0 #2A2520;
-  max-height: 600rpx;
-  overflow-y: auto;
-
-  .ab-text {
-    font-size: 28rpx;
-    color: #2A2520;
-    line-height: 1.6;
-  }
-
-  .ab-loading {
-    display: flex;
-    gap: 8rpx;
-    justify-content: center;
-    padding: 20rpx 0;
-
-    text {
-      font-size: 48rpx;
-      color: #E8C468;
-      animation: dot-bounce 1.4s infinite;
-
-      &:nth-child(2) { animation-delay: 0.2s; }
-      &:nth-child(3) { animation-delay: 0.4s; }
-    }
-  }
-}
-
-@keyframes dot-bounce {
-  0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-12rpx); }
-}
-
-/* --- 预设问题 --- */
+/* --- 预设问题(贴在猫精灵下方,不贴输入框) --- */
 .preset-row {
   flex-shrink: 0;
   display: flex !important;
   gap: 16rpx;
-  padding: 0 0 20rpx;
+  padding: 16rpx 0 8rpx;
   white-space: nowrap;
 }
 
@@ -393,154 +87,22 @@
   }
 }
 
-/* --- 输入栏 --- */
+/* --- 输入栏(自然流贴底,避开 navtab) — 单一定义避免合并 --- */
 .ask-input-bar {
-  margin: 0;
-  background: rgba(255, 254, 251, 0.84);
-  border-radius: 12rpx;
+  position: relative;
+  flex-shrink: 0;
+  margin: 24rpx 0 0;
+  padding: 14rpx 18rpx;
   border: 1rpx solid rgba(163, 194, 232, 0.44);
+  border-radius: 12rpx;
+  background: rgba(255, 254, 251, 0.84);
   box-shadow: var(--glass-shadow);
-  position: relative;
 }
 
-.ask-top-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16rpx 24rpx 0;
-}
-
-.ask-pet-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 8rpx;
-  background: #F5D68A;
-  border: 3rpx solid #2A2520;
-  border-radius: 20rpx;
-  padding: 10rpx 24rpx;
-  font-size: 24rpx;
-  font-weight: 700;
-  color: #2A2520;
-
-  &.open { background: #E8C468; }
-}
-
-.ask-history-btn {
-  width: 60rpx;
-  height: 60rpx;
-  border-radius: 50%;
-  border: 3rpx solid #2A2520;
-  background: #FFF8E8;
-  font-size: 30rpx;
-  color: #2A2520;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* 图片预览 */
-.ask-img-preview {
-  display: flex;
-  gap: 12rpx;
-  padding: 12rpx 24rpx 8rpx;
-}
-
-.ask-img-item {
-  width: 96rpx;
-  height: 96rpx;
-  border-radius: 16rpx;
-  background: #FFF8E8;
-  border: 3rpx solid #2A2520;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 40rpx;
-  position: relative;
-
-  .remove-x {
-    position: absolute;
-    top: -8rpx;
-    right: -8rpx;
-    width: 32rpx;
-    height: 32rpx;
-    border-radius: 50%;
-    background: #C8423A;
-    color: #FFFEFB;
-    font-size: 20rpx;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border: 2rpx solid #2A2520;
-  }
-}
-
-/* 宠物下拉 */
-.ask-pet-dropdown {
-  background: #FFFEFB;
-  border: 4rpx solid #2A2520;
-  border-radius: 20rpx;
-  box-shadow: 4rpx 6rpx 0 #2A2520;
-  padding: 8rpx;
-  margin: 8rpx 24rpx;
-}
-
-.ask-pd-item {
-  display: flex;
-  flex-direction: column;
-  padding: 16rpx 20rpx;
-  border-radius: 16rpx;
-
-  .pd-name {
-    font-size: 28rpx;
-    color: #2A2520;
-    font-weight: 600;
-  }
-  .pd-info {
-    font-size: 22rpx;
-    color: #8A8278;
-    margin-top: 4rpx;
-  }
-
-  &.selected {
-    background: #F5D68A;
-  }
-}
-
-/* 历史列表 */
-.ask-history-list {
-  padding: 16rpx 24rpx;
-
-  .ask-history-empty {
-    text-align: center;
-    font-size: 26rpx;
-    color: #8A8278;
-    padding: 40rpx 0;
-  }
-}
-
-.ask-hc-item {
-  padding: 16rpx 0;
-  border-bottom: 2rpx solid #EDE5D8;
-
-  .hc-q {
-    display: block;
-    font-size: 26rpx;
-    color: #2A2520;
-  }
-  .hc-meta {
-    display: block;
-    font-size: 22rpx;
-    color: #8A8278;
-    margin-top: 4rpx;
-  }
-}
-
-/* 底部行 */
 .ask-bottom-row {
   display: flex;
   align-items: flex-end;
   gap: 16rpx;
-  padding: 14rpx 18rpx;
 }
 
 .ask-add-img {
@@ -595,3 +157,6 @@
     box-shadow: 4rpx 6rpx 0 #2A2520;
   }
 }
+
+/* --- 顶部导航(已弃用,避免误显示) --- */
+.ask-header { display: none; }

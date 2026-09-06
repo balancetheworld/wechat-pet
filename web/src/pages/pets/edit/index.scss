@@ -1,0 +1,276 @@
+/* ============================================
+   添加宠物表单 (沿用 Pet-Manual 视觉)
+   ============================================ */
+
+.pet-edit-page {
+  min-height: 100vh;
+  height: auto;
+  box-sizing: border-box;
+  padding: 32rpx 24rpx 160rpx;
+}
+
+/* ============ 顶部标题区 ============ */
+.pet-edit-header {
+  position: relative;
+  z-index: 1;
+  margin: 24rpx 0 32rpx;
+  padding: 0 12rpx;
+}
+
+.pet-edit-header .h2 {
+  display: block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 56rpx;
+  font-weight: 700;
+  color: #5B84BE;
+  line-height: 1.1;
+  margin: 0 0 8rpx;
+}
+
+.pet-edit-header .p {
+  display: block;
+  margin: 0;
+  font-size: 26rpx;
+  color: #8A8278;
+  line-height: 1.5;
+}
+
+/* ============ 滚动容器: 88vh + 自动滚动 ============ */
+.pet-edit-page .add-pet-form {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 254, 251, 0.72);
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 20rpx;
+  padding: 24rpx 28rpx 32rpx;
+  box-shadow: 0 10rpx 32rpx rgba(74, 100, 137, 0.10);
+  /* max-height 留 88vh - 头部, 让表单内滚 */
+  max-height: calc(100vh - 280rpx);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 隐藏滚动条 */
+.pet-edit-page .add-pet-form::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* ============ 表单字段 ============ */
+.add-pet-form .form-field {
+  margin-bottom: 28rpx;
+}
+
+.add-pet-form .label {
+  display: block;
+  margin-bottom: 12rpx;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 30rpx;
+  font-weight: 700;
+  color: #4A6489;
+}
+
+.form-row {
+  display: flex;
+  gap: 20rpx;
+}
+
+.form-row .form-field {
+  flex: 1;
+  margin-bottom: 28rpx;
+}
+
+/* ============ 胶囊输入框 (沿用 Pet-Manual) ============ */
+.capsule-input {
+  width: 100%;
+  height: 80rpx;
+  padding: 0 28rpx;
+  border: 1rpx solid #E9EDF2;
+  background: #FFFFFF;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+  color: #2A2520;
+  outline: none;
+  transition: all 0.18s ease;
+  text-align: left;
+  line-height: normal;
+  box-sizing: border-box;
+}
+
+.capsule-input::placeholder {
+  color: #B8C4D0;
+}
+
+.capsule-input:focus {
+  border-color: rgba(127, 165, 214, 0.6);
+  box-shadow: 0 0 0 6rpx rgba(127, 165, 214, 0.12);
+}
+
+/* 日期 Picker 包装: 模拟 capsule-input */
+.capsule-input.date-view {
+  display: flex;
+  align-items: center;
+  color: #2A2520;
+}
+
+/* species 选 other 时出现的额外输入 */
+.species-other-input {
+  margin-top: 16rpx;
+}
+
+/* ============ 头像选择 ============ */
+.avatar-picker {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.avatar-preview {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 1rpx dashed #C9DDEF;
+  background: #F5F9FE center / cover no-repeat;
+}
+
+.avatar-preview.has-photo {
+  border-style: solid;
+  border-color: #7FA5D6;
+  box-shadow: 0 0 0 4rpx rgba(127, 165, 214, 0.25);
+}
+
+.avatar-photo {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  display: block;
+}
+
+.avatar-pick-button {
+  height: 64rpx;
+  padding: 0 28rpx;
+  border: 1rpx solid #C9DDEF;
+  border-radius: 20rpx;
+  background: #F5F9FE;
+  color: #4A6489;
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 60rpx;
+}
+
+.avatar-pick-button:active {
+  background: #E8F1FB;
+}
+
+/* ============ 芯片 (物种/性别/绝育/健康) ============ */
+.chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+
+.chip-group-tight {
+  flex-wrap: nowrap;
+}
+
+.chip {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 12rpx;
+  padding: 16rpx 28rpx;
+  border: 1rpx solid #C9DDEF;
+  background: #F5F9FE;
+  color: #4A6489;
+  border-radius: 999rpx;
+  font-size: 26rpx;
+  line-height: 1.2;
+  font-weight: 600;
+  box-sizing: border-box;
+  line-height: normal;
+  height: auto;
+}
+
+.chip .span {
+  display: inline-block;
+  font-size: 26rpx;
+  color: inherit;
+  font-weight: inherit;
+}
+
+.chip:active {
+  background: #E8F1FB;
+}
+
+.chip.selected {
+  background: rgba(127, 165, 214, 0.85);
+  border-color: transparent;
+  color: #FFFFFF;
+}
+
+.chip.selected .span {
+  color: #FFFFFF;
+}
+
+.chip-sm {
+  flex: 1;
+  padding: 12rpx 16rpx;
+  font-size: 24rpx;
+}
+
+/* ============ 操作按钮行 ============ */
+.add-pet-form-actions {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 16rpx;
+}
+
+.add-pet-form-actions .secondary-button,
+.add-pet-form-actions .primary-button {
+  flex: 1;
+  height: 88rpx;
+  margin-top: 0;
+  border-radius: 999rpx;
+  font-size: 30rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+  line-height: 86rpx;
+}
+
+.secondary-button {
+  width: 100%;
+  height: 88rpx;
+  border: 1rpx solid #E0EDF3;
+  border-radius: 999rpx;
+  background: transparent;
+  color: #4A6489;
+  font-size: 30rpx;
+  font-weight: 600;
+  line-height: 86rpx;
+}
+
+.secondary-button:active {
+  background: #F5F9FE;
+}
+
+.primary-button {
+  width: 100%;
+  height: 88rpx;
+  border: 0;
+  border-radius: 999rpx;
+  color: #FFFFFF;
+  background: #5B84BE;
+  font-weight: 700;
+  line-height: 86rpx;
+}
+
+.primary-button:disabled {
+  color: #B8C4D0;
+  background: #E9EDF2;
+}
+
+.primary-button:active:not(:disabled) {
+  background: #4A6F9F;
+}

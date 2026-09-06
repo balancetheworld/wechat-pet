@@ -104,3 +104,46 @@
   color: #FFFEFB;
   background: rgba(127,165,214,0.86);
 }
+
+/* ============ 第一页登录按钮：与第二页按钮保持同样尺寸（宽 50%、高 128rpx、圆角 64rpx、居中） ============ */
+.profile-onboarding__login--welcome {
+  position: relative;
+  z-index: 1;
+  width: 50%;
+  min-height: 128px;
+  border-radius: 64px;
+  align-self: center;
+  margin-bottom: 32px;
+}
+
+/* ============ 第二页双按钮行 ============ */
+.profile-onboarding__actions {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: stretch;
+  gap: 16px;
+  width: 100%;
+}
+
+.profile-onboarding__actions .profile-onboarding__submit,
+.profile-onboarding__actions .profile-onboarding__login {
+  flex: 1 1 0;
+  /* 与第二页输入框上下宽度相同 */
+  min-height: 100px;
+  width: auto;
+  margin-bottom: 0;
+  /* 圆角加大到更圆 */
+  border-radius: 100px;
+  /* 字号加大,不另加粗 */
+  font-size: 36px;
+  font-weight: normal;
+  letter-spacing: 2rpx;
+}
+
+/* 默认状态：未触发重新登录时，「重新登录」用更浅的颜色做弱化显示 */
+.profile-onboarding__login--idle {
+  background: rgba(127,165,214,0.45);
+}
