@@ -7,7 +7,7 @@ import PageBackground from '../../components/page-background'
 import { routes } from '../../constants/routes'
 import { completeCalendarReminder, createCalendarRecord, getCalendarDay, getCalendarMonth, uploadCalendarImage } from '../../services/calendar'
 import { getPets } from '../../services/pet'
-import { assetURL } from '../../services/request'
+import { assetURL, authorizedAssetURL } from '../../services/request'
 import { useAppStore } from '../../stores/app-store'
 import { navigateTo } from '../../utils/navigation'
 import './index.scss'
@@ -98,7 +98,7 @@ function repeatTypeLabel(type: ReminderRepeatType) {
 }
 
 function mediaURL(media: CalendarMedia) {
-  return media.url && /^https?:\/\//.test(media.url) ? media.url : assetURL(media.asset_id)
+  return media.url && /^https?:\/\//.test(media.url) ? authorizedAssetURL(media.url) : assetURL(media.asset_id)
 }
 
 function recordMedia(record: CalendarDay['records'][number]) {

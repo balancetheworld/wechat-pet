@@ -42,10 +42,37 @@ func (s *Service) Profile(ctx context.Context, familyID, petID string) (PetProfi
 	return v, nil
 }
 
-func (s *Service) Resource(ctx context.Context, familyID, petID, resource, method string, payload map[string]any) (any, error) {
+func (s *Service) Resource(ctx context.Context, familyID, userID, petID, resource, method string, payload map[string]any) (any, error) {
 	r, ok := s.repository.(ProfileRepository)
 	if !ok {
 		return nil, appErrors.Internal(errors.New("pet profile repository unavailable"))
+	}
+	if method == "PATCH" && resource == "profile" {
+		for _, key := range []string{"avatar_asset_id", "cover_asset_id"} {
+			if value, exists := payload[key].(string); exists {
+				if err := s.authorizeAsset(ctx, value, familyID); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
+	if (method == "POST" || method == "PATCH") && (resource == "birthday-media" || resource == "growth-media") {
+		if value, exists := payload["asset_id"].(string); exists {
+			if err := s.authorizeAsset(ctx, value, familyID); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if method == "POST" || method == "PATCH" {
+		if resource == "birthday-blessings" {
+			payload["user_id"] = userID
+		}
+		if resource == "growth-events" {
+			payload["recorder"] = userID
+		}
+	}
+	if err := validateResourcePayload(resource, method, payload); err != nil {
+		return nil, err
 	}
 	v, err := r.Resource(ctx, familyID, petID, resource, method, payload)
 	if err != nil {
@@ -114,8 +141,15 @@ func (r *SQLRepository) Resource(ctx context.Context, familyID, petID, resource,
 			return nil, appErrors.InvalidParam("没有可更新字段")
 		}
 		args = append(args, petID, familyID)
-		if _, e := r.db.ExecContext(ctx, r.query("UPDATE pets SET "+strings.Join(sets, ",")+",updated_at=CURRENT_TIMESTAMP WHERE id=? AND family_id=?"), args...); e != nil {
+		result, e := r.db.ExecContext(ctx, r.query("UPDATE pets SET "+strings.Join(sets, ",")+",updated_at=CURRENT_TIMESTAMP WHERE id=? AND family_id=?"), args...)
+		if e != nil {
 			return nil, e
+		}
+		if affected, e := result.RowsAffected(); e != nil || affected == 0 {
+			if e != nil {
+				return nil, e
+			}
+			return nil, sql.ErrNoRows
 		}
 		return r.GetProfile(ctx, familyID, petID)
 	}
@@ -187,8 +221,17 @@ func (r *SQLRepository) Resource(ctx context.Context, familyID, petID, resource,
 			return nil, appErrors.InvalidParam("档案 ID 不能为空")
 		}
 		if method == "DELETE" {
-			_, e := r.db.ExecContext(ctx, r.query("DELETE FROM "+table+" WHERE id=? AND pet_id=? AND family_id=?"), id, petID, familyID)
-			return map[string]any{}, e
+			result, e := r.db.ExecContext(ctx, r.query("DELETE FROM "+table+" WHERE id=? AND pet_id=? AND family_id=?"), id, petID, familyID)
+			if e != nil {
+				return nil, e
+			}
+			if affected, e := result.RowsAffected(); e != nil || affected == 0 {
+				if e != nil {
+					return nil, e
+				}
+				return nil, sql.ErrNoRows
+			}
+			return map[string]any{}, nil
 		}
 		sets := []string{}
 		args := []any{}
@@ -202,8 +245,17 @@ func (r *SQLRepository) Resource(ctx context.Context, familyID, petID, resource,
 			return nil, appErrors.InvalidParam("没有可更新字段")
 		}
 		args = append(args, id, petID, familyID)
-		_, e := r.db.ExecContext(ctx, r.query("UPDATE "+table+" SET "+strings.Join(sets, ",")+",updated_at=CURRENT_TIMESTAMP WHERE id=? AND pet_id=? AND family_id=?"), args...)
-		return payload, e
+		result, e := r.db.ExecContext(ctx, r.query("UPDATE "+table+" SET "+strings.Join(sets, ",")+",updated_at=CURRENT_TIMESTAMP WHERE id=? AND pet_id=? AND family_id=?"), args...)
+		if e != nil {
+			return nil, e
+		}
+		if affected, e := result.RowsAffected(); e != nil || affected == 0 {
+			if e != nil {
+				return nil, e
+			}
+			return nil, sql.ErrNoRows
+		}
+		return payload, nil
 	}
 	return nil, appErrors.InvalidParam("不支持的操作")
 }
@@ -234,6 +286,74 @@ func resourceSpec(resource string) (string, string, error) {
 		return "pet_growth_media", "event_id,asset_id", nil
 	}
 	return "", "", appErrors.InvalidParam("未知档案资源")
+}
+
+func validateResourcePayload(resource, method string, payload map[string]any) error {
+	if resource == "profile" {
+		for _, field := range []string{"name", "avatar_asset_id", "cover_asset_id", "breed", "gender"} {
+			if value, ok := payload[field]; ok {
+				if _, ok := value.(string); !ok {
+					return appErrors.InvalidParam(field + " 格式无效")
+				}
+			}
+		}
+		if value, ok := payload["sterilized"]; ok {
+			if _, ok := value.(bool); !ok {
+				return appErrors.InvalidParam("sterilized 格式无效")
+			}
+		}
+		for _, field := range []string{"birthday", "home_date"} {
+			if value, ok := payload[field]; ok && value != nil {
+				date, ok := value.(string)
+				if !ok {
+					return appErrors.InvalidParam(field + " 格式无效")
+				}
+				if _, err := time.Parse("2006-01-02", date); err != nil {
+					return appErrors.InvalidParam(field + " 格式应为 YYYY-MM-DD")
+				}
+			}
+		}
+		return nil
+	}
+	if resource == "health" {
+		for _, field := range []string{"status", "allergies", "long_term_medication"} {
+			if value, ok := payload[field]; ok {
+				if _, ok := value.(string); !ok {
+					return appErrors.InvalidParam(field + " 格式无效")
+				}
+			}
+		}
+		return nil
+	}
+	if method == "GET" || method == "DELETE" {
+		return nil
+	}
+	for _, field := range []string{"record_id", "event_id", "asset_id", "user_id", "type", "name", "number", "trait", "value", "question", "answer", "status", "details", "summary", "content", "recorder"} {
+		if value, ok := payload[field]; ok {
+			if _, ok := value.(string); !ok {
+				return appErrors.InvalidParam(field + " 格式无效")
+			}
+		}
+	}
+	for _, field := range []string{"vaccinated_at", "measured_at", "occurred_at"} {
+		if value, ok := payload[field]; ok {
+			date, ok := value.(string)
+			if !ok {
+				return appErrors.InvalidParam(field + " 格式无效")
+			}
+			if _, err := time.Parse("2006-01-02", date); err != nil {
+				return appErrors.InvalidParam(field + " 格式应为 YYYY-MM-DD")
+			}
+		}
+	}
+	for _, field := range []string{"year", "age", "weight"} {
+		if value, ok := payload[field]; ok {
+			if _, ok := value.(float64); !ok {
+				return appErrors.InvalidParam(field + " 格式无效")
+			}
+		}
+	}
+	return nil
 }
 
 func (r *SQLRepository) health(ctx context.Context, familyID, petID, method string, p map[string]any) (any, error) {

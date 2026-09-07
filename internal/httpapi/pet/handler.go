@@ -116,7 +116,8 @@ func (h *Handler) Profile(c *gin.Context) {
 
 func (h *Handler) Resource(c *gin.Context) {
 	familyID, ok := middleware.GetCurrentFamilyID(c)
-	if !ok {
+	userID, userOK := middleware.GetCurrentUserID(c)
+	if !ok || !userOK {
 		response.Fail(c, appErrors.Forbidden())
 		return
 	}
@@ -131,7 +132,7 @@ func (h *Handler) Resource(c *gin.Context) {
 		payload["id"] = id
 	}
 	method := c.Request.Method
-	result, err := h.service.Resource(c.Request.Context(), familyID, c.Param("pet_id"), c.Param("resource"), method, payload)
+	result, err := h.service.Resource(c.Request.Context(), familyID, userID, c.Param("pet_id"), c.Param("resource"), method, payload)
 	if err != nil {
 		response.Fail(c, asAppError(err))
 		return

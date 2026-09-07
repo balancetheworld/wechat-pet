@@ -11,7 +11,7 @@ import (
 )
 
 func registerV1Routes(router *gin.RouterGroup, dependencies Dependencies) {
-	assetapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.FileService)
+	assetapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.FileService, dependencies.LocalUploadDir, dependencies.FamilyRepository)
 	authapi.RegisterRoutes(router, dependencies.AuthService)
 	userapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.UserService)
 	familyapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.FamilyService, dependencies.FamilyRepository)

@@ -42,9 +42,6 @@ func NewWithDependencies(dependencies Dependencies, loggers ...*slog.Logger) *gi
 	router.GET("/healthz", func(c *gin.Context) {
 		response.Success(c, map[string]string{"status": "ok"})
 	})
-	if dependencies.LocalUploadDir != "" {
-		router.Static("/uploads", dependencies.LocalUploadDir)
-	}
 	v1 := router.Group("/api/v1")
 	registerV1Routes(v1, dependencies)
 

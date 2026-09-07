@@ -1,3 +1,4 @@
+import type { ITouchEvent } from '@tarojs/components/types/common'
 import type { CalendarRecordCategory, MedicalType } from '../../types/calendar'
 import type { Pet, PetProfile } from '../../types/pet'
 import { Button, Image, Input, Picker, ScrollView, Text, Textarea, View } from '@tarojs/components'
@@ -228,7 +229,7 @@ export default function Profile() {
     setCurrentPage(Math.max(0, Math.min(pageCount - 1, page)))
   }, [pageCount])
 
-  const handleTouchStart = useCallback((event: any) => {
+  const handleTouchStart = useCallback((event: ITouchEvent) => {
     if (turning) {
       return
     }
@@ -237,7 +238,7 @@ export default function Profile() {
     setTurnDirection(null)
   }, [turning])
 
-  const handleTouchMove = useCallback((event: any) => {
+  const handleTouchMove = useCallback((event: ITouchEvent) => {
     if (touchStartX === null) {
       return
     }
@@ -251,7 +252,7 @@ export default function Profile() {
     setTurnDirection(deltaX < 0 ? 'next' : 'previous')
   }, [currentPage, pageCount, touchStartX])
 
-  const handleTouchEnd = useCallback((event: any) => {
+  const handleTouchEnd = useCallback((event: ITouchEvent) => {
     if (touchStartX === null) {
       return
     }

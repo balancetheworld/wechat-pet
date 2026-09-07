@@ -31,6 +31,10 @@ func InvalidParam(message string) *AppError {
 	return &AppError{HTTPStatus: http.StatusBadRequest, Code: CodeInvalidParam, Message: message}
 }
 
+func PayloadTooLarge(message string) *AppError {
+	return &AppError{HTTPStatus: http.StatusRequestEntityTooLarge, Code: CodeInvalidParam, Message: message}
+}
+
 func Unauthorized() *AppError {
 	return &AppError{HTTPStatus: http.StatusUnauthorized, Code: CodeUnauthorized, Message: "未认证"}
 }
