@@ -32,7 +32,7 @@
   width: 100%;
   text-align: center;
   white-space: nowrap;
-  font-size: 40px;
+  font-size: 52px;
   font-weight: 600;
 }
 
@@ -105,15 +105,36 @@
   background: rgba(127,165,214,0.86);
 }
 
-/* ============ 第一页登录按钮：与第二页按钮保持同样尺寸（宽 50%、高 128rpx、圆角 64rpx、居中） ============ */
+/* ============ 第一页登录按钮：白底玻璃胶囊，与背景插画风格相适应（宽 72%、高 144rpx、圆角 72rpx、居中） ============ */
 .profile-onboarding__login--welcome {
   position: relative;
   z-index: 1;
-  width: 50%;
-  min-height: 128px;
-  border-radius: 64px;
+  width: 72%;
+  min-height: 144px;
+  border: 1px solid rgba(163, 194, 232, 0.75);
+  border-radius: 72px;
   align-self: center;
   margin-bottom: 32px;
+  font-size: 44px;
+  font-weight: 600;
+  letter-spacing: 4px;
+  text-indent: 4px;
+  color: #4A6489;
+  background: linear-gradient(135deg, #E7EFFA, #C9DBF0);
+  box-shadow: 0 10px 26px rgba(74, 100, 137, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+/* 清除微信原生 button 的默认描边 */
+.profile-onboarding__login--welcome::after {
+  border: none;
+}
+
+.profile-onboarding__login--welcome-hover {
+  transform: scale(0.96);
+  opacity: 0.92;
 }
 
 /* ============ 第二页双按钮行 ============ */

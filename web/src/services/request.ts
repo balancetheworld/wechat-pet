@@ -8,9 +8,13 @@ import { ApiError } from '../types/api'
 export { ApiError } from '../types/api'
 export type { UploadOptions } from '../types/request'
 
-const apiBaseURL = 'http://127.0.0.1:8080'
+const apiBaseURL = TARO_APP_API_BASE_URL
 const requestTimeout = 10_000
 let refreshingSession: Promise<void> | null = null
+
+if (!apiBaseURL) {
+  throw new Error('缺少 TARO_APP_API_BASE_URL 配置')
+}
 
 function requestURL(path: string) {
   return `${apiBaseURL}${path}`
@@ -18,7 +22,15 @@ function requestURL(path: string) {
 
 export function assetURL(assetID: string) {
   const value = assetID.trim()
-  return value ? requestURL(`/uploads/${encodeURIComponent(value)}`) : ''
+  return value ? authorizedAssetURL(requestURL(`/api/v1/uploads/${encodeURIComponent(value)}`)) : ''
+}
+
+export function authorizedAssetURL(value: string) {
+  if (!value || !value.startsWith(`${apiBaseURL}/api/v1/uploads/`)) {
+    return value
+  }
+  const token = useAuthStore.getState().token
+  return token ? `${value}${value.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}` : value
 }
 
 function errorFromNetwork(error: unknown) {

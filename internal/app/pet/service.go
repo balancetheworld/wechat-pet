@@ -6,17 +6,29 @@ import (
 	"strings"
 
 	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	fileservice "github.com/balancetheworld/wechat-pet/internal/service/file"
 )
 
 type Service struct {
 	repository Repository
+	assets     interface {
+		AuthorizeFamily(context.Context, string, string) error
+	}
 }
 
-func NewService(repository Repository) (*Service, error) {
+func NewService(repository Repository, assets ...interface {
+	AuthorizeFamily(context.Context, string, string) error
+}) (*Service, error) {
 	if repository == nil {
 		return nil, errors.New("pet service repository is required")
 	}
-	return &Service{repository: repository}, nil
+	var assetAuth interface {
+		AuthorizeFamily(context.Context, string, string) error
+	}
+	if len(assets) > 0 {
+		assetAuth = assets[0]
+	}
+	return &Service{repository: repository, assets: assetAuth}, nil
 }
 
 func (s *Service) List(ctx context.Context, familyID string) ([]PetDTO, error) {
@@ -45,6 +57,9 @@ func (s *Service) Get(ctx context.Context, familyID string, petID string) (PetDT
 func (s *Service) Create(ctx context.Context, familyID string, userID string, request CreatePetRequest) (PetDTO, error) {
 	name, err := validateName(request.Name)
 	if err != nil {
+		return PetDTO{}, err
+	}
+	if err := s.authorizeAsset(ctx, request.AvatarAssetID, familyID); err != nil {
 		return PetDTO{}, err
 	}
 	value, err := s.repository.Create(ctx, familyID, userID, name)
@@ -76,6 +91,19 @@ func (s *Service) Update(ctx context.Context, familyID string, petID string, use
 		return PetDTO{}, mapError(err)
 	}
 	return toDTO(value), nil
+}
+
+func (s *Service) authorizeAsset(ctx context.Context, assetID, familyID string) error {
+	if s.assets == nil || strings.TrimSpace(assetID) == "" {
+		return nil
+	}
+	if err := s.assets.AuthorizeFamily(ctx, assetID, familyID); err != nil {
+		if errors.Is(err, fileservice.ErrAssetNotOwnedByFamily) {
+			return appErrors.Forbidden()
+		}
+		return appErrors.Internal(err)
+	}
+	return nil
 }
 
 func (s *Service) Delete(ctx context.Context, familyID string, petID string, userID string) error {

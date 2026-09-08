@@ -1,6 +1,7 @@
 import { Button, Image, Text, View } from '@tarojs/components'
 import PageBackground from '../../components/page-background'
 import { routes } from '../../constants/routes'
+import { authorizedAssetURL } from '../../services/request'
 import { useAuthStore } from '../../stores/auth-store'
 import { useFamilyStore } from '../../stores/family-store'
 import { navigateTo, switchTab } from '../../utils/navigation'
@@ -23,7 +24,7 @@ export default function Account() {
         <Text className="account-header__title">账户与家庭</Text>
       </View>
       <View className="account-user">
-        {user?.avatarUrl ? <Image className="account-user__avatar" src={user.avatarUrl} mode="aspectFill" /> : <View className="account-user__avatar account-user__avatar--empty">头像</View>}
+        {user?.avatarUrl ? <Image className="account-user__avatar" src={authorizedAssetURL(user.avatarUrl)} mode="aspectFill" /> : <View className="account-user__avatar account-user__avatar--empty">头像</View>}
         <View className="account-user__info">
           <Text className="account-user__name">{user?.nickname || '未设置昵称'}</Text>
           <Text className="account-user__identity">{identityLabels[identity]}</Text>

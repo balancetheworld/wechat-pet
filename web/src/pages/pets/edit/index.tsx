@@ -164,7 +164,6 @@ export default function PetEdit() {
   /* --- 选择头像 --- */
   async function chooseAvatar() {
     try {
-      // @ts-expect-error - Taro.chooseImage 在类型里需要扩展
       const res = await Taro.chooseImage({
         count: 1,
         sizeType: ['compressed'],
@@ -348,7 +347,7 @@ export default function PetEdit() {
             <Picker
               mode="date"
               value={formBirth}
-              max={maxDate}
+              end={maxDate}
               onChange={event => setFormBirth(event.detail.value)}
             >
               <View className="capsule-input date-view">{formBirth || '选择日期'}</View>
@@ -359,7 +358,7 @@ export default function PetEdit() {
             <Picker
               mode="date"
               value={formArrival}
-              max={maxDate}
+              end={maxDate}
               onChange={event => setFormArrival(event.detail.value)}
             >
               <View className="capsule-input date-view">{formArrival || '选择日期'}</View>
@@ -385,7 +384,7 @@ export default function PetEdit() {
 
         {/* 操作 */}
         <View className="add-pet-form-actions">
-          <Button className="secondary-button" onClick={navigateBack}>取消</Button>
+          <Button className="secondary-button" onClick={() => { void navigateBack() }}>取消</Button>
           <Button
             className="primary-button"
             disabled={!formName.trim() || submitting || loading}

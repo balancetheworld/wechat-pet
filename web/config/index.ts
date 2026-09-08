@@ -7,6 +7,7 @@ import prodConfig from './prod'
 
 // https://taro-docs.jd.com/docs/next/config#defineconfig-辅助函数
 export default defineConfig<'webpack5'>(async (merge, { command: _command, mode: _mode }) => {
+  const apiBaseURL = process.env.TARO_APP_API_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:8080' : '')
   const baseConfig: UserConfigExport<'webpack5'> = {
     projectName: 'web',
     date: '2026-8-19',
@@ -23,6 +24,7 @@ export default defineConfig<'webpack5'>(async (merge, { command: _command, mode:
       '@tarojs/plugin-generator',
     ],
     defineConstants: {
+      TARO_APP_API_BASE_URL: JSON.stringify(apiBaseURL),
     },
     copy: {
       patterns: [

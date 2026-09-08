@@ -14,6 +14,10 @@ type Service struct {
 	users      Repository
 	family     familyapp.Repository
 	avatarURLs AvatarURLResolver
+	assetAuth  interface {
+		AuthorizeUser(context.Context, string, string) error
+		AuthorizeFamily(context.Context, string, string) error
+	}
 }
 
 type AvatarURLResolver interface {
@@ -42,6 +46,13 @@ func NewService(users Repository, family familyapp.Repository, avatarURLs ...Ava
 	return &Service{users: users, family: family, avatarURLs: avatarURLResolver}, nil
 }
 
+func (s *Service) SetAssetAuthorizer(value interface {
+	AuthorizeUser(context.Context, string, string) error
+	AuthorizeFamily(context.Context, string, string) error
+}) {
+	s.assetAuth = value
+}
+
 func (s *Service) Me(ctx context.Context, userID string) (Profile, error) {
 	user, err := s.users.GetByID(ctx, userID)
 	if err != nil {
@@ -53,6 +64,17 @@ func (s *Service) Me(ctx context.Context, userID string) (Profile, error) {
 func (s *Service) UpdateProfile(ctx context.Context, userID string, request UpdateProfileRequest) (Profile, error) {
 	if strings.TrimSpace(request.Nickname) == "" || strings.TrimSpace(request.AvatarAssetID) == "" {
 		return Profile{}, appErrors.InvalidParam("昵称和头像不能为空")
+	}
+	if s.assetAuth != nil {
+		if err := s.assetAuth.AuthorizeUser(ctx, request.AvatarAssetID, userID); err != nil {
+			family, familyErr := s.family.GetActiveFamilySummary(ctx, userID)
+			if familyErr != nil {
+				return Profile{}, appErrors.Internal(familyErr)
+			}
+			if family == nil || s.assetAuth.AuthorizeFamily(ctx, request.AvatarAssetID, family.ID) != nil {
+				return Profile{}, appErrors.Forbidden()
+			}
+		}
 	}
 	user, err := s.users.UpdateProfile(ctx, userID, request.Nickname, request.AvatarAssetID)
 	if err != nil {

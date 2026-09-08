@@ -1,3 +1,4 @@
+import type { CommonEvent, ITouchEvent } from '@tarojs/components/types/common'
 import type { CalendarRecordCategory, MedicalType } from '../../types/calendar'
 import type { Pet, PetProfile } from '../../types/pet'
 import { Button, Image, Input, Picker, ScrollView, Slider, Text, Textarea, View } from '@tarojs/components'
@@ -259,20 +260,28 @@ export default function Profile() {
     setCurrentPage(Math.max(0, Math.min(pageCount - 1, page)))
   }, [pageCount])
 
-  const handleTouchStart = useCallback((event: any) => {
+  const handleTouchStart = useCallback((event: CommonEvent) => {
     if (turning) {
       return
     }
-    setTouchStartX(event.touches[0].clientX)
+    const touch = (event as Partial<ITouchEvent>).touches?.[0]
+    if (!touch) {
+      return
+    }
+    setTouchStartX(touch.clientX)
     setTouchDeltaX(0)
     setTurnDirection(null)
   }, [turning])
 
-  const handleTouchMove = useCallback((event: any) => {
-    if (touchStartX === null || turning) {
+  const handleTouchMove = useCallback((event: CommonEvent) => {
+    if (touchStartX === null) {
       return
     }
-    const deltaX = event.touches[0].clientX - touchStartX
+    const touch = (event as Partial<ITouchEvent>).touches?.[0]
+    if (!touch) {
+      return
+    }
+    const deltaX = touch.clientX - touchStartX
     if ((deltaX < 0 && currentPage >= pageCount - 1) || (deltaX > 0 && currentPage <= 0)) {
       setTouchDeltaX(0)
       setTurnDirection(null)
@@ -282,11 +291,16 @@ export default function Profile() {
     setTurnDirection(deltaX < 0 ? 'next' : 'previous')
   }, [currentPage, pageCount, touchStartX, turning])
 
-  const handleTouchEnd = useCallback((event: any) => {
-    if (touchStartX === null || turning) {
+  const handleTouchEnd = useCallback((event: CommonEvent) => {
+    if (touchStartX === null) {
       return
     }
-    const deltaX = event.changedTouches[0].clientX - touchStartX
+    const touch = (event as Partial<ITouchEvent>).changedTouches?.[0]
+    if (!touch) {
+      setTouchStartX(null)
+      return
+    }
+    const deltaX = touch.clientX - touchStartX
     setTouchStartX(null)
     const rotation = Math.max(-180, Math.min(180, deltaX * 0.5))
     const canTurnNext = rotation <= -35 && currentPage < pageCount - 1

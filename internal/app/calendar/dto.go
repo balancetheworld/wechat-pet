@@ -1,5 +1,7 @@
 package calendar
 
+import "time"
+
 type PetDTO struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
@@ -47,6 +49,15 @@ type RecordDTO struct {
 	CreatedBy         MemberDTO     `json:"created_by"`
 	Reminder          *ReminderDTO  `json:"reminder"`
 	Reminders         []ReminderDTO `json:"reminders"`
+}
+
+type ContextRecord struct {
+	ID                string
+	Category          string
+	MedicalType       string
+	CustomMedicalType string
+	Content           string
+	OccurredAt        time.Time
 }
 
 type DayMarkerDTO struct {

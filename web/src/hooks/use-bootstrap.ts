@@ -2,12 +2,16 @@ import { useEffect, useRef } from 'react'
 import { useAppStore } from '../stores/app-store'
 import { useAuthStore } from '../stores/auth-store'
 import { useFamilyStore } from '../stores/family-store'
+import { loadHandwrittenFont } from '../utils/font'
 
 export function useBootstrap() {
   const retryKey = useAppStore(state => state.retryKey)
   const running = useRef(false)
 
   useEffect(() => {
+    // 自定义字体预加载，不阻塞 bootstrap
+    void loadHandwrittenFont()
+
     async function bootstrap() {
       if (running.current) {
         return
