@@ -22,6 +22,12 @@ func ValidateAnalysisOutput(decision RunDecision) error {
 	if decision.Status != RunCompleted {
 		return nil
 	}
+	if _, ok := decision.Data["fact_type"]; ok {
+		if decision.RiskLevel != RiskGreen || decision.Data["items"] == nil {
+			return fmt.Errorf("%w: invalid fact output", ErrInvalidAnalysisOutput)
+		}
+		return nil
+	}
 	if decision.RiskLevel != RiskGreen && decision.RiskLevel != RiskYellow {
 		return fmt.Errorf("%w: invalid risk level", ErrInvalidAnalysisOutput)
 	}

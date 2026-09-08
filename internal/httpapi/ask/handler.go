@@ -43,6 +43,26 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	response.Success(c, askapp.NewExecutionDTO(result))
 }
 
+func (h *Handler) CreateSessionFromInput(c *gin.Context) {
+	familyID, familyOK := middleware.GetCurrentFamilyID(c)
+	userID, userOK := middleware.GetCurrentUserID(c)
+	if !familyOK || !userOK {
+		response.Fail(c, appErrors.Forbidden())
+		return
+	}
+	var request createSessionRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.Fail(c, appErrors.InvalidParam("问问参数无效"))
+		return
+	}
+	result, resolution, err := h.service.CreateSessionFromInput(c.Request.Context(), familyID, userID, request.Input)
+	if err != nil {
+		response.Fail(c, asAppErrorWithResolution(err, resolution))
+		return
+	}
+	response.Success(c, askapp.NewExecutionDTO(result))
+}
+
 func (h *Handler) ProcessRun(c *gin.Context) {
 	familyID, ok := middleware.GetCurrentFamilyID(c)
 	if !ok {
@@ -119,4 +139,12 @@ func asAppError(err error) *appErrors.AppError {
 		return appError
 	}
 	return appErrors.Internal(err)
+}
+
+func asAppErrorWithResolution(err error, resolution askapp.PetResolution) *appErrors.AppError {
+	result := asAppError(err)
+	if resolution.Status == askapp.PetResolveAmbiguous {
+		result.Message = "宠物名称存在歧义，请补充更多信息"
+	}
+	return result
 }

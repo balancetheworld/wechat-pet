@@ -11,6 +11,7 @@ import (
 	"time"
 
 	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
+	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
 	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
 	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
 	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
@@ -97,6 +98,84 @@ func TestAskRoutesLifecycle(t *testing.T) {
 	}
 }
 
+func TestAskRoutesMultiPetFactContract(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	setupAskRouteSchema(t, db)
+	if _, err := db.Exec("INSERT INTO users (id, openid, nickname, last_login_at, created_at, updated_at) VALUES ('user-1', 'openid-1', '用户', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO families (id, name, created_at, updated_at) VALUES ('family-1', '家庭', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO family_members (id, family_id, user_id, role, status, created_at, updated_at) VALUES ('member-1', 'family-1', 'user-1', 'owner', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO pets (id, family_id, name, created_by, updated_by, created_at, updated_at) VALUES ('pet-1', 'family-1', '旺仔', 'user-1', 'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), ('pet-2', 'family-1', '球球', 'user-1', 'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`CREATE TABLE calendar_records (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, category TEXT NOT NULL, medical_type TEXT, custom_medical_type TEXT, content TEXT NOT NULL, occurred_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO calendar_records (id, family_id, pet_id, category, medical_type, custom_medical_type, content, occurred_at, deleted_at) VALUES ('record-1', 'family-1', 'pet-1', 'daily', '', '', '旺仔洗澡', '2026-08-20 10:00:00', NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	familyRepository, err := familyapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	petRepository, err := petapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	askRepository, err := askapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calendarRepository, err := calendarapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	askService, err := askapp.NewService(askRepository, petRepository, askapp.DeterministicExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	askService.SetCalendarRepository(calendarRepository)
+	signer, err := jwtpkg.NewSigner("test-secret", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewWithDependencies(Dependencies{AskService: askService, FamilyRepository: familyRepository, TokenSigner: signer})
+	token, err := signer.Sign("user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions", `{"input":"旺仔和球球上次洗澡分别是什么时候"}`)
+	if create.Code != http.StatusOK || !strings.Contains(create.Body.String(), `"pet_id":"pet-1"`) || !strings.Contains(create.Body.String(), `"pet_id":"pet-2"`) {
+		t.Fatalf("create status = %d, body = %s", create.Code, create.Body.String())
+	}
+	sessionID := extractAskRouteID(create.Body.String(), "session")
+	runID := extractAskRouteID(create.Body.String(), "run")
+	if sessionID == "" || runID == "" {
+		t.Fatalf("missing IDs: %s", create.Body.String())
+	}
+	process := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/process", "")
+	body := process.Body.String()
+	if process.Code != http.StatusOK || !strings.Contains(body, `"status":"completed"`) || !strings.Contains(body, `"type":"fact.completed"`) || !strings.Contains(body, `"fact_type":"bath"`) || !strings.Contains(body, `"pet_id":"pet-1"`) || !strings.Contains(body, `"pet_id":"pet-2"`) || !strings.Contains(body, `"found":false`) {
+		t.Fatalf("process status = %d, body = %s", process.Code, body)
+	}
+	if strings.Contains(body, `"PetID"`) || strings.Contains(body, `"PetName"`) {
+		t.Fatalf("fact fields are not snake_case: %s", body)
+	}
+	events := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events?after=1", "")
+	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"type":"fact.completed"`) || !strings.Contains(events.Body.String(), `"fact_type":"bath"`) {
+		t.Fatalf("events status = %d, body = %s", events.Code, events.Body.String())
+	}
+}
+
 func askRouteRequest(t *testing.T, router http.Handler, token, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	recorder := httptest.NewRecorder()
@@ -138,6 +217,7 @@ func setupAskRouteSchema(t *testing.T, db *sql.DB) {
 	}
 	askStatements := []string{
 		`CREATE TABLE ask_sessions (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, created_by TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, turn_count INTEGER NOT NULL, prompt_version TEXT NOT NULL, rule_version TEXT NOT NULL, knowledge_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, completed_at TIMESTAMP)`,
+		`CREATE TABLE ask_session_pets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, pet_id TEXT NOT NULL, mention TEXT NOT NULL, sort_order INTEGER NOT NULL, UNIQUE(session_id, pet_id), UNIQUE(session_id, sort_order))`,
 		`CREATE TABLE ask_turns (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, status TEXT NOT NULL, input TEXT NOT NULL, selected_run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(session_id, turn_index))`,
 		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_index INTEGER NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL, UNIQUE(turn_id, run_index))`,
 		`CREATE TABLE ask_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(run_id, sequence))`,

@@ -49,7 +49,27 @@ type Session struct {
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 	CompletedAt      *time.Time
+	Pets             []SessionPet
 }
+
+type SessionPet struct {
+	PetID     string
+	PetName   string
+	Mention   string
+	SortOrder int
+}
+
+type FactType string
+
+const (
+	FactUnknown    FactType = ""
+	FactBath       FactType = "bath"
+	FactVaccine    FactType = "vaccine"
+	FactDeworming  FactType = "deworming"
+	FactCheckup    FactType = "checkup"
+	FactVisit      FactType = "visit"
+	FactMedication FactType = "medication"
+)
 
 type Turn struct {
 	ID            string
