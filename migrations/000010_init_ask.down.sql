@@ -1,0 +1,5 @@
+DROP TABLE IF EXISTS ask_messages;
+DROP TABLE IF EXISTS ask_events;
+DROP TABLE IF EXISTS ask_runs;
+DROP TABLE IF EXISTS ask_turns;
+DROP TABLE IF EXISTS ask_sessions;

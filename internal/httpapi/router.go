@@ -3,6 +3,7 @@ package httpapi
 import (
 	"log/slog"
 
+	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
 	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
 	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
 	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
@@ -22,6 +23,7 @@ type Dependencies struct {
 	PetService       *petapp.Service
 	PetRepository    petapp.Repository
 	CalendarService  *calendarapp.Service
+	AskService       *askapp.Service
 	TokenSigner      *jwtpkg.Signer
 	FileService      *fileservice.Service
 	LocalUploadDir   string
