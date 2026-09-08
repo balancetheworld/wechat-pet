@@ -2,7 +2,7 @@ import { Button, Image, Input, Picker, Text, View } from '@tarojs/components'
 import Taro, { useRouter } from '@tarojs/taro'
 import { useEffect, useMemo, useState } from 'react'
 import PageBackground from '../../../components/page-background'
-import { createPet, getPet, updatePet } from '../../../services/pet'
+import { createPet, getPet, getPetProfile, updatePet } from '../../../services/pet'
 import { navigateBack } from '../../../utils/navigation'
 import './index.scss'
 
@@ -57,13 +57,21 @@ export default function PetEdit() {
   const [formArrival, setFormArrival] = useState(() => todayString())
   const [formHealth, setFormHealth] = useState('healthy')
   const [formBreed, setFormBreed] = useState('')
-  const [formTags, setFormTags] = useState('')
-  const [formQuote, setFormQuote] = useState('')
 
   const [loading, setLoading] = useState(isEdit)
   const [submitting, setSubmitting] = useState(false)
+  /* --- 输入框聚焦状态: placeholder 聚焦时直接隐藏 --- */
+  const [focused, setFocused] = useState<Record<string, boolean>>({})
+  const focusOn = (key: string) => () => {
+    setFocused(f => ({ ...f, [key]: true }))
+  }
+  const focusOff = (key: string) => () => {
+    setFocused(f => ({ ...f, [key]: false }))
+  }
+  const inputCls = (key: string) => `capsule-input${focused[key] ? ' focused' : ''}`
+  const inputPh = (key: string, text: string) => (focused[key] ? '' : text)
 
-  /* --- 编辑模式: 拉取 --- */
+  /* --- 编辑模式: 拉取并预填所有字段 --- */
   useEffect(() => {
     if (!petID) {
       return
@@ -71,8 +79,76 @@ export default function PetEdit() {
     const id = petID
     async function load() {
       try {
-        const pet = await getPet(id)
+        const [pet, profile] = await Promise.all([getPet(id), getPetProfile(id).catch(() => null)])
         setFormName(pet.name)
+        if (profile) {
+          /* 把后端字段映射到表单字段 (兼容空值, 不强行覆盖默认值) */
+          if (profile.breed) {
+            setFormBreed(profile.breed)
+          }
+          if (profile.gender === 'male' || profile.gender === 'female' || profile.gender === 'unknown') {
+            setFormGender(profile.gender)
+          }
+          if (profile.sterilized === true) {
+            setFormNeutered('yes')
+          }
+          else if (profile.sterilized === false) {
+            setFormNeutered('no')
+          }
+          if (profile.birthday) {
+            setFormBirth(profile.birthday)
+          }
+          if (profile.home_date) {
+            setFormArrival(profile.home_date)
+          }
+        }
+        /* 优先用本地缓存的额外数据 (物种/头像/健康状态) 覆盖, 因为这些字段后端暂未持久化 */
+        try {
+          const cache = await Taro.getStorage({ key: `pet-extra-${pet.name}` })
+          const data = cache.data as {
+            avatar?: string
+            species?: string
+            speciesOther?: string
+            gender?: string
+            neutered?: string
+            birth?: string
+            arrival?: string
+            health?: string
+            breed?: string
+          } | undefined
+          if (data) {
+            if (data.avatar) {
+              setFormAvatar(data.avatar)
+            }
+            if (data.species) {
+              setFormSpecies(data.species)
+            }
+            if (data.speciesOther) {
+              setFormSpeciesOther(data.speciesOther)
+            }
+            if (data.gender) {
+              setFormGender(data.gender)
+            }
+            if (data.neutered) {
+              setFormNeutered(data.neutered)
+            }
+            if (data.birth) {
+              setFormBirth(data.birth)
+            }
+            if (data.arrival) {
+              setFormArrival(data.arrival)
+            }
+            if (data.health) {
+              setFormHealth(data.health)
+            }
+            if (data.breed) {
+              setFormBreed(data.breed)
+            }
+          }
+        }
+        catch {
+          /* 没有缓存时静默忽略 */
+        }
       }
       catch (error) {
         const message = error instanceof Error ? error.message : '加载宠物失败'
@@ -126,8 +202,6 @@ export default function PetEdit() {
         arrival: formArrival,
         health: formHealth,
         breed: formBreed,
-        tags: formTags,
-        quote: formQuote,
       }
       try {
         await Taro.setStorage({ key: `pet-extra-${value}`, data: extraData })
@@ -183,11 +257,13 @@ export default function PetEdit() {
         <View className="form-field">
           <Text className="label">名字 *</Text>
           <Input
-            className="capsule-input"
+            className={inputCls('name')}
             maxlength={12}
-            placeholder="给宠物起个名字"
+            placeholder={inputPh('name', '给宠物起个名字')}
             value={formName}
             onInput={event => setFormName(event.detail.value)}
+            onFocus={focusOn('name')}
+            onBlur={focusOff('name')}
           />
         </View>
 
@@ -207,11 +283,13 @@ export default function PetEdit() {
           </View>
           {formSpecies === 'other' && (
             <Input
-              className="capsule-input species-other-input"
+              className={inputCls('speciesOther')}
               maxlength={8}
-              placeholder="填写物种，如：刺猬"
+              placeholder={inputPh('speciesOther', '填写物种，如：刺猬')}
               value={formSpeciesOther}
               onInput={event => setFormSpeciesOther(event.detail.value)}
+              onFocus={focusOn('speciesOther')}
+              onBlur={focusOff('speciesOther')}
             />
           )}
         </View>
@@ -220,11 +298,13 @@ export default function PetEdit() {
         <View className="form-field">
           <Text className="label">品种（可选）</Text>
           <Input
-            className="capsule-input"
+            className={inputCls('breed')}
             maxlength={20}
-            placeholder="如：英国短毛猫"
+            placeholder={inputPh('breed', '如：英国短毛猫')}
             value={formBreed}
             onInput={event => setFormBreed(event.detail.value)}
+            onFocus={focusOn('breed')}
+            onBlur={focusOff('breed')}
           />
         </View>
 
@@ -300,30 +380,6 @@ export default function PetEdit() {
               </Button>
             ))}
           </View>
-        </View>
-
-        {/* 性格标签 */}
-        <View className="form-field">
-          <Text className="label">性格标签</Text>
-          <Input
-            className="capsule-input"
-            maxlength={40}
-            placeholder="多个用空格或逗号分隔，如：粘人 贪吃"
-            value={formTags}
-            onInput={event => setFormTags(event.detail.value)}
-          />
-        </View>
-
-        {/* 个性寄语 */}
-        <View className="form-field">
-          <Text className="label">个性寄语（可选）</Text>
-          <Input
-            className="capsule-input"
-            maxlength={30}
-            placeholder="一句话介绍它"
-            value={formQuote}
-            onInput={event => setFormQuote(event.detail.value)}
-          />
         </View>
 
         {/* 操作 */}
