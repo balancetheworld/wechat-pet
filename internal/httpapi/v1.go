@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	askapi "github.com/balancetheworld/wechat-pet/internal/httpapi/ask"
 	assetapi "github.com/balancetheworld/wechat-pet/internal/httpapi/asset"
 	authapi "github.com/balancetheworld/wechat-pet/internal/httpapi/auth"
 	calendarapi "github.com/balancetheworld/wechat-pet/internal/httpapi/calendar"
@@ -17,4 +18,5 @@ func registerV1Routes(router *gin.RouterGroup, dependencies Dependencies) {
 	familyapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.FamilyService, dependencies.FamilyRepository)
 	petapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.FamilyRepository, dependencies.PetService)
 	calendarapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.FamilyRepository, dependencies.CalendarService)
+	askapi.RegisterRoutes(router, dependencies.TokenSigner, dependencies.FamilyRepository, dependencies.AskService)
 }

@@ -18,6 +18,23 @@ type SQLRepository struct {
 	driver string
 }
 
+func (r *SQLRepository) ListRecentRecords(ctx context.Context, familyID, petID string, since time.Time, limit int) ([]ContextRecord, error) {
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT id, category, COALESCE(medical_type, ''), COALESCE(custom_medical_type, ''), content, occurred_at FROM calendar_records WHERE family_id = ? AND pet_id = ? AND occurred_at >= ? AND deleted_at IS NULL ORDER BY occurred_at DESC, id DESC LIMIT ?"), familyID, petID, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ContextRecord, 0)
+	for rows.Next() {
+		var value ContextRecord
+		if err := rows.Scan(&value.ID, &value.Category, &value.MedicalType, &value.CustomMedicalType, &value.Content, &value.OccurredAt); err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
 func NewRepository(db *sql.DB, driver string) (*SQLRepository, error) {
 	if db == nil {
 		return nil, errors.New("database is required")

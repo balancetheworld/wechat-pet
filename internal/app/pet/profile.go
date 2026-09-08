@@ -25,6 +25,12 @@ type PetProfile struct {
 	NextBirthdayDays *int    `json:"next_birthday_days"`
 }
 
+type PetHealth struct {
+	Status             string `json:"status"`
+	Allergies          string `json:"allergies"`
+	LongTermMedication string `json:"long_term_medication"`
+}
+
 type ProfileRepository interface {
 	GetProfile(context.Context, string, string) (PetProfile, error)
 	Resource(context.Context, string, string, string, string, map[string]any) (any, error)
@@ -118,6 +124,15 @@ func (r *SQLRepository) GetProfile(ctx context.Context, familyID, petID string) 
 		}
 	}
 	return p, nil
+}
+
+func (r *SQLRepository) GetHealth(ctx context.Context, familyID, petID string) (PetHealth, error) {
+	var value PetHealth
+	err := r.db.QueryRowContext(ctx, r.query("SELECT status, allergies, long_term_medication FROM pet_health WHERE pet_id = ? AND family_id = ?"), petID, familyID).Scan(&value.Status, &value.Allergies, &value.LongTermMedication)
+	if errors.Is(err, sql.ErrNoRows) {
+		return PetHealth{}, nil
+	}
+	return value, err
 }
 
 func (r *SQLRepository) Resource(ctx context.Context, familyID, petID, resource, method string, payload map[string]any) (any, error) {

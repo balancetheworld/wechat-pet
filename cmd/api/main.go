@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
 	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
 	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
 	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
@@ -119,11 +120,22 @@ func main() {
 		os.Exit(1)
 	}
 	calendarService.SetAssetAuthorizer(fileService)
+	askRepository, err := askapp.NewRepository(db, cfg.DatabaseDriver)
+	if err != nil {
+		logger.Error("create ask repository", "error", err)
+		os.Exit(1)
+	}
+	askService, err := askapp.NewService(askRepository, petRepository, askapp.DeterministicExecutor{})
+	if err != nil {
+		logger.Error("create ask service", "error", err)
+		os.Exit(1)
+	}
+	askService.SetCalendarRepository(calendarRepository)
 	localUploadDir := ""
 	if cfg.StorageDriver == "local" {
 		localUploadDir = cfg.LocalUploadDir
 	}
-	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, FamilyService: familyService, FamilyRepository: familyRepository, PetService: petService, PetRepository: petRepository, CalendarService: calendarService, TokenSigner: tokenSigner, FileService: fileService, LocalUploadDir: localUploadDir}, logger)
+	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, FamilyService: familyService, FamilyRepository: familyRepository, PetService: petService, PetRepository: petRepository, CalendarService: calendarService, AskService: askService, TokenSigner: tokenSigner, FileService: fileService, LocalUploadDir: localUploadDir}, logger)
 	logger.Info("api server starting", "addr", cfg.HTTPAddr)
 	if err := server.Run(cfg.HTTPAddr); err != nil {
 		logger.Error("api server stopped", "error", err)
