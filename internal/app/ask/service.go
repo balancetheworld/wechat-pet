@@ -79,6 +79,25 @@ func (s *Service) GetSession(ctx context.Context, familyID, sessionID string) (S
 	if err != nil {
 		return Session{}, appErrors.Internal(err)
 	}
+	value, err = s.loadSessionPets(ctx, value)
+	if err != nil {
+		return Session{}, appErrors.Internal(err)
+	}
+	return value, nil
+}
+
+func (s *Service) loadSessionPets(ctx context.Context, value Session) (Session, error) {
+	repository, ok := s.repository.(interface {
+		ListSessionPets(context.Context, string) ([]SessionPet, error)
+	})
+	if !ok {
+		return value, nil
+	}
+	pets, err := repository.ListSessionPets(ctx, value.ID)
+	if err != nil {
+		return Session{}, err
+	}
+	value.Pets = pets
 	return value, nil
 }
 
@@ -166,12 +185,54 @@ func (s *Service) CreateSession(ctx context.Context, familyID, userID, petID, in
 	if len([]rune(input)) > MaxInputLength {
 		return ExecutionResult{}, appErrors.InvalidParam("问题内容不能超过 4000 个字符")
 	}
-	if _, err := s.pets.Get(ctx, familyID, petID); err != nil {
-		if errors.Is(err, petapp.ErrNotFound) {
-			return ExecutionResult{}, appErrors.NotFound("宠物不存在")
-		}
+	pet, err := s.pets.Get(ctx, familyID, petID)
+	if errors.Is(err, petapp.ErrNotFound) {
+		return ExecutionResult{}, appErrors.NotFound("宠物不存在")
+	}
+	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
+	result, _, err := s.createSessionWithPets(ctx, familyID, userID, input, []petapp.Pet{pet})
+	return result, err
+}
+
+func (s *Service) CreateSessionFromInput(ctx context.Context, familyID, userID, input string) (ExecutionResult, PetResolution, error) {
+	familyID = strings.TrimSpace(familyID)
+	userID = strings.TrimSpace(userID)
+	input = strings.TrimSpace(input)
+	if familyID == "" || userID == "" {
+		return ExecutionResult{}, PetResolution{}, appErrors.Unauthorized()
+	}
+	if input == "" {
+		return ExecutionResult{}, PetResolution{}, appErrors.InvalidParam("问题内容不能为空")
+	}
+	if len([]rune(input)) > MaxInputLength {
+		return ExecutionResult{}, PetResolution{}, appErrors.InvalidParam("问题内容不能超过 4000 个字符")
+	}
+	pets, err := s.pets.List(ctx, familyID)
+	if err != nil {
+		return ExecutionResult{}, PetResolution{}, appErrors.Internal(err)
+	}
+	resolution := ResolvePets(input, pets)
+	if resolution.Status == PetResolveNone {
+		return ExecutionResult{}, resolution, appErrors.InvalidParam("请在问题中补充宠物名称")
+	}
+	if resolution.Status == PetResolveAmbiguous {
+		return ExecutionResult{}, resolution, appErrors.Conflict("宠物名称存在歧义，请补充更多信息")
+	}
+	return s.createSessionWithPets(ctx, familyID, userID, input, resolution.Resolved)
+}
+
+func (s *Service) createSessionWithPets(ctx context.Context, familyID, userID, input string, pets []petapp.Pet) (ExecutionResult, PetResolution, error) {
+	if len(pets) == 0 {
+		return ExecutionResult{}, PetResolution{}, appErrors.InvalidParam("请在问题中补充宠物名称")
+	}
+	result, err := s.createSession(ctx, familyID, userID, input, pets)
+	resolution := PetResolution{Status: PetResolveResolved, Resolved: pets, Input: input}
+	return result, resolution, err
+}
+
+func (s *Service) createSession(ctx context.Context, familyID, userID, input string, pets []petapp.Pet) (ExecutionResult, error) {
 	now := s.now().UTC()
 	sessionID, err := newID()
 	if err != nil {
@@ -189,11 +250,26 @@ func (s *Service) CreateSession(ctx context.Context, familyID, userID, petID, in
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
-	session := Session{ID: sessionID, FamilyID: familyID, CreatedBy: userID, PetID: petID, Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: s.versions.PromptVersion, RuleVersion: s.versions.RuleVersion, KnowledgeVersion: s.versions.KnowledgeVersion, CreatedAt: now, UpdatedAt: now}
+	session := Session{ID: sessionID, FamilyID: familyID, CreatedBy: userID, PetID: pets[0].ID, Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: s.versions.PromptVersion, RuleVersion: s.versions.RuleVersion, KnowledgeVersion: s.versions.KnowledgeVersion, CreatedAt: now, UpdatedAt: now}
 	turn := Turn{ID: turnID, SessionID: sessionID, TurnIndex: 0, Status: RunQueued, Input: input, SelectedRunID: runID, CreatedAt: now}
 	run := Run{ID: runID, SessionID: sessionID, TurnID: turnID, RunIndex: 0, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: s.versions.RuleVersion, PromptVersion: s.versions.PromptVersion, CreatedAt: now}
 	event := Event{ID: eventID, SessionID: sessionID, TurnID: turnID, RunID: runID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
-	if err := s.repository.CreateSessionRun(ctx, session, turn, run, event); err != nil {
+	sessionPets := make([]SessionPet, 0, len(pets))
+	for index, pet := range pets {
+		sessionPets = append(sessionPets, SessionPet{PetID: pet.ID, PetName: pet.Name, Mention: pet.Name, SortOrder: index})
+	}
+	session.Pets = sessionPets
+	if len(sessionPets) > 1 {
+		if repository, ok := s.repository.(interface {
+			CreateSessionRunWithPets(context.Context, Session, []SessionPet, Turn, Run, Event) error
+		}); ok {
+			if err := repository.CreateSessionRunWithPets(ctx, session, sessionPets, turn, run, event); err != nil {
+				return ExecutionResult{}, appErrors.Internal(err)
+			}
+		} else if err := s.repository.CreateSessionRun(ctx, session, turn, run, event); err != nil {
+			return ExecutionResult{}, appErrors.Internal(err)
+		}
+	} else if err := s.repository.CreateSessionRun(ctx, session, turn, run, event); err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
 	return ExecutionResult{Session: session, Run: run, Events: []Event{event}}, nil
@@ -205,6 +281,10 @@ func (s *Service) ProcessRun(ctx context.Context, familyID, sessionID, runID str
 		if errors.Is(err, ErrSessionNotFound) {
 			return ExecutionResult{}, appErrors.NotFound("问问会话不存在")
 		}
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	session, err = s.loadSessionPets(ctx, session)
+	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
 	run, err := s.repository.GetRun(ctx, session.ID, strings.TrimSpace(runID))
@@ -299,7 +379,23 @@ func (s *Service) ProcessRun(ctx context.Context, familyID, sessionID, runID str
 	if risk.Level == RiskRed {
 		decision = RunDecision{Status: RunEscalated, RiskLevel: RiskRed, EventType: "risk.escalated", Data: map[string]any{"trigger_code": risk.TriggerCode, "message": risk.Message, "action": risk.Action}}
 	} else {
-		decision, err = s.executor.Execute(ctx, RunInput{Session: session, Turn: turn, Run: run, Context: contextSnapshot})
+		factType := DetectFactType(turn.Input)
+		if factType != FactUnknown {
+			if reader, ok := s.calendar.(factReader); ok {
+				sessionPets := session.Pets
+				if len(sessionPets) == 0 {
+					sessionPets = []SessionPet{{PetID: pet.ID, PetName: pet.Name, Mention: pet.Name, SortOrder: 0}}
+				}
+				var data map[string]any
+				data, err = buildFactResult(ctx, reader, session.FamilyID, sessionPets, factType)
+				if err == nil {
+					decision = RunDecision{Status: RunCompleted, RiskLevel: RiskGreen, EventType: "fact.completed", Data: data}
+				}
+			}
+		}
+		if decision.Status == "" {
+			decision, err = s.executor.Execute(ctx, RunInput{Session: session, Turn: turn, Run: run, Context: contextSnapshot})
+		}
 		if err != nil {
 			decision = RunDecision{Status: RunFailed, ErrorCode: "executor_failed", EventType: "run.failed", Data: map[string]any{"message": "当前暂时无法完成分析"}}
 		} else if err := ValidateAnalysisOutput(decision); err != nil {

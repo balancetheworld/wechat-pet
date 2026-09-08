@@ -15,6 +15,7 @@ func RegisterRoutes(router *gin.RouterGroup, signer *jwtpkg.Signer, familyReposi
 	handler := NewHandler(service)
 	group := router.Group("", middleware.RequireAuth(signer), middleware.RequireFamily(familyRepository))
 	group.POST("/pets/:pet_id/ask/sessions", handler.CreateSession)
+	group.POST("/ask/sessions", handler.CreateSessionFromInput)
 	group.POST("/ask/sessions/:session_id/runs/:run_id/process", handler.ProcessRun)
 	group.POST("/ask/sessions/:session_id/runs/:run_id/reply", handler.Reply)
 	group.GET("/ask/sessions/:session_id", handler.GetSession)

@@ -853,3 +853,320 @@ git diff --check
 ### 下一步计划
 
 第十二步实现上下文来源审计落库和相似事件查询：保存每次 Run 使用的上下文摘要元数据，并按宠物、标签和时间范围查找历史相似事件，为“近两个月第 3 次呕吐”等提示提供可解释依据。
+
+## 第十三步：支持自然语言定位多只宠物
+
+### 实现内容
+
+- 新增 `ResolvePets`，按家庭宠物列表解析问题中出现的一个或多个宠物名称。
+- 新增 `POST /api/v1/ask/sessions`，请求体使用 `{ "input": "旺仔和球球上次洗澡分别是什么时候" }`，不再要求前端先选择宠物。
+- 新增 `ask_session_pets` 关联表，保存会话涉及的宠物、原始提及名称和输入顺序。
+- `Session` 保留原有 `pet_id` 作为兼容字段，同时增加 `pets` 列表返回完整绑定结果。
+- 会话处理和详情读取时重新加载多宠物关联，确保创建、执行、查询返回一致。
+
+### 解析和安全边界
+
+解析只在当前家庭的宠物列表内进行，不会把其他家庭或未提及的宠物带入会话。解析状态分为：
+
+```text
+none       未识别到宠物名称，要求补充名称
+resolved   一个或多个名称唯一匹配，创建会话
+ambiguous  名称对应多个同名宠物，要求用户消歧
+```
+
+名称包含关系按较长名称优先，例如“球球”不会误匹配名为“球”的宠物；当用户明确同时提及“球”和“球球”时，两者都会保留。
+
+### 修改文件
+
+- `internal/app/ask/pet_resolver.go`：多宠物名称解析和包含关系处理。
+- `internal/app/ask/pet_resolver_test.go`：覆盖多名称、重名、缺失名称和名称包含边界。
+- `internal/app/ask/model.go`：新增 `SessionPet` 和会话宠物集合。
+- `internal/app/ask/repository.go`：新增多宠物会话原子写入及关联读取。
+- `internal/app/ask/service.go`：新增自然语言创建会话入口，并在处理链路加载会话宠物。
+- `internal/app/ask/dto.go`：会话响应新增 `pets`。
+- `internal/httpapi/ask/handler.go`、`internal/httpapi/ask/routes.go`：新增自然语言创建接口。
+- `migrations/000011_ask_session_pets.up.sql`、`migrations/000011_ask_session_pets.down.sql`：新增关联表迁移。
+
+### 当前限制
+
+- 当前只完成“识别并绑定多只宠物”，尚未实现按每只宠物分别查询洗澡、疫苗等事实并生成逐项结果。
+- 同名宠物会返回 409，当前错误响应还未携带候选宠物数组，前端可先提示用户补充更具体名称。
+- 旧的单宠物接口继续可用；生产环境需要执行 `000011` 迁移后才能持久化多宠物关联。
+
+### 验证结果
+
+已通过：
+
+```bash
+GOCACHE=/tmp/pet-go-build go test ./...
+git diff --check
+```
+
+### 下一步计划
+
+第十四步实现多宠物上下文和确定性事实查询：按会话宠物集合逐个加载档案、日历记录，并为“分别是什么时候”返回结构化 `items` 数组，避免让模型自由拼接宠物与答案的对应关系。
+
+## 第十四步：多宠物确定性事实查询
+
+### 实现内容
+
+- 新增事实意图识别，当前支持洗澡、疫苗、驱虫、体检、就医和用药六类历史事实。
+- 在红色风险规则之后增加事实查询分支；命中事实意图且 Calendar Repository 可用时，不调用 Agent Executor。
+- 根据会话中的 `Session.Pets` 顺序逐只查询最近一条记录，保证“旺仔和球球分别是什么时候”中的宠物与结果一一对应。
+- 查询结果统一生成 `fact.completed` 事件，数据结构包含 `fact_type` 和 `items`。
+- `items` 使用稳定的 snake_case 字段：`pet_id`、`pet_name`、`found`、`occurred_at`、`content`。
+- 未找到某只宠物的记录时保留该宠物位置并返回 `found: false`，不会改写为推测日期。
+- Calendar 查询同时限制 `family_id`、`pet_id`，忽略软删除记录，并按发生时间倒序、记录 ID 倒序取最近一条。
+- 洗澡事实匹配日历文本中的“洗澡”或“洗浴”；疫苗、驱虫、体检、就医和用药匹配标准 `medical_type`。
+
+### 处理优先级
+
+```text
+红色风险规则
+→ 确定性事实意图识别
+→ 按会话宠物逐只读取 Calendar
+→ fact.completed
+→ 非事实问题或事实数据源不可用时回退 Agent Executor
+```
+
+事实分支只负责可审计的历史记录读取，不负责疾病判断，也不展示疾病概率。红色风险始终优先，包含呼吸困难、持续抽搐等紧急表达的问题不会被“洗澡/疫苗”等关键词改写为普通事实查询。
+
+### 输出示例
+
+```json
+{
+  "fact_type": "bath",
+  "items": [
+    {
+      "pet_id": "pet-1",
+      "pet_name": "旺仔",
+      "found": true,
+      "occurred_at": "2026-08-20T10:00:00Z",
+      "content": "旺仔洗澡"
+    },
+    {
+      "pet_id": "pet-2",
+      "pet_name": "球球",
+      "found": false,
+      "occurred_at": "",
+      "content": ""
+    }
+  ]
+}
+```
+
+### 修改文件
+
+- `internal/app/ask/fact.go`：事实类型识别和逐宠物结果组装。
+- `internal/app/ask/fact_test.go`：覆盖事实关键词、未知问题、输入顺序、无记录和查询错误。
+- `internal/app/ask/model.go`：新增 `FactType` 枚举。
+- `internal/app/ask/output.go`：允许并校验事实完成态输出。
+- `internal/app/ask/service.go`：接入事实分支和 Executor 回退逻辑。
+- `internal/app/ask/service_test.go`：验证多宠物事实查询完成态、风险等级和 Executor 未执行。
+- `internal/app/calendar/dto.go`：新增 `FactRecord`。
+- `internal/app/calendar/repository.go`：新增按家庭、宠物和事实类型读取最近记录的接口。
+- `internal/app/calendar/repository_test.go`：验证家庭/宠物隔离、软删除、最近记录排序和事实类型匹配。
+
+### 当前限制
+
+- 事实类型仍使用有限关键词规则，暂不处理复杂同义句、否定句和跨轮次省略主语。
+- 洗澡记录依赖日历 `content` 文本中的“洗澡”或“洗浴”，历史数据若未按统一措辞记录可能无法命中。
+- 医疗事实依赖标准 `medical_type`，自定义医疗类型暂不参与事实分类。
+- 同名宠物仍需先由上一步的消歧流程解决；事实查询不会自行猜测宠物身份。
+- “体检”识别已收窄为体检、体查、健康检查、做检查等表达，普通症状中的“检查”不会直接进入事实分支。
+
+### 验证结果
+
+已通过：
+
+```bash
+gofmt -w internal/app/ask/fact.go internal/app/ask/fact_test.go internal/app/ask/service_test.go internal/app/calendar/repository_test.go
+GOCACHE=/tmp/pet-go-build go test ./internal/app/ask ./internal/app/calendar
+GOCACHE=/tmp/pet-go-build go test ./...
+git diff --check
+```
+
+### 下一步计划
+
+第十五步建议实现事实查询结果的 HTTP 契约测试和前端消费协议：验证创建会话、执行 Run、事件轮询三个接口返回的 `pets`、`fact.completed` 和 snake_case 字段，并定义无记录、数据源降级和同名消歧的前端展示状态。
+
+## 第十五步：事实查询 HTTP 契约和前端消费协议
+
+### 实现内容
+
+- 新增问问 HTTP 生命周期契约测试，覆盖自然语言创建会话、处理 Run 和事件轮询三个接口。
+- 创建接口固定使用：`POST /api/v1/ask/sessions`，请求体为 `{ "input": "..." }`。
+- 创建成功后从响应的 `data.session.id` 和 `data.run.id` 读取会话与执行标识，不依赖 ID 格式。
+- 处理接口固定使用：`POST /api/v1/ask/sessions/{session_id}/runs/{run_id}/process`。
+- 事件接口固定使用：`GET /api/v1/ask/sessions/{session_id}/runs/{run_id}/events?after={sequence}`，`after` 为已消费的最大序号。
+- `fact.completed` 事件的 `data` 直接是结构化 JSON，前端可读取 `fact_type` 和 `items`，无需解析模型自然语言。
+- `items` 中每个宠物都保留一项；`found=false` 表示当前没有匹配记录，前端应展示“暂无记录”，不能展示为空日期或自行推测。
+- 会话响应中的 `data.session.pets` 是宠物绑定和展示顺序的来源，`items` 顺序与其一致。
+- 同名宠物消歧仍由创建接口返回 409；无宠物名称时返回 400；前端应保留原输入并提示补充名称。
+
+### 前端消费状态
+
+```text
+创建中
+→ queued
+→ 调用 process
+→ completed / waiting_input / escalated / failed
+→ 通过 events?after=... 增量消费事件
+```
+
+事实查询建议按事件类型渲染：
+
+- `fact.completed`：按 `items` 顺序展示宠物名、是否找到记录、发生时间和记录摘要。
+- `risk.escalated`：展示立即就医行动，不继续展示普通分析内容。
+- `assistant.question`：展示追问并提交到 `reply` 接口。
+- `run.failed`：展示通用失败提示，不暴露内部错误。
+
+事件轮询应保存最后一个 `sequence`，下一次请求传入该值；重复收到相同事件时按序号去重。事件的 `data` 是 JSON 对象，字段名统一为 snake_case。
+
+### 修改文件
+
+- `internal/httpapi/ask_routes_test.go`：新增多宠物事实查询 HTTP 契约测试，并补充多宠物关联表测试夹具。
+- `docs/ask-agent-development.md`：记录接口调用顺序、状态机和前端事实结果消费协议。
+
+### 验证结果
+
+已通过：
+
+```bash
+gofmt -w internal/httpapi/ask_routes_test.go
+GOCACHE=/tmp/pet-go-build go test ./internal/httpapi
+GOCACHE=/tmp/pet-go-build go test ./...
+git diff --check
+```
+
+### 下一步计划
+
+第十六步开始前端问问页面：先封装问问 API 和事件轮询服务，再实现输入框、创建中/追问/风险升级/事实结果/失败等状态视图；页面不再要求用户手动选择宠物，宠物绑定以服务端 `session.pets` 为准。
+
+## 第十六步：前端问问模块整体规划
+
+### 当前前端现状
+
+- `web/src/pages/ask/index.tsx` 当前是静态视觉页面，已有背景图、AI 角色、预设问题和输入栏，但尚未连接问问后端。
+- `web/src/services/request.ts` 已提供统一鉴权、登录刷新、业务错误和网络错误处理，应作为问问 API 的唯一请求入口。
+- 项目使用 Taro + React + TypeScript，跨页面状态使用 Zustand；问问页面已经注册为底部 Tab，不新增独立入口。
+- 宠物列表由现有 Pet Store 管理，但问问不以当前选中宠物作为查询条件，服务端 `session.pets` 才是本次问题的真实绑定结果。
+
+### 前端分层
+
+```text
+pages/ask/index.tsx
+页面布局、输入交互、页面生命周期
+        ↓
+hooks/use-ask-session.ts
+创建会话、处理 Run、追问、事件轮询和状态转换
+        ↓
+stores/ask-store.ts
+当前会话、运行状态、事件序号、消息和结果
+        ↓
+services/ask.ts
+HTTP API 和响应类型约束
+        ↓
+services/request.ts
+鉴权、重试、业务错误和网络错误
+```
+
+建议新增文件：
+
+- `web/src/types/ask.ts`：会话、Run、宠物绑定、事件、事实结果和结构化分析结果类型。
+- `web/src/services/ask.ts`：封装创建会话、处理 Run、追问、获取会话和增量事件接口。
+- `web/src/stores/ask-store.ts`：保存当前会话和展示所需的最小状态，不保存完整宠物档案或全部历史上下文。
+- `web/src/hooks/use-ask-session.ts`：封装问问工作流，页面不直接编排多个接口调用。
+- 后续按需要拆分 `web/src/components/ask/` 下的输入栏、消息列表、事实结果、风险提示和追问组件。
+
+### 核心状态机
+
+```text
+idle
+→ creating
+→ queued
+→ processing
+→ completed
+→ waiting_input → replying → processing
+                    ↓
+                 completed
+
+processing → escalated
+processing → failed
+creating   → input_error / ambiguous / network_error
+```
+
+状态含义：
+
+- `idle`：没有当前会话，可输入问题或点击预设问题。
+- `creating`：正在调用 `POST /api/v1/ask/sessions`，输入框和发送按钮防重复提交。
+- `queued`：已拿到 `session.id`、`run.id`，准备处理本次 Run。
+- `processing`：调用 process 接口或等待事件，展示处理中状态。
+- `waiting_input`：收到 `assistant.question`，允许用户回答当前追问。
+- `completed`：收到 `fact.completed` 或普通结构化分析完成事件，展示结果和后续操作。
+- `escalated`：收到 `risk.escalated`，优先展示就医行动，不渲染普通分析结果。
+- `failed`：收到 `run.failed` 或请求失败，展示通用失败提示并允许重新发起。
+- `input_error`：400 参数问题，保留原输入并提示补充宠物名称或问题内容。
+- `ambiguous`：409 同名宠物歧义，保留原输入，提示补充更具体的宠物名称。
+
+### 接口调用时序
+
+```text
+用户提交输入
+→ createAskSession(input)
+→ 保存 session、run 和 session.pets
+→ processAskRun(session.id, run.id)
+→ 合并响应中的 events
+→ 使用最后 sequence 调用 getAskEvents(after)
+→ 按事件类型更新页面状态
+```
+
+当前后端的 process 接口是同步完成 Run 的主要入口，但前端仍按事件增量消费设计：响应事件先入状态，轮询只请求更大的 `after`，按 `sequence` 去重。这样可以兼容后续异步 Agent、网络重试和页面重新进入。
+
+### 页面展示规划
+
+- 空状态：保留现有 AI 角色和预设问题，预设问题只负责填入输入框或直接提交，不绑定某一只宠物。
+- 会话头部：展示“问问”标题和当前会话状态；创建成功后展示服务端返回的宠物名称，不提供手动切换来覆盖绑定。
+- 消息区：按用户输入、追问、结果和风险事件分组，结果内容不依赖字符串解析。
+- 多宠物事实结果：按 `session.pets` / `items` 顺序逐行展示宠物名、记录状态、发生时间和摘要；`found=false` 展示“暂无记录”。
+- 普通分析结果：固定展示当前判断、观察到的情况、可能原因、接下来怎么做、需要就医的情况五个字段。
+- 追问：一次只显示一个问题，提交后回到 `processing`，最多遵守后端三轮限制。
+- 红色风险：使用高优先级风险提示和立即就医行动，不和绿色普通分析混排。
+- 失败状态：不暴露内部错误、SQL 或模型信息，提供重试当前问题和修改输入两个动作。
+
+### 输入和图片边界
+
+- 文本输入是第十六步的主流程，提交前校验非空和 4000 字符限制。
+- 当前后端创建会话接口只接受 `input`，尚未提供问问图片字段和图片分析接口；现有“添加图片”视觉入口不能伪装成已支持能力。
+- 图片能力单独作为后续步骤：先复用资产上传服务，再扩展问问请求的媒体字段、质量检测状态和事件协议，完成接口契约后再开放按钮。
+
+### 状态持久化边界
+
+- Zustand 只保存当前会话的最小 UI 状态、事件序号和结构化结果。
+- 不把完整上下文、宠物档案或所有事件长期写入本地存储；重新进入页面时以服务端会话和事件接口恢复。
+- MVP 暂不做问问历史列表，历史数据以后通过独立分页接口接入，避免把当前会话状态和历史查询耦合。
+
+### 开发顺序
+
+1. 定义 `types/ask.ts`，对齐后端 snake_case JSON 字段和事件数据联合类型。
+2. 实现 `services/ask.ts`，封装创建、处理、追问、会话详情和事件查询。
+3. 实现 `stores/ask-store.ts` 与 `use-ask-session.ts`，完成状态机、事件去重和错误归一化。
+4. 将 `pages/ask/index.tsx` 改造成可提交的文本问问页，先支持普通分析、追问、失败和风险状态。
+5. 增加多宠物 `fact.completed` 结果组件，验证“旺仔和球球分别是什么时候”的逐项展示。
+6. 补充页面级交互测试和 TypeScript 类型检查，再进行微信开发者工具真机验证。
+7. 图片问问、观察提醒、问问历史和就医摘要作为后续独立步骤，不和首个文本闭环同时上线。
+
+### 前端验证标准
+
+```bash
+cd web
+pnpm typecheck
+pnpm lint
+pnpm build:weapp
+```
+
+验收至少包含：空输入拦截、无宠物名称 400、同名宠物 409、单宠物普通分析、多宠物事实结果、追问往返、红色风险、事件重复去重、网络失败重试和登录失效跳转。
+
+### 下一步计划
+
+第十七步实现问问前端基础契约：先新增 `types/ask.ts` 和 `services/ask.ts`，让页面具备可调用后端的类型安全 API；暂不修改视觉布局和图片入口，完成接口层后再接入状态机。

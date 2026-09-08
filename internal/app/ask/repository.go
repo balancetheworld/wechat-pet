@@ -59,6 +59,33 @@ func (r *SQLRepository) CreateSessionRun(ctx context.Context, session Session, t
 	return tx.Commit()
 }
 
+func (r *SQLRepository) CreateSessionRunWithPets(ctx context.Context, session Session, pets []SessionPet, turn Turn, run Run, event Event) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_sessions (id, family_id, pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), session.ID, session.FamilyID, session.PetID, session.CreatedBy, session.Status, session.RiskLevel, session.TurnCount, session.PromptVersion, session.RuleVersion, session.KnowledgeVersion, session.CreatedAt, session.UpdatedAt, session.CompletedAt); err != nil {
+		return err
+	}
+	for _, pet := range pets {
+		if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_session_pets (id, session_id, pet_id, mention, sort_order) VALUES (?, ?, ?, ?, ?)"), petRecordID(session.ID, pet.SortOrder), session.ID, pet.PetID, pet.Mention, pet.SortOrder); err != nil {
+			return err
+		}
+	}
+	if err := r.createTurnRun(ctx, tx, turn, run); err != nil {
+		return err
+	}
+	if err := r.appendEvent(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func petRecordID(sessionID string, sortOrder int) string {
+	return sessionID + "-pet-" + strconv.Itoa(sortOrder)
+}
+
 func (r *SQLRepository) GetSession(ctx context.Context, familyID, sessionID string) (Session, error) {
 	var value Session
 	var completedAt sql.NullTime
@@ -73,6 +100,27 @@ func (r *SQLRepository) GetSession(ctx context.Context, familyID, sessionID stri
 		value.CompletedAt = &completedAt.Time
 	}
 	return value, nil
+}
+
+func (r *SQLRepository) ListSessionPets(ctx context.Context, sessionID string) ([]SessionPet, error) {
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT pet_id, mention, sort_order FROM ask_session_pets WHERE session_id = ? ORDER BY sort_order"), sessionID)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no such table") || strings.Contains(strings.ToLower(err.Error()), "does not exist") {
+			return nil, nil
+		}
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]SessionPet, 0)
+	for rows.Next() {
+		var value SessionPet
+		if err := rows.Scan(&value.PetID, &value.Mention, &value.SortOrder); err != nil {
+			return nil, err
+		}
+		value.PetName = value.Mention
+		result = append(result, value)
+	}
+	return result, rows.Err()
 }
 
 func (r *SQLRepository) GetRun(ctx context.Context, sessionID, runID string) (Run, error) {

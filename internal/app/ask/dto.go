@@ -6,14 +6,22 @@ import (
 )
 
 type SessionDTO struct {
-	ID          string        `json:"id"`
-	PetID       string        `json:"pet_id"`
-	Status      SessionStatus `json:"status"`
-	RiskLevel   RiskLevel     `json:"risk_level"`
-	TurnCount   int           `json:"turn_count"`
-	CreatedAt   time.Time     `json:"created_at"`
-	UpdatedAt   time.Time     `json:"updated_at"`
-	CompletedAt *time.Time    `json:"completed_at"`
+	ID          string          `json:"id"`
+	PetID       string          `json:"pet_id"`
+	Pets        []SessionPetDTO `json:"pets,omitempty"`
+	Status      SessionStatus   `json:"status"`
+	RiskLevel   RiskLevel       `json:"risk_level"`
+	TurnCount   int             `json:"turn_count"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	CompletedAt *time.Time      `json:"completed_at"`
+}
+
+type SessionPetDTO struct {
+	PetID     string `json:"pet_id"`
+	PetName   string `json:"pet_name"`
+	Mention   string `json:"mention"`
+	SortOrder int    `json:"sort_order"`
 }
 
 type RunDTO struct {
@@ -42,7 +50,11 @@ type ExecutionDTO struct {
 }
 
 func NewSessionDTO(value Session) SessionDTO {
-	return SessionDTO{ID: value.ID, PetID: value.PetID, Status: value.Status, RiskLevel: value.RiskLevel, TurnCount: value.TurnCount, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, CompletedAt: value.CompletedAt}
+	pets := make([]SessionPetDTO, 0, len(value.Pets))
+	for _, pet := range value.Pets {
+		pets = append(pets, SessionPetDTO{PetID: pet.PetID, PetName: pet.PetName, Mention: pet.Mention, SortOrder: pet.SortOrder})
+	}
+	return SessionDTO{ID: value.ID, PetID: value.PetID, Pets: pets, Status: value.Status, RiskLevel: value.RiskLevel, TurnCount: value.TurnCount, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt, CompletedAt: value.CompletedAt}
 }
 
 func NewRunDTO(value Run) RunDTO {

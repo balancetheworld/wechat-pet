@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -14,14 +15,26 @@ import (
 )
 
 type servicePetRepository struct {
-	pet petapp.Pet
+	pet  petapp.Pet
+	pets []petapp.Pet
 }
 
 func (r servicePetRepository) List(context.Context, string) ([]petapp.Pet, error) {
+	if r.pets != nil {
+		return r.pets, nil
+	}
 	return []petapp.Pet{r.pet}, nil
 }
 
-func (r servicePetRepository) Get(context.Context, string, string) (petapp.Pet, error) {
+func (r servicePetRepository) Get(_ context.Context, _ string, petID string) (petapp.Pet, error) {
+	if r.pets != nil {
+		for _, pet := range r.pets {
+			if pet.ID == petID {
+				return pet, nil
+			}
+		}
+		return petapp.Pet{}, petapp.ErrNotFound
+	}
 	return r.pet, nil
 }
 
@@ -64,6 +77,31 @@ type contextCalendarRepository struct {
 
 func (r contextCalendarRepository) ListRecentRecords(context.Context, string, string, time.Time, int) ([]calendarapp.ContextRecord, error) {
 	return r.records, nil
+}
+
+type factCalendarRepository struct {
+	records map[string]calendarapp.FactRecord
+}
+
+func (r factCalendarRepository) ListRecentRecords(context.Context, string, string, time.Time, int) ([]calendarapp.ContextRecord, error) {
+	return nil, nil
+}
+
+func (r factCalendarRepository) FindLatestFact(_ context.Context, _, petID, factType string) (calendarapp.FactRecord, error) {
+	record, ok := r.records[petID+":"+factType]
+	if !ok {
+		return calendarapp.FactRecord{}, sql.ErrNoRows
+	}
+	return record, nil
+}
+
+type countingExecutor struct {
+	called bool
+}
+
+func (e *countingExecutor) Execute(context.Context, RunInput) (RunDecision, error) {
+	e.called = true
+	return RunDecision{Status: RunFailed, EventType: "run.failed", Data: map[string]any{"message": "should not execute"}}, nil
 }
 
 func (e *contextExecutor) Execute(_ context.Context, input RunInput) (RunDecision, error) {
@@ -109,6 +147,92 @@ func TestServiceCreateAndProcessRun(t *testing.T) {
 	}
 	if len(repeated.Events) != 3 || repeated.Run.Status != RunWaitingInput {
 		t.Fatalf("repeated result = %+v", repeated)
+	}
+}
+
+func TestServiceProcessRunCompletesMultiPetFactWithoutExecutor(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &countingExecutor{}
+	service, err := NewService(repository, servicePetRepository{pets: []petapp.Pet{{ID: "pet-1", Name: "旺仔"}, {ID: "pet-2", Name: "球球"}}}, executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 9, 1, 10, 0, 0, 0, time.UTC)
+	service.SetCalendarRepository(factCalendarRepository{records: map[string]calendarapp.FactRecord{
+		"pet-1:bath": {ID: "record-1", Content: "旺仔洗澡", OccurredAt: at},
+	}})
+	created, _, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔和球球上次洗澡分别是什么时候")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called {
+		t.Fatal("executor was called for deterministic fact query")
+	}
+	if processed.Run.Status != RunCompleted || processed.Run.RiskLevel != RiskGreen || processed.Events[2].Type != "fact.completed" {
+		t.Fatalf("processed = %+v", processed)
+	}
+	if !strings.Contains(processed.Events[2].Data, `"fact_type":"bath"`) || !strings.Contains(processed.Events[2].Data, `"pet_id":"pet-1"`) || !strings.Contains(processed.Events[2].Data, `"pet_id":"pet-2"`) {
+		t.Fatalf("fact event data = %s", processed.Events[2].Data)
+	}
+	if !strings.Contains(processed.Events[2].Data, `"found":false`) {
+		t.Fatalf("missing fact was not represented = %s", processed.Events[2].Data)
+	}
+}
+
+func TestServiceCreateSessionFromInputPersistsMultiplePets(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pets: []petapp.Pet{{ID: "pet-1", Name: "旺仔"}, {ID: "pet-2", Name: "球球"}}}, DeterministicExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, resolution, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔和球球上次洗澡分别是什么时候")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Status != PetResolveResolved || len(created.Session.Pets) != 2 || created.Session.Pets[0].PetID != "pet-1" || created.Session.Pets[1].PetID != "pet-2" {
+		t.Fatalf("resolution=%+v session=%+v", resolution, created.Session)
+	}
+	rows, err := db.Query("SELECT pet_id, mention, sort_order FROM ask_session_pets WHERE session_id = ? ORDER BY sort_order", created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var values []string
+	for rows.Next() {
+		var petID, mention string
+		var sortOrder int
+		if err := rows.Scan(&petID, &mention, &sortOrder); err != nil {
+			t.Fatal(err)
+		}
+		values = append(values, petID+":"+mention+":"+strconv.Itoa(sortOrder))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(values, ",") != "pet-1:旺仔:0,pet-2:球球:1" {
+		t.Fatalf("session pets = %v", values)
 	}
 }
 

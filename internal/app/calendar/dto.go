@@ -60,6 +60,14 @@ type ContextRecord struct {
 	OccurredAt        time.Time
 }
 
+type FactRecord struct {
+	ID                string
+	MedicalType       string
+	CustomMedicalType string
+	Content           string
+	OccurredAt        time.Time
+}
+
 type DayMarkerDTO struct {
 	Date               string `json:"date"`
 	HasMedicalRecord   bool   `json:"has_medical_record"`
