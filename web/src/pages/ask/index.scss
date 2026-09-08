@@ -25,9 +25,9 @@
   width: 100%;
   height: 100%;
   pointer-events: none;
-  /* 真实毛玻璃: 把背景图本身模糊 */
-  filter: blur(36rpx);
-  transform: scale(1.08);
+  /* 真实毛玻璃: 把背景图本身模糊 (10rpx → 5rpx, 几乎高清, 仅留一丝柔光) */
+  filter: blur(5rpx);
+  transform: scale(1.02);
 }
 
 .ask-page > view {
@@ -35,28 +35,30 @@
   z-index: 1;
 }
 
-/* --- ai 精灵(猫)— 偏右下: 整体下移并向右偏移 --- */
+/* --- ai 精灵(猫)— 精准定位到画面右侧红圈处 ---
+   用 right + top 直接锚定元素右上角, 不再用 transform 居中
+   (top/right 是相对 .ask-cat-wrap, 容器由 flex: 1 1 auto 撑满剩余高度) */
 .ask-cat-wrap {
   flex: 1 1 auto;
   position: relative;
-  display: flex;
-  justify-content: center;
-  align-items: center;
   width: 100%;
   min-height: 360rpx;
-  /* 整体下移: 给顶距让猫精灵位于中下区域 */
-  padding-top: 140rpx;
-  /* 向右偏移: 整列靠右一些 */
-  padding-right: 0;
 }
 
 .ask-cat {
+  position: absolute;
   display: block;
   width: 420rpx;
   height: 420rpx;
-  /* 猫精灵本身向右下偏移 */
-  margin-top: 100rpx;
-  margin-left: 140rpx;
+  /* 红圈中心约在屏幕 65% 横向 / 31% 纵向
+     元素右上角定位: 距容器右 4%, 距容器顶 14% (推算后元素中心 ≈ 红圈中心) */
+  top: 14%;
+  right: 4%;
+  /* 相对锚点偏移: 右移 50px, 下移 300px (用大写 PX 绕过 Taro 自动转 rpx) */
+  transform: translate(50PX, 300PX);
+  /* 淡蓝色光晕: 非常淡, 沿猫轮廓柔光扩散 (双层, 内实外虚) */
+  filter: drop-shadow(0 0 20rpx rgba(127, 165, 214, 0.28))
+          drop-shadow(0 0 52rpx rgba(127, 165, 214, 0.14));
 }
 
 /* --- 预设问题(贴在猫精灵下方,不贴输入框) --- */

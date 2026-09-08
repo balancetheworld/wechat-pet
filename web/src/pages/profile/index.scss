@@ -13,7 +13,7 @@
   min-height: 100vh;
   box-sizing: border-box;
   overflow: hidden;
-  padding: 168rpx 24rpx 280rpx;
+  padding: 248rpx 24rpx 220rpx;
   background: #F5EFE6;
 }
 
@@ -40,7 +40,23 @@
   z-index: 1;
   width: 100%;
   flex-shrink: 0;
-  perspective: 1600rpx;
+  perspective: 2000rpx;
+}
+
+/* 书脊书签条: 紧贴 book-card 外左侧, 宽 30px, 与档案内页同色, 内阴影从右到左深→浅 */
+.book-container::before {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  left: -30rpx;
+  top: 0;
+  width: 30rpx;
+  height: 100%;
+  /* 与 .page 同色 (浅米白 + 微透明玻璃) */
+  background: rgba(255, 254, 251, 0.92);
+  /* 内部阴影: 从右到左, 由深到浅 — 贴 book-card 那侧深, 远离那侧浅 */
+  box-shadow: inset 16rpx 0 12rpx -6rpx rgba(74, 100, 137, 0.28);
+  pointer-events: none;
 }
 
 .book-card {
@@ -52,13 +68,59 @@
   transform-origin: 0 50%;
   transform-style: preserve-3d;
   backface-visibility: hidden;
-  transition: transform 260ms cubic-bezier(0.2, 0.75, 0.25, 1);
+  /* 翻页: 柔和缓动, 模拟纸张被翻动的物理感 */
+  transition: transform 400ms cubic-bezier(0.22, 0.61, 0.36, 1);
   will-change: transform;
 }
 
-.book-card-next { z-index: 0; }
+/* 相邻页(下一页/上一页)默认在下层 */
+.book-card-adjacent { z-index: 0; }
 .book-card-current { z-index: 1; }
+/* 往后翻时, 上一页从左侧书脊翻回, 升到当前页之上 */
+.book-card-adjacent.is-flipping { z-index: 2; }
 .book-card.dragging { transition: none; }
+
+/* ============================================
+   页内右下角"修改"按钮 — 浮动在每页 (cover/back-cover 除外) 右下
+   适应性联动: identity/personality 跳 pet-edit 页;
+               health/birthday 弹 detail 占位提示;
+               growth 直接打开 growthForm
+   ============================================ */
+.page-edit-button {
+  position: absolute;
+  z-index: 5;
+  right: 32rpx;
+  bottom: 32rpx;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 10rpx;
+  padding: 14rpx 22rpx;
+  border-radius: 999rpx;
+  background: rgba(170, 200, 230, 0.78);
+  border: 1rpx solid #FFFFFF;
+  color: #4A6489;
+  font-size: 26rpx;
+  font-weight: 400;
+  font-family: 'Ma Shan Zheng', cursive;
+  line-height: 1;
+  box-shadow: 0 6rpx 18rpx rgba(74, 100, 137, 0.18);
+  letter-spacing: 2rpx;
+}
+
+.page-edit-button::after { display: none; }
+
+.page-edit-button:active {
+  background: rgba(127, 165, 214, 0.78);
+}
+
+.page-edit-icon {
+  display: inline-block;
+  font-size: 28rpx;
+  color: #4A6489;
+  font-weight: 700;
+  line-height: 1;
+  font-style: normal;
+}
 
 /* --- 通用页面 / 封面 / 封底 --- */
 .page {
@@ -72,9 +134,25 @@
   box-sizing: border-box;
   overflow: hidden;
   border: 1rpx solid rgba(255, 255, 255, 0.72);
-  border-radius: 28rpx;
-  box-shadow: 0 10rpx 30rpx rgba(74, 100, 137, 0.16), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  /* 左上左下直角 (装订侧是直边), 右上右下圆角 (翻开那一侧) */
+  border-radius: 0 28rpx 28rpx 0;
+  box-shadow:
+    0 10rpx 30rpx rgba(74, 100, 137, 0.16),
+    inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
   background: rgba(255, 254, 251, 0.88);
+}
+
+/* 页内最左侧 30px(30rpx) 渐变阴影: 从左到右, 由深到浅 (模拟书页侧边的内阴影) */
+.page::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  left: 0;
+  top: 0;
+  width: 30rpx;
+  height: 100%;
+  background: linear-gradient(to right, rgba(74, 100, 137, 0.32) 0%, rgba(74, 100, 137, 0.12) 60%, rgba(74, 100, 137, 0) 100%);
+  pointer-events: none;
 }
 
 /* 封面页：图片彻底铺满整页(背景图 100% 100% 强制填满,无法露出蓝色) */
@@ -91,7 +169,8 @@
   padding: 0 !important;
   margin: 0 !important;
   border: 0 !important;
-  border-radius: 0 !important;
+  /* 与 .page 共享同样的圆角, 让图片圆角化, 避免边角露出兜底蓝色 */
+  border-radius: 0 28rpx 28rpx 0 !important;
   cursor: pointer;
   overflow: hidden;
   /* 底层兜底蓝色(理论上不会露出,但保留以防图片加载失败) */
@@ -109,7 +188,8 @@
 .page-body {
   flex: 1;
   box-sizing: border-box;
-  padding: 52rpx 40rpx 32rpx;
+  /* 顶部 padding 收窄: 52rpx → 24rpx (让标题更靠近档案顶部) */
+  padding: 24rpx 40rpx 32rpx;
   overflow: hidden;
 }
 
@@ -170,35 +250,49 @@
   font-size: 24rpx;
 }
 
-/* --- 页头 --- */
+/* --- 页头 (FOOTPRINTS / 足迹 双行结构 + 横线分割) --- */
 .page-head {
   display: flex;
   flex-direction: column;
-  margin-bottom: 28rpx;
+  /* 减小: 28rpx → 18rpx, 让标题和 divider 整体更靠上 */
+  margin-bottom: 18rpx;
 }
 
-.page-eyebrow {
-  display: block;
-  margin-bottom: 10rpx;
-  color: #8A8278;
-  font-size: 28rpx;
-  letter-spacing: 4rpx;
+/* 英文+中文 双行标题容器(基线对齐) */
+.page-head-title {
+  display: flex;
+  align-items: baseline;
+  gap: 18rpx;
+  margin-bottom: 14rpx;
+}
+
+/* 英文小标(灰色, letter-spacing 大) */
+.page-head-en {
+  display: inline-block;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 30rpx;
   font-weight: 700;
-  font-family: 'Ma Shan Zheng', cursive;
+  color: #5B84BE;
+  letter-spacing: 6rpx;
 }
 
-/* 标题: 强制粗体覆盖 proto.scss 的 font-weight: 400 默认 */
-.page-title,
-.archive-page .page-title,
-.archive-page .page-head .page-title {
-  display: block;
+/* 中文大字(深色, 主标题) — 改为与英文同字号, 形成等高的双行标签感 */
+.page-head-zh {
+  display: inline-block;
   font-family: 'Ma Shan Zheng', cursive;
-  font-size: 72rpx;
-  font-weight: 900 !important;
-  color: #5B84BE;
-  margin-bottom: 12rpx;
-  line-height: 1.1;
+  font-size: 30rpx;
+  font-weight: 700 !important;
+  color: #2A2520;
   letter-spacing: 2rpx;
+  line-height: 1.1;
+}
+
+/* 横线分割 */
+.page-head-divider {
+  width: 100%;
+  height: 1rpx;
+  margin-bottom: 18rpx;
+  background: #EDE5D8;
 }
 
 .page-subtitle {
@@ -364,6 +458,109 @@
 
 .tag:nth-child(3n+2) { background: rgba(255, 255, 255, 0.55); }
 .tag:nth-child(3n)   { background: rgba(127, 165, 214, 0.26); }
+
+/* ============================================
+   编辑态标签胶囊 (参考图: 文字 + 右侧 × 关闭)
+   - 非编辑态: 沿用 .tag 浅蓝玻璃胶囊
+   - 编辑态: 文字 + 右侧 × 关闭按钮, 文字区点击进入详情卡
+   ============================================ */
+.tag-capsule {
+  display: inline-flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 10rpx 18rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.7);
+  border-radius: 999rpx;
+  background: rgba(255, 255, 255, 0.55);
+  color: #4A6489;
+  font-size: 24rpx;
+  font-family: 'Ma Shan Zheng', cursive;
+  line-height: 1.2;
+  box-shadow: 0 4rpx 12rpx rgba(74, 100, 137, 0.08);
+}
+
+.tag-capsule.editable { background: rgba(255, 255, 255, 0.7); }
+
+.tag-capsule.add {
+  border-style: dashed;
+  border-color: rgba(127, 165, 214, 0.5);
+  background: rgba(170, 200, 230, 0.18);
+  color: #7FA5D6;
+  font-weight: 700;
+}
+
+.tag-capsule-text {
+  display: inline-block;
+  max-width: 360rpx;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 24rpx;
+  color: inherit;
+}
+
+.tag-capsule.editable .tag-capsule-text {
+  /* 编辑态时, 文字区可点击进入详情卡 */
+  flex: 1;
+}
+
+.tag-capsule-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32rpx;
+  height: 32rpx;
+  border-radius: 50%;
+  background: rgba(127, 165, 214, 0.32);
+  color: #FFFEFB;
+  font-size: 22rpx;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* ============================================
+   详情卡可编辑: Textarea + 取消/保存按钮
+   ============================================ */
+.detail-textarea {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 12rpx;
+  padding: 16rpx;
+  min-height: 200rpx;
+  font-size: 28rpx;
+  line-height: 1.7;
+  color: #2A2520;
+  border: 1rpx solid rgba(127, 165, 214, 0.5);
+  border-radius: 12rpx;
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.detail-card-actions {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 24rpx;
+}
+
+.detail-card-actions .secondary-button,
+.detail-card-actions .primary-button {
+  flex: 1;
+  padding: 14rpx 20rpx;
+  text-align: center;
+  font-size: 26rpx;
+  font-weight: 400;
+  border-radius: 12rpx;
+  border: 1rpx solid #FFFFFF;
+}
+
+.detail-card-actions .secondary-button {
+  background: rgba(170, 200, 230, 0.42);
+  color: #4A6489;
+}
+
+.detail-card-actions .primary-button {
+  background: rgba(170, 200, 230, 0.72);
+  color: #4A6489;
+}
 
 /* --- 个性问答 --- */
 .manual-list {
@@ -770,16 +967,19 @@
 
 /* ============================================
    左上角宠物切换胶囊（仅宠物名 + 三角标）
+   加大 + 下移: 与状态栏保持一点间距
    ============================================ */
 .pet-switcher-button {
   position: fixed;
   z-index: 12;
-  top: 88rpx;
+  /* 下移: 88rpx → 116rpx, 避开状态栏 */
+  top: 116rpx;
   left: 24rpx;
   display: inline-flex;
   align-items: center;
-  gap: 10rpx;
-  padding: 12rpx 24rpx;
+  gap: 14rpx;
+  /* padding 加大: 上下 18rpx / 左右 36rpx, 整体高度约 74rpx (从 ~54rpx) */
+  padding: 18rpx 36rpx;
   border: 1rpx solid rgba(255, 255, 255, 0.72);
   border-radius: 999rpx;
   background: rgba(255, 255, 255, 0.5);
@@ -792,17 +992,19 @@
 
 .pet-switcher-name {
   display: block;
-  max-width: 220rpx;
+  max-width: 300rpx;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 30rpx;
+  /* 字号从 30rpx → 38rpx, 字重保持 700 (Ma Shan Zheng 本就粗) */
+  font-size: 38rpx;
   color: #5B84BE;
   font-weight: 700;
 }
 
 .pet-switcher-caret {
-  font-size: 22rpx;
+  /* 三角标从 22rpx → 30rpx, 与名字比例协调 */
+  font-size: 30rpx;
   color: #8A8278;
   font-style: normal;
 }
@@ -955,40 +1157,11 @@
 }
 
 /* ============================================
-   成长足迹 - 添加事件按钮 + 弹层
-   视觉与日历 cal-add-button / cal-sheet 保持一致
+   成长足迹"添加记录"弹层
+   与 calendar 页面 cal-sheet 完全同款 (在档案页内复用)
    ============================================ */
 
-.growth-add-button {
-  position: fixed;
-  z-index: 9;
-  /* 档案书本外的右下, 略高于页码胶囊 (capsule 在 bottom: 220rpx) */
-  right: 24rpx;
-  bottom: 290rpx;
-  padding: 20rpx 32rpx;
-  color: #FFFEFB;
-  font-size: 28rpx;
-  font-weight: 700;
-  letter-spacing: 2rpx;
-  /* 玻璃质感: 偏白蓝 + 高透明度, 透出底层背景 */
-  background: rgba(170, 200, 230, 0.42);
-  border: 1rpx solid rgba(255, 255, 255, 0.7);
-  border-radius: 999rpx;
-  /* 外发光 + 顶高光 + 底反光 */
-  box-shadow:
-    0 14rpx 36rpx rgba(74, 100, 137, 0.28),
-    0 4rpx 12rpx rgba(91, 132, 190, 0.18),
-    inset 0 1rpx 0 rgba(255, 255, 255, 0.85),
-    inset 0 -1rpx 0 rgba(255, 255, 255, 0.18);
-  line-height: 1;
-  transition: opacity 0.18s ease;
-}
-
-.growth-add-button:active {
-  opacity: 0.78;
-}
-
-.growth-overlay {
+.archive-page .cal-overlay {
   position: fixed;
   z-index: 100;
   inset: 0;
@@ -997,19 +1170,21 @@
   background: rgba(53, 80, 107, 0.42);
 }
 
-.growth-sheet {
+.archive-page .cal-sheet {
   width: 100%;
-  max-height: 80vh;
+  max-height: 86vh;
   box-sizing: border-box;
-  padding: 0 28rpx calc(40rpx + env(safe-area-inset-bottom));
+  padding: 0 28rpx calc(54rpx + env(safe-area-inset-bottom));
   overflow-y: auto;
   border-radius: 28rpx 28rpx 0 0;
   border-top: 1rpx solid rgba(255, 255, 255, 0.78);
-  background: rgba(255, 254, 251, 0.92);
+  background: rgba(255, 254, 251, 0.84);
   box-shadow: 0 -8rpx 28rpx rgba(74, 100, 137, 0.16);
+  backdrop-filter: blur(20px) saturate(1.25);
+  -webkit-backdrop-filter: blur(20px) saturate(1.25);
 }
 
-.growth-sheet-handle {
+.archive-page .cal-sheet-handle {
   width: 70rpx;
   height: 8rpx;
   margin: 16rpx auto;
@@ -1017,7 +1192,7 @@
   background: rgba(163, 194, 232, 0.62);
 }
 
-.growth-sheet-title {
+.archive-page .cal-sheet-title {
   display: block;
   text-align: center;
   font-size: 33rpx;
@@ -1025,7 +1200,7 @@
   color: #7FA5D6;
 }
 
-.growth-field-label {
+.archive-page .cal-field-label {
   display: block;
   margin: 24rpx 0 12rpx;
   font-size: 25rpx;
@@ -1033,53 +1208,55 @@
   color: #2A2520;
 }
 
-.growth-segments,
-.growth-pet-chips,
-.growth-type-chips {
+.archive-page .cal-segments,
+.archive-page .cal-pet-chips,
+.archive-page .cal-type-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 12rpx;
 }
 
-.growth-segment,
-.growth-pet-chip,
-.growth-type-chip {
+.archive-page .cal-segment,
+.archive-page .cal-pet-chip,
+.archive-page .cal-type-chip {
   box-sizing: border-box;
-  padding: 12rpx 20rpx;
+  padding: 14rpx 20rpx;
   font-size: 25rpx;
   color: rgba(74, 100, 137, 0.92);
   border: 1rpx solid #D0E8F0;
   border-radius: 14rpx;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.48);
+  box-shadow: 0 4rpx 12rpx rgba(74, 100, 137, 0.08);
 }
 
-.growth-segment {
+.archive-page .cal-segment {
   flex: 1;
   text-align: center;
 }
 
-.growth-segment.selected,
-.growth-type-chip.selected {
+.archive-page .cal-segment.selected,
+.archive-page .cal-type-chip.selected {
   color: #FFFEFB;
   border-color: rgba(127, 165, 214, 0.65);
   background: rgba(127, 165, 214, 0.86);
 }
 
-.growth-segment.medical.selected {
+.archive-page .cal-segment.medical.selected {
   border-color: rgba(91, 184, 158, 0.7);
   background: #5BB89E;
 }
 
-.growth-pet-chip.selected {
+.archive-page .cal-pet-chip.selected {
   border-color: rgba(163, 194, 232, 0.7);
   background: rgba(191, 224, 241, 0.58);
   color: #3A7A92;
 }
 
-.growth-textarea,
-.growth-custom-medical-type {
+.archive-page .cal-textarea {
   width: 100%;
+  min-height: 156rpx;
   box-sizing: border-box;
+  padding: 16rpx;
   font-size: 26rpx;
   color: #2A2520;
   border: 1rpx solid #D0E8F0;
@@ -1087,18 +1264,19 @@
   background: rgba(232, 244, 248, 0.62);
 }
 
-.growth-textarea {
-  min-height: 156rpx;
-  padding: 16rpx;
-}
-
-.growth-custom-medical-type {
+.archive-page .cal-custom-medical-type {
   height: 68rpx;
+  box-sizing: border-box;
   margin-top: 12rpx;
   padding: 0 14rpx;
+  font-size: 24rpx;
+  color: #2A2520;
+  border: 1rpx solid #D0E8F0;
+  border-radius: 14rpx;
+  background: rgba(232, 244, 248, 0.62);
 }
 
-.growth-picker-row {
+.archive-page .cal-picker-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1110,14 +1288,15 @@
   background: rgba(255, 255, 255, 0.56);
 }
 
-.growth-sheet-actions {
+.archive-page .cal-sheet-actions {
   display: flex;
+  align-items: center;
   gap: 16rpx;
   margin-top: 34rpx;
 }
 
-.growth-cancel-button,
-.growth-save-button {
+.archive-page .cal-cancel-button,
+.archive-page .cal-save-button {
   flex: 1;
   box-sizing: border-box;
   padding: 14rpx 20rpx;
@@ -1126,16 +1305,57 @@
   font-weight: 700;
   border-radius: 14rpx;
   border: 1rpx solid #D0E8F0;
-  background: rgba(255, 255, 255, 0.6);
+  background: rgba(255, 255, 255, 0.48);
   color: rgba(74, 100, 137, 0.92);
+  box-shadow: 0 4rpx 12rpx rgba(74, 100, 137, 0.08);
 }
 
-.growth-save-button {
+.archive-page .cal-save-button {
   color: #FFFEFB;
   border-color: rgba(127, 165, 214, 0.65);
   background: rgba(127, 165, 214, 0.86);
 }
 
-.growth-save-button.disabled {
+.archive-page .cal-save-button.disabled {
   opacity: 0.45;
 }
+
+/* ============================================
+   内联编辑模式 (各章节的字段可编辑 + "+ 添加" 入口)
+   ============================================ */
+.archive-page .inline-edit-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8rpx 14rpx;
+  font-size: 26rpx;
+  color: #2A2520;
+  border: 1rpx solid rgba(127, 165, 214, 0.6);
+  border-radius: 10rpx;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.archive-page .inline-edit-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  margin-top: 18rpx;
+  padding: 16rpx 0;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: rgba(74, 100, 137, 0.92);
+  border: 1rpx dashed rgba(127, 165, 214, 0.6);
+  border-radius: 14rpx;
+  background: rgba(232, 244, 248, 0.42);
+}
+
+.archive-page .inline-edit-add:active {
+  opacity: 0.7;
+}
+
+/* "修改" 按钮处于编辑态时, 底色变为确认色 (绿色) */
+.archive-page .page-edit-button.editing {
+  background: #5BB89E;
+  color: #FFFEFB;
+}
+

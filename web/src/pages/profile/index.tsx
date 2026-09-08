@@ -1,6 +1,6 @@
 import type { CalendarRecordCategory, MedicalType } from '../../types/calendar'
 import type { Pet, PetProfile } from '../../types/pet'
-import { Button, Image, Input, Picker, ScrollView, Text, Textarea, View } from '@tarojs/components'
+import { Button, Image, Input, Picker, ScrollView, Slider, Text, Textarea, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import backgroundImage from '../../assets/background1.png'
@@ -8,8 +8,9 @@ import passportImage from '../../assets/passport.png'
 import { routes } from '../../constants/routes'
 import { createCalendarRecord } from '../../services/calendar'
 import { getPetProfile, getPetResource, getPets } from '../../services/pet'
+import { useAppStore } from '../../stores/app-store'
 import { usePetStore } from '../../stores/pet-store'
-import { navigateTo } from '../../utils/navigation'
+import { navigateTo, openPetEdit } from '../../utils/navigation'
 import './index.scss'
 import '../manual.scss'
 
@@ -58,6 +59,17 @@ const CHAPTERS = [
 ] as const
 
 type ChapterKey = typeof CHAPTERS[number]['key']
+
+/* 章节英文标题（用于左上角"FOOTPRINTS / 足迹"风格） */
+const CHAPTER_EN: Record<ChapterKey, string> = {
+  cover: 'COVER',
+  identity: 'PROFILE',
+  personality: 'PERSONALITY',
+  health: 'HEALTH',
+  birthday: 'BIRTHDAYS',
+  growth: 'FOOTPRINTS',
+  back: 'BACK COVER',
+}
 
 /* 每页可容纳的条数（超出自动开新页） */
 const PERSONALITY_PER_PAGE = 3
@@ -121,13 +133,17 @@ export default function Profile() {
   /* 目录弹层 */
   const [tocOpen, setTocOpen] = useState(false)
   /* 详情弹层 */
-  const [detail, setDetail] = useState<{ title: string, subtitle: string, body: string } | null>(null)
+  const [detail, setDetail] = useState<{ title: string, subtitle: string, body: string, bodyKey?: string, onSave?: (newBody: string) => void } | null>(null)
+  /* detail 弹层编辑缓冲 */
+  const [detailDraft, setDetailDraft] = useState('')
   /* 宠物切换弹层 */
   const [switcherOpen, setSwitcherOpen] = useState(false)
-  /* 成长足迹添加事件弹层 */
+  /* 档案页内联编辑状态：null=正常, 其它=对应章节进入"页面内可编辑"模式 */
+  const [editingChapter, setEditingChapter] = useState<ChapterKey | null>(null)
+  /* ===== 成长足迹添加事件 (沿用 calendar 的 cal-* 弹层 + createCalendarRecord) ===== */
   const [growthFormVisible, setGrowthFormVisible] = useState(false)
   const [growthFormCategory, setGrowthFormCategory] = useState<CalendarRecordCategory>('daily')
-  const [growthFormMedicalType, setGrowthFormMedicalType] = useState<MedicalType>('checkup')
+  const [growthFormMedicalType, setGrowthFormMedicalType] = useState<MedicalType>('vaccine')
   const [growthFormCustomMedicalType, setGrowthFormCustomMedicalType] = useState('')
   const [growthFormContent, setGrowthFormContent] = useState('')
   const [growthFormDate, setGrowthFormDate] = useState<string>(() => {
@@ -138,6 +154,18 @@ export default function Profile() {
   const [growthSubmitting, setGrowthSubmitting] = useState(false)
 
   const selectedPet = pets.find(item => item.id === currentPetId) || pets[0]
+
+  /* ===== 成长足迹添加记录表单打开时, 隐藏底部 tab-bar (与日历页同机制), 避免遮住表单 ===== */
+  const setCalendarFormVisible = useAppStore(state => state.setCalendarFormVisible)
+
+  useEffect(() => {
+    setCalendarFormVisible(growthFormVisible)
+    Taro.eventCenter.trigger('calendar-form-visibility', growthFormVisible)
+    return () => {
+      setCalendarFormVisible(false)
+      Taro.eventCenter.trigger('calendar-form-visibility', false)
+    }
+  }, [growthFormVisible, setCalendarFormVisible])
 
   /* ===== 动态分页：按数据量把每个章节拆成若干页 ===== */
   const pages = useMemo<BookPage[]>(() => {
@@ -167,6 +195,7 @@ export default function Profile() {
   /* 数据变化导致页数变少时，收回越界的当前页 */
   useEffect(() => {
     if (currentPage > pageCount - 1) {
+      // eslint-disable-next-line react-hooks-extra/no-direct-set-state-in-use-effect
       setCurrentPage(0)
     }
   }, [pageCount, currentPage])
@@ -225,6 +254,8 @@ export default function Profile() {
   }, [loadProfile, selectedPet, setPets])
 
   const goToPage = useCallback((page: number) => {
+    /* 翻页/跳页时若有章节处于编辑态, 自动结束编辑(按钮恢复"修改"), 避免编辑态串页 */
+    setEditingChapter(null)
     setCurrentPage(Math.max(0, Math.min(pageCount - 1, page)))
   }, [pageCount])
 
@@ -238,7 +269,7 @@ export default function Profile() {
   }, [turning])
 
   const handleTouchMove = useCallback((event: any) => {
-    if (touchStartX === null) {
+    if (touchStartX === null || turning) {
       return
     }
     const deltaX = event.touches[0].clientX - touchStartX
@@ -249,10 +280,10 @@ export default function Profile() {
     }
     setTouchDeltaX(Math.max(-360, Math.min(360, deltaX)))
     setTurnDirection(deltaX < 0 ? 'next' : 'previous')
-  }, [currentPage, pageCount, touchStartX])
+  }, [currentPage, pageCount, touchStartX, turning])
 
   const handleTouchEnd = useCallback((event: any) => {
-    if (touchStartX === null) {
+    if (touchStartX === null || turning) {
       return
     }
     const deltaX = event.changedTouches[0].clientX - touchStartX
@@ -271,20 +302,49 @@ export default function Profile() {
     setTurnDirection(direction)
     setTurnTargetPage(targetPage)
     setTouchDeltaX(direction === 'next' ? -360 : 360)
+    /* 翻页过渡 400ms，等翻到底后再切页，避免翻页动画被中途打断 */
     setTimeout(() => {
       setResetting(true)
-      goToPage(targetPage)
+      setTurnDirection(null)
+      setTurnTargetPage(null)
       setTouchDeltaX(0)
+      goToPage(targetPage)
       setTimeout(() => {
-        setTurnTargetPage(null)
-        setTurnDirection(null)
         setResetting(false)
         setTurning(false)
-      }, 16)
-    }, 260)
-  }, [currentPage, goToPage, pageCount, touchStartX])
+      }, 30)
+    }, 400)
+  }, [currentPage, goToPage, pageCount, touchStartX, turning])
 
-  const openDetail = (title: string, subtitle: string, body: string) => setDetail({ title, subtitle, body })
+  const openDetail = (title: string, subtitle: string, body: string, onSave?: (newBody: string) => void) => {
+    /* 编辑章节下若调用方未传 onSave, 自动提供一个本地保存提示 */
+    let effectiveOnSave = onSave
+    if (editingChapter && !onSave) {
+      effectiveOnSave = (_newBody: string) => {
+        Taro.showToast({ title: `已保存"${title}"的新内容到本地`, icon: 'success' })
+      }
+    }
+    setDetail({ title, subtitle, body, onSave: effectiveOnSave })
+    setDetailDraft(body)
+  }
+
+  /* 个性说明书: 添加标签 — 直接复用与"修改"标签相同的详情卡(填写→保存) */
+  const openAddPersonalityTag = () => {
+    openDetail(
+      '添加性格标签',
+      '填写标签内容后保存',
+      '',
+      (newBody: string) => {
+        const trimmed = newBody.trim()
+        if (!trimmed) {
+          Taro.showToast({ title: '标签内容不能为空', icon: 'none' })
+          return
+        }
+        setPersonality(previous => [...previous, { id: `local-${Date.now()}`, trait: trimmed, value: '' }])
+        Taro.showToast({ title: '已添加标签', icon: 'success' })
+      },
+    )
+  }
 
   const handleSwitchPet = useCallback((petId: string) => {
     if (petId === currentPetId) {
@@ -293,6 +353,8 @@ export default function Profile() {
     }
     setSwitcherOpen(false)
     setCurrentPetId(petId)
+    /* 切换宠物时同步退出编辑态 */
+    setEditingChapter(null)
     /* 切回第 1 页（封面）等待新档案加载 */
     setCurrentPage(0)
   }, [currentPetId, setCurrentPetId])
@@ -303,7 +365,7 @@ export default function Profile() {
     const today = new Date()
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
     setGrowthFormCategory('daily')
-    setGrowthFormMedicalType('checkup')
+    setGrowthFormMedicalType('vaccine')
     setGrowthFormCustomMedicalType('')
     setGrowthFormContent('')
     setGrowthFormDate(todayStr)
@@ -313,6 +375,25 @@ export default function Profile() {
 
   function closeGrowthForm() {
     setGrowthFormVisible(false)
+  }
+
+  /* ===== 每页右下角"修改"按钮统一行为 =====
+     - 5 章节(identity/personality/health/birthday/growth) 点击后:
+       * 首次: 进入"当前页内联编辑"模式, 右下角按钮文案变 "√ 完成"
+       * 再次: 退出编辑模式, 回到正常显示
+     - 封面/封底不显示该按钮
+  */
+  function handleEditPage(chapter: ChapterKey) {
+    if (chapter === 'cover' || chapter === 'back') {
+      return
+    }
+    /* 身份名片: 直接跳转到宠物编辑表单, 带 petId 参数让表单预填当前宠物信息 */
+    if (chapter === 'identity' && currentPetId) {
+      openPetEdit(currentPetId)
+      return
+    }
+    /* 其它章节 (个性/健康/生日/成长) 使用页面内联编辑模式 */
+    setEditingChapter(editingChapter === chapter ? null : chapter)
   }
 
   async function handleCreateGrowthEvent() {
@@ -380,6 +461,20 @@ export default function Profile() {
     ? (currentPage > 0 ? currentPage - 1 : null)
     : (currentPage < pageCount - 1 ? currentPage + 1 : null))
 
+  /* 翻页方向派生态：决定哪一页是"翻起页"、翻起角度与纸张投影强度 */
+  const flippingNext = turnDirection === 'next'
+  const flippingPrevious = turnDirection === 'previous'
+  const isDragging = touchStartX !== null || resetting
+  /* 往前翻(next)：当前页绕左书脊向左翻 0 → -180 */
+  const currentRotation = flippingNext ? Math.max(-180, Math.min(0, touchDeltaX * 0.5)) : 0
+  /* 往后翻(previous)：上一页从左侧 -180 翻回 0 */
+  const adjacentRotation = flippingPrevious
+    ? Math.min(0, -180 + Math.max(0, Math.min(180, touchDeltaX * 0.5)))
+    : 0
+  /* 翻起程度 0~1，用于纸张投影随角度增强 */
+  const flipProgress = flippingNext || flippingPrevious ? Math.min(1, Math.abs(touchDeltaX * 0.5) / 180) : 0
+  const flipShadow = `0 16rpx 44rpx rgba(74, 100, 137, ${(0.06 + flipProgress * 0.28).toFixed(3)})`
+
   /* ===== 页面: 封面 ===== */
   const renderCover = () => (
     <View
@@ -394,9 +489,11 @@ export default function Profile() {
     <View className="page content-page">
       <View className="page-body">
         <View className="page-head">
-          <Text className="page-eyebrow">PROFILE</Text>
-          <Text className="page-title">{profile?.name || selectedPet?.name || '身份名片'}</Text>
-          <Text className="page-subtitle">它的基本档案，一页看全</Text>
+          <View className="page-head-title">
+            <Text className="page-head-en">{CHAPTER_EN.identity}</Text>
+            <Text className="page-head-zh">{profile?.name || selectedPet?.name || '身份名片'}</Text>
+          </View>
+          <View className="page-head-divider" />
         </View>
         <View className="identity-hero">
           <Button className="identity-photo" onClick={() => openDetail('头像', '点击上传新头像', '在这里可以上传或更换宠物的头像照片，作为这本档案的封面留念。')}>
@@ -405,11 +502,11 @@ export default function Profile() {
           <View className="identity-meta">
             <Text className="identity-name">{profile?.name || selectedPet?.name || '宠'}</Text>
             <Text className="identity-type">
-{profile?.breed || '品种待补充'}
-{' '}
-·
-{' '}
-{formatGender(profile?.gender || '')}
+              {profile?.breed || '品种待补充'}
+              {' '}
+              ·
+              {' '}
+              {formatGender(profile?.gender || '')}
             </Text>
           </View>
         </View>
@@ -441,6 +538,9 @@ export default function Profile() {
             <Text className="strong">已收纳 2 项</Text>
           </Button>
         </View>
+        {editingChapter === 'identity' && (
+          <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '编辑身份信息: 后续版本支持', icon: 'none' })}>＋ 编辑身份信息</View>
+        )}
       </View>
     </View>
   )
@@ -453,20 +553,65 @@ export default function Profile() {
       <View className="page content-page">
         <View className="page-body">
           <View className="page-head">
-            <Text className="page-eyebrow">PERSONALITY</Text>
-            <Text className="page-title">个性说明书</Text>
-            <Text className="page-subtitle">性格标签，加上一份读懂它的说明书</Text>
+            <View className="page-head-title">
+              <Text className="page-head-en">{CHAPTER_EN.personality}</Text>
+              <Text className="page-head-zh">个性说明书</Text>
+            </View>
+            <View className="page-head-divider" />
           </View>
           {part === 1 && (
             <View className="tags">
-              {personality.length > 0
-                ? personality.map(item => (
-<Text className="tag" key={item.id}>
-{item.trait}
-{item.value ? ` · ${item.value}` : ''}
-</Text>
-))
-                : <Text className="empty-text">还没有性格标签</Text>}
+              {personality.length === 0 && editingChapter !== 'personality' && (
+                <Text className="empty-text">还没有性格标签</Text>
+              )}
+              {personality.map((item) => {
+                const tagBody = `${item.trait}${item.value ? ` · ${item.value}` : ''}`
+                const isEditing = editingChapter === 'personality'
+                return (
+                  <View
+                    className={`tag-capsule${isEditing ? ' editable' : ''}`}
+                    key={item.id}
+                  >
+                    <Text
+                      className="tag-capsule-text"
+                      onClick={() => {
+                        if (isEditing) {
+                          /* 编辑态: 点标签文字进入详情卡可编辑 */
+                          openDetail(
+                            `性格标签 · ${item.trait}`,
+                            '点下方"记录内容"修改此标签',
+                            tagBody,
+                            (_newBody: string) => {
+                              Taro.showToast({ title: `已更新标签"${item.trait}"`, icon: 'success' })
+                            },
+                          )
+                        }
+                      }}
+                    >
+                      {tagBody}
+                    </Text>
+                    {isEditing && (
+                      <Text
+                        className="tag-capsule-close"
+                        onClick={() => {
+                          /* 编辑态: 点 × 删除该标签 (本地 state, 不写后端) */
+                          Taro.showToast({ title: `已删除标签"${item.trait}"`, icon: 'success' })
+                        }}
+                      >
+                        ×
+                      </Text>
+                    )}
+                  </View>
+                )
+              })}
+              {editingChapter === 'personality' && (
+                <View
+                  className="tag-capsule add"
+                  onClick={openAddPersonalityTag}
+                >
+                  <Text className="tag-capsule-text">＋</Text>
+                </View>
+              )}
             </View>
           )}
           <View className="manual-list">
@@ -493,6 +638,9 @@ export default function Profile() {
                 <Text className="i">›</Text>
               </Button>
             ))}
+            {editingChapter === 'personality' && part === 1 && (
+              <View className="inline-edit-add" onClick={openAddPersonalityTag}>＋ 添加新标签</View>
+            )}
           </View>
         </View>
       </View>
@@ -505,9 +653,11 @@ export default function Profile() {
       <View className="page content-page">
         <View className="page-body">
           <View className="page-head">
-            <Text className="page-eyebrow">HEALTH</Text>
-            <Text className="page-title">健康资料</Text>
-            <Text className="page-subtitle">健康档案仅对家庭成员可见</Text>
+            <View className="page-head-title">
+              <Text className="page-head-en">{CHAPTER_EN.health}</Text>
+              <Text className="page-head-zh">健康资料</Text>
+            </View>
+            <View className="page-head-divider" />
           </View>
           <View className="health-lead">
             <View className="health-lead-main">
@@ -551,6 +701,9 @@ export default function Profile() {
             </Button>
           </View>
           <Text className="updated">档案由家庭成员维护</Text>
+          {editingChapter === 'health' && (
+            <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '添加健康记录: 后续版本支持', icon: 'none' })}>＋ 添加健康记录</View>
+          )}
         </View>
       </View>
     )
@@ -564,9 +717,11 @@ export default function Profile() {
       <View className="page content-page">
         <View className="page-body">
           <View className="page-head">
-            <Text className="page-eyebrow">BIRTHDAYS</Text>
-            <Text className="page-title">生日纪念册</Text>
-            <Text className="page-subtitle">一起数过的每一岁，都值得好好收藏。</Text>
+            <View className="page-head-title">
+              <Text className="page-head-en">{CHAPTER_EN.birthday}</Text>
+              <Text className="page-head-zh">生日纪念册</Text>
+            </View>
+            <View className="page-head-divider" />
           </View>
           {birthdayRecords.length === 0 && part === 1 && (
             <View className="birthday-feature" style={{ opacity: 0.6, textAlign: 'center' }}>
@@ -616,6 +771,9 @@ export default function Profile() {
               </View>
             )
           })}
+          {editingChapter === 'birthday' && part === 1 && (
+            <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '添加生日记录: 后续版本支持', icon: 'none' })}>＋ 添加生日记录</View>
+          )}
         </View>
       </View>
     )
@@ -636,13 +794,17 @@ export default function Profile() {
           GROWTH_FIRST_PAGE_EVENTS + (part - 1) * GROWTH_PER_PAGE,
         )
 
+    const isEditing = editingChapter === 'growth'
+
     return (
       <View className="page content-page">
         <View className="page-body">
           <View className="page-head">
-            <Text className="page-eyebrow">GROWTH</Text>
-            <Text className="page-title">成长足迹</Text>
-            <Text className="page-subtitle">把日子里的小事，慢慢连成它的一生。</Text>
+            <View className="page-head-title">
+              <Text className="page-head-en">{CHAPTER_EN.growth}</Text>
+              <Text className="page-head-zh">成长足迹</Text>
+            </View>
+            <View className="page-head-divider" />
           </View>
           {part === 1 && (
             <>
@@ -709,6 +871,9 @@ kg
                 <Text className="p">{ev.content}</Text>
               </View>
             ))}
+            {isEditing && (
+              <View className="inline-edit-add" onClick={openGrowthForm}>＋ 添加新事件</View>
+            )}
           </View>
         </View>
       </View>
@@ -735,22 +900,49 @@ kg
     if (!info) {
       return renderCover()
     }
+    let body
     switch (info.chapter) {
       case 'cover':
-        return renderCover()
+        body = renderCover()
+        break
       case 'identity':
-        return renderProfilePage()
+        body = renderProfilePage()
+        break
       case 'personality':
-        return renderPersonalityPage(info.part)
+        body = renderPersonalityPage(info.part)
+        break
       case 'health':
-        return renderHealthPage()
+        body = renderHealthPage()
+        break
       case 'birthday':
-        return renderBirthdayPage(info.part)
+        body = renderBirthdayPage(info.part)
+        break
       case 'growth':
-        return renderGrowthPage(info.part)
+        body = renderGrowthPage(info.part)
+        break
       default:
-        return renderBackCover()
+        body = renderBackCover()
     }
+    // 封面与封底不加修改按钮, 其它每页右下角浮动一个 "修改" 入口
+    const showEditButton = info.chapter !== 'cover' && info.chapter !== 'back'
+    const isEditingThis = editingChapter === info.chapter
+    return (
+      <>
+        {body}
+        {showEditButton && (
+          <View
+            className={`page-edit-button${isEditingThis ? ' editing' : ''}`}
+            onClick={(event) => {
+              event.stopPropagation()
+              handleEditPage(info.chapter)
+            }}
+          >
+            <Text className="page-edit-icon">{isEditingThis ? '√' : '✎'}</Text>
+            <Text className="page-edit-text">{isEditingThis ? '完成' : '修改'}</Text>
+          </View>
+        )}
+      </>
+    )
   }
 
   /* 目录：按章节跳转（跳到该章节的第 1 页） */
@@ -774,8 +966,18 @@ kg
       </Button>
 
       <View className="book-container" style={{ aspectRatio: BOOK_RATIO }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
-        {adjacentPage !== null && <View className="book-card book-card-next">{renderBookPage(adjacentPage)}</View>}
-        <View className={`book-card book-card-current${touchStartX === null && !resetting ? '' : ' dragging'}`} style={{ transform: `rotateY(${Math.max(-180, Math.min(180, touchDeltaX * 0.5))}deg)` }}>
+        {adjacentPage !== null && (
+          <View
+            className={`book-card book-card-adjacent${flippingPrevious ? ' is-flipping' : ''}${flippingPrevious && isDragging ? ' dragging' : ''}`}
+            style={flippingPrevious ? { transform: `rotateY(${adjacentRotation}deg)`, boxShadow: flipShadow } : undefined}
+          >
+            {renderBookPage(adjacentPage)}
+          </View>
+        )}
+        <View
+          className={`book-card book-card-current${flippingNext ? ' is-flipping' : ''}${flippingNext && isDragging ? ' dragging' : ''}`}
+          style={flippingNext ? { transform: `rotateY(${currentRotation}deg)`, boxShadow: flipShadow } : undefined}
+        >
           {renderBookPage(currentPage)}
         </View>
         {loading && <View className="book-loading"><Text>正在加载档案</Text></View>}
@@ -786,18 +988,35 @@ kg
         )}
       </View>
 
-      {/* 底部页码状态：点击打开目录 */}
-      <Button className="page-status" onClick={() => setTocOpen(true)}>
-        <Text className="span">{currentPageInfo?.name || '封面'}</Text>
-        <Text className="page-dot" />
-        <Text className="span">
-{currentPage + 1}
-{' '}
-/
-{' '}
-{pageCount}
+      {/* 底部进度条: 浅黑玻璃 + 黄色高亮 + 黄色光晕圆点 + 当前页高亮数字 */}
+      <View className="page-progress">
+        <View className="page-progress-track">
+          <Slider
+            className="page-progress-slider"
+            min={0}
+            max={Math.max(0, pageCount - 1)}
+            step={1}
+            value={currentPage}
+            onChanging={event => goToPage(event.detail.value)}
+            onChange={event => goToPage(event.detail.value)}
+            activeColor="#FFD86E"
+            /* 内 track 完全透明: 去掉"灰色底层", 仅显示黄色已选区域 */
+            backgroundColor="rgba(255,255,255,0)"
+            blockSize={0}
+            showValue={false}
+          />
+          {/* 滑块: 单元素, 黄底 + box-shadow 做"黄色光晕"边框, 整元素移动天然同步 */}
+          <View
+            className="page-progress-thumb"
+            style={{ left: `${pageCount > 1 ? (currentPage / (pageCount - 1)) * 100 : 50}%` }}
+          />
+        </View>
+        <Text className="page-progress-num">
+          <Text className="page-progress-num-current">{currentPage + 1}</Text>
+          <Text className="page-progress-num-sep"> / </Text>
+          <Text className="page-progress-num-total">{pageCount}</Text>
         </Text>
-      </Button>
+      </View>
 
       {/* 目录弹层 */}
       <View className={`overlay${tocOpen ? ' open' : ''}`} onClick={() => setTocOpen(false)}>
@@ -851,20 +1070,66 @@ kg
         </View>
       </View>
 
-      {/* 详情弹层 */}
-      <View className={`overlay${detail ? ' open' : ''}`} onClick={() => setDetail(null)}>
+      {/* 详情弹层 (支持编辑模式: 当 openDetail 传入 onSave 时, 自动切换为可编辑 Textarea) */}
+      <View
+        className={`overlay${detail ? ' open' : ''}`}
+        onClick={() => {
+          setDetail(null)
+          setDetailDraft('')
+        }}
+      >
         <View className="detail-card" onClick={event => event.stopPropagation()}>
           <View className="detail-card-head">
             <View className="detail-card-head-main">
               <Text className="h2">{detail?.title || '详情'}</Text>
               {!!detail?.subtitle && <Text className="p">{detail.subtitle}</Text>}
             </View>
-            <Button className="close-button" onClick={() => setDetail(null)}>×</Button>
+            <Button
+              className="close-button"
+              onClick={() => {
+                setDetail(null)
+                setDetailDraft('')
+              }}
+            >
+              ×
+            </Button>
           </View>
           <View className="detail-block">
             <Text className="span">记录内容</Text>
-            <Text className="p">{detail?.body || ''}</Text>
+            {detail?.onSave
+              ? (
+                <Textarea
+                  className="detail-textarea"
+                  value={detailDraft}
+                  maxlength={500}
+                  onInput={event => setDetailDraft(event.detail.value)}
+                />
+              )
+              : <Text className="p">{detail?.body || ''}</Text>}
           </View>
+          {detail?.onSave && (
+            <View className="detail-card-actions">
+              <Button
+                className="secondary-button"
+                onClick={() => {
+                  setDetail(null)
+                  setDetailDraft('')
+                }}
+              >
+                取消
+              </Button>
+              <Button
+                className="primary-button"
+                onClick={() => {
+                  detail.onSave?.(detailDraft)
+                  setDetail(null)
+                  setDetailDraft('')
+                }}
+              >
+                保存
+              </Button>
+            </View>
+          )}
         </View>
       </View>
 
@@ -921,34 +1186,31 @@ kg
         </View>
       </View>
 
-      {/* 成长足迹添加按钮(只在成长足迹章节显示) */}
-      {currentPageInfo?.chapter === 'growth' && (
-        <Button className="growth-add-button" onClick={openGrowthForm}>＋ 添加事件</Button>
-      )}
+      {/* 成长足迹"档案外"悬浮添加按钮已移除: 仅保留编辑态下页内的"＋ 添加新事件"入口 */}
 
-      {/* 成长足迹添加事件弹层 */}
+      {/* 成长足迹添加事件弹层 (完全复用 calendar 的 cal-* 弹层样式) */}
       {growthFormVisible && (
-        <View className="growth-overlay" onClick={closeGrowthForm}>
-          <View className="growth-sheet" onClick={event => event.stopPropagation()}>
-            <View className="growth-sheet-handle" />
-            <Text className="growth-sheet-title">添加事件</Text>
+        <View className="cal-overlay" onClick={closeGrowthForm}>
+          <View className="cal-sheet" onClick={event => event.stopPropagation()}>
+            <View className="cal-sheet-handle" />
+            <Text className="cal-sheet-title">添加记录</Text>
 
-            <Text className="growth-field-label">分类</Text>
-            <View className="growth-segments">
-              <View className={`growth-segment${growthFormCategory === 'daily' ? ' selected' : ''}`} onClick={() => setGrowthFormCategory('daily')}>日常</View>
-              <View className={`growth-segment${growthFormCategory === 'medical' ? ' selected medical' : ''}`} onClick={() => setGrowthFormCategory('medical')}>医疗</View>
+            <Text className="cal-field-label">分类</Text>
+            <View className="cal-segments">
+              <View className={`cal-segment${growthFormCategory === 'daily' ? ' selected' : ''}`} onClick={() => setGrowthFormCategory('daily')}>日常</View>
+              <View className={`cal-segment medical${growthFormCategory === 'medical' ? ' selected' : ''}`} onClick={() => setGrowthFormCategory('medical')}>医疗</View>
             </View>
 
-            <Text className="growth-field-label">宠物</Text>
-            <View className="growth-pet-chips">
+            <Text className="cal-field-label">宠物</Text>
+            <View className="cal-pet-chips">
               {pets.map(pet => (
-                <View key={pet.id} className={`growth-pet-chip${growthFormPetID === pet.id ? ' selected' : ''}`} onClick={() => setGrowthFormPetID(pet.id)}>{pet.name}</View>
+                <View key={pet.id} className={`cal-pet-chip${growthFormPetID === pet.id ? ' selected' : ''}`} onClick={() => setGrowthFormPetID(pet.id)}>{pet.name}</View>
               ))}
             </View>
 
-            <Text className="growth-field-label">发生日期</Text>
+            <Text className="cal-field-label">发生日期</Text>
             <Picker mode="date" value={growthFormDate} onChange={event => setGrowthFormDate(event.detail.value)}>
-              <View className="growth-picker-row">
+              <View className="cal-picker-row">
                 <Text>{growthFormDate || '选择日期'}</Text>
                 <Text>选择</Text>
               </View>
@@ -956,24 +1218,24 @@ kg
 
             {growthFormCategory === 'medical' && (
               <>
-                <Text className="growth-field-label">医疗类型</Text>
-                <View className="growth-type-chips">
+                <Text className="cal-field-label">医疗类型</Text>
+                <View className="cal-type-chips">
                   {(['vaccine', 'deworming', 'checkup', 'visit', 'medication', 'other'] as MedicalType[]).map(type => (
-                    <View key={type} className={`growth-type-chip${growthFormMedicalType === type ? ' selected' : ''}`} onClick={() => setGrowthFormMedicalType(type)}>{MEDICAL_TYPE_LABEL[type]}</View>
+                    <View key={type} className={`cal-type-chip${growthFormMedicalType === type ? ' selected' : ''}`} onClick={() => setGrowthFormMedicalType(type)}>{MEDICAL_TYPE_LABEL[type]}</View>
                   ))}
                 </View>
                 {growthFormMedicalType === 'other' && (
-                  <Input className="growth-custom-medical-type" value={growthFormCustomMedicalType} maxlength={50} placeholder="请输入医疗类型" onInput={event => setGrowthFormCustomMedicalType(event.detail.value)} />
+                  <Input className="cal-custom-medical-type" value={growthFormCustomMedicalType} maxlength={50} placeholder="请输入医疗类型" onInput={event => setGrowthFormCustomMedicalType(event.detail.value)} />
                 )}
               </>
             )}
 
-            <Text className="growth-field-label">记录内容</Text>
-            <Textarea className="growth-textarea" value={growthFormContent} maxlength={1000} placeholder={growthFormCategory === 'medical' ? '医院、药品等需要备注的写在这里哦～' : '写下今天发生的事'} onInput={event => setGrowthFormContent(event.detail.value)} />
+            <Text className="cal-field-label">记录内容</Text>
+            <Textarea className="cal-textarea" value={growthFormContent} maxlength={1000} placeholder={growthFormCategory === 'medical' ? '医院、药品等需要备注的写在这里哦～' : '写下今天发生的事'} onInput={event => setGrowthFormContent(event.detail.value)} />
 
-            <View className="growth-sheet-actions">
-              <View className="growth-cancel-button" onClick={closeGrowthForm}>取消</View>
-              <View className={`growth-save-button${growthSubmitting ? ' disabled' : ''}`} onClick={handleCreateGrowthEvent}>{growthSubmitting ? '保存中' : '保存'}</View>
+            <View className="cal-sheet-actions">
+              <View className="cal-cancel-button" onClick={closeGrowthForm}>取消</View>
+              <View className={`cal-save-button${growthSubmitting ? ' disabled' : ''}`} onClick={handleCreateGrowthEvent}>{growthSubmitting ? '保存中' : '保存'}</View>
             </View>
           </View>
         </View>
