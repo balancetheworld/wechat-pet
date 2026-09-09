@@ -124,7 +124,7 @@ func TestServiceCreateAndProcessRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "最近没精神")
+	result, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "最近没精神", "create-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestServiceCreateAndProcessRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if processed.Run.Status != RunWaitingInput || processed.Session.Status != SessionActive || len(processed.Events) != 3 {
+	if processed.Run.Status != RunWaitingInput || processed.Run.RowVersion != 3 || processed.Run.CompletedAt != nil || processed.Session.Status != SessionActive || len(processed.Events) != 3 {
 		t.Fatalf("processed result = %+v", processed)
 	}
 	if processed.Events[2].Type != "assistant.question" {
@@ -170,7 +170,7 @@ func TestServiceProcessRunCompletesMultiPetFactWithoutExecutor(t *testing.T) {
 	service.SetCalendarRepository(factCalendarRepository{records: map[string]calendarapp.FactRecord{
 		"pet-1:bath": {ID: "record-1", Content: "旺仔洗澡", OccurredAt: at},
 	}})
-	created, _, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔和球球上次洗澡分别是什么时候")
+	created, _, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔和球球上次洗澡分别是什么时候", "create-2")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +207,7 @@ func TestServiceCreateSessionFromInputPersistsMultiplePets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, resolution, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔和球球上次洗澡分别是什么时候")
+	created, resolution, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔和球球上次洗澡分别是什么时候", "create-3")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,6 +236,47 @@ func TestServiceCreateSessionFromInputPersistsMultiplePets(t *testing.T) {
 	}
 }
 
+func TestServiceCreateSessionIsIdempotent(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pets: []petapp.Pet{{ID: "pet-1", Name: "旺仔"}}}, DeterministicExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, _, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔最近没精神", "same-create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed, _, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔最近没精神", "same-create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.Session.ID != created.Session.ID || replayed.Run.ID != created.Run.ID {
+		t.Fatalf("replayed result = %+v", replayed)
+	}
+	if _, _, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔开始呕吐", "same-create"); err == nil {
+		t.Fatal("reused create idempotency key error = nil")
+	}
+	var sessionCount, messageCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM ask_sessions").Scan(&sessionCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM ask_messages").Scan(&messageCount); err != nil {
+		t.Fatal(err)
+	}
+	if sessionCount != 1 || messageCount != 1 {
+		t.Fatalf("session count = %d, message count = %d", sessionCount, messageCount)
+	}
+}
+
 func TestServiceProcessRunBuildsContextSnapshot(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -253,7 +294,7 @@ func TestServiceProcessRunBuildsContextSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	service.SetCalendarRepository(contextCalendarRepository{records: []calendarapp.ContextRecord{{ID: "record-1", Category: "medical", Content: "完成疫苗接种"}}})
-	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "第一轮问题")
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "第一轮问题", "create-4")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,13 +314,16 @@ func TestServiceProcessRunBuildsContextSnapshot(t *testing.T) {
 	if len(executor.input.Context.RecentRecords) != 1 || executor.input.Context.RecentRecords[0].Content != "完成疫苗接种" {
 		t.Fatalf("recent records = %+v", executor.input.Context.RecentRecords)
 	}
-	if len(executor.input.Context.Sources) != 5 || executor.input.Context.Sources[0].Name != "pet_base" || executor.input.Context.Sources[3].Name != "calendar_records" || executor.input.Context.Sources[4].Name != "ask_turns" {
+	if len(executor.input.Context.Sources) != 6 || executor.input.Context.Sources[0].Name != "pet_base" || executor.input.Context.Sources[1].Name != "ask_messages" || executor.input.Context.Sources[4].Name != "calendar_records" || executor.input.Context.Sources[5].Name != "ask_turns" {
 		t.Fatalf("context sources = %+v", executor.input.Context.Sources)
+	}
+	if len(executor.input.Context.Messages) != 1 || executor.input.Context.Messages[0].Role != "user" || executor.input.Context.Messages[0].Content != "第一轮问题" {
+		t.Fatalf("context messages = %+v", executor.input.Context.Messages)
 	}
 	if len(executor.input.Context.Events) != 1 || executor.input.Context.Events[0].Tag != "medical_record" {
 		t.Fatalf("context events = %+v", executor.input.Context.Events)
 	}
-	if !strings.Contains(processed.Events[1].Data, `"context_version":"ask-context-v4"`) || !strings.Contains(processed.Events[1].Data, `"char_count":`) || strings.Contains(processed.Events[1].Data, "鸡肉") {
+	if !strings.Contains(processed.Events[1].Data, `"context_version":"ask-context-v5"`) || !strings.Contains(processed.Events[1].Data, `"char_count":`) || strings.Contains(processed.Events[1].Data, "鸡肉") {
 		t.Fatalf("context audit data = %s", processed.Events[1].Data)
 	}
 }
@@ -299,7 +343,7 @@ func TestServiceEscalatesAndCompletesSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "呼吸困难")
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "呼吸困难", "create-5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +371,7 @@ func TestServiceRuleEscalationSkipsExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "现在呼吸困难")
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "现在呼吸困难", "create-6")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -358,10 +402,10 @@ func TestServiceValidatesCreateInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", ""); err == nil {
+	if _, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "", "create-7"); err == nil {
 		t.Fatal("empty input error = nil")
 	}
-	if _, err := service.CreateSession(context.Background(), "family-1", "user-1", "", "问题"); err == nil {
+	if _, err := service.CreateSession(context.Background(), "family-1", "user-1", "", "问题", "create-8"); err == nil {
 		t.Fatal("empty pet error = nil")
 	}
 }
@@ -381,7 +425,7 @@ func TestServiceExecutorFailureIsPersistedAsFailed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "问题")
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "问题", "create-9")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -394,7 +438,7 @@ func TestServiceExecutorFailureIsPersistedAsFailed(t *testing.T) {
 	}
 }
 
-func TestServiceReplyCreatesFollowUpTurn(t *testing.T) {
+func TestServiceReplyResumesSameRunAndPersistsMessages(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -409,47 +453,62 @@ func TestServiceReplyCreatesFollowUpTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "最近没精神")
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "最近没精神", "create-10")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID); err != nil {
-		t.Fatal(err)
-	}
-	replied, err := service.Reply(context.Background(), "family-1", created.Session.ID, created.Run.ID, "现在呼吸困难")
+	waiting, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replied.Session.TurnCount != 2 || replied.Run.Status != RunQueued || len(replied.Events) != 1 {
+	replied, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, created.Run.ID, "现在呼吸困难", waiting.Run.RowVersion, "reply-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replied.Session.TurnCount != 1 || replied.Run.ID != created.Run.ID || replied.Run.TurnID != created.Run.TurnID || replied.Run.Status != RunQueued || replied.Run.RowVersion != 4 || replied.Run.ClarificationCount != 1 || len(replied.Events) != 1 || replied.Events[0].Sequence != 4 {
 		t.Fatalf("reply result = %+v", replied)
 	}
-	turn, err := repository.GetTurn(context.Background(), created.Session.ID, replied.Run.TurnID)
+	turn, err := repository.GetTurn(context.Background(), created.Session.ID, created.Run.TurnID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn.TurnIndex != 1 || turn.Input == "" {
-		t.Fatalf("follow-up turn = %+v", turn)
+	if turn.TurnIndex != 0 || turn.Input != "最近没精神" || turn.Status != RunQueued {
+		t.Fatalf("resumed turn = %+v", turn)
 	}
 	loaded, err := repository.GetSession(context.Background(), "family-1", created.Session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.TurnCount != 2 {
+	if loaded.TurnCount != 1 {
 		t.Fatalf("session turn count = %d", loaded.TurnCount)
 	}
-	if _, err := service.Reply(context.Background(), "family-1", created.Session.ID, created.Run.ID, "重复回答"); err == nil {
-		t.Fatal("stale run reply error = nil")
+	messages, err := repository.ListMessages(context.Background(), created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 3 || messages[0].Role != "user" || messages[1].Role != "question" || messages[2].Role != "user" || messages[2].Content != "现在呼吸困难" {
+		t.Fatalf("messages = %+v", messages)
+	}
+	replayed, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, created.Run.ID, "现在呼吸困难", waiting.Run.RowVersion, "reply-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replayed.Run.ID != replied.Run.ID || replayed.Run.RowVersion != replied.Run.RowVersion {
+		t.Fatalf("replayed result = %+v", replayed)
+	}
+	if _, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, created.Run.ID, "不同回答", waiting.Run.RowVersion, "reply-1"); err == nil {
+		t.Fatal("reused idempotency key error = nil")
 	}
 	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, replied.Run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if processed.Run.Status != RunEscalated || processed.Run.RiskLevel != RiskRed || processed.Events[2].Type != "risk.escalated" {
-		t.Fatalf("follow-up red result = %+v", processed)
+	if processed.Run.Status != RunEscalated || processed.Run.RiskLevel != RiskRed || processed.Events[5].Type != "risk.escalated" {
+		t.Fatalf("resumed red result = %+v", processed)
 	}
 }
 
-func TestServiceReplyValidatesStateAndTurnLimit(t *testing.T) {
+func TestServiceReplyValidatesStateVersionAndClarificationLimit(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -464,32 +523,49 @@ func TestServiceReplyValidatesStateAndTurnLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "问题")
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "问题", "create-11")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Reply(context.Background(), "family-1", created.Session.ID, created.Run.ID, "回答"); err == nil {
+	if _, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, created.Run.ID, "回答", created.Run.RowVersion, "reply-queued"); err == nil {
 		t.Fatal("queued run reply error = nil")
 	}
-	if _, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID); err != nil {
-		t.Fatal(err)
-	}
-	first, err := service.Reply(context.Background(), "family-1", created.Session.ID, created.Run.ID, "第一轮回答")
+	waiting, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, first.Run.ID); err != nil {
-		t.Fatal(err)
-	}
-	second, err := service.Reply(context.Background(), "family-1", created.Session.ID, first.Run.ID, "第二轮回答")
+	first, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, created.Run.ID, "第一轮回答", waiting.Run.RowVersion, "reply-limit-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, second.Run.ID); err != nil {
+	waiting, err = service.ProcessRun(context.Background(), "family-1", created.Session.ID, first.Run.ID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Reply(context.Background(), "family-1", created.Session.ID, second.Run.ID, "超过上限"); err == nil {
-		t.Fatal("turn limit error = nil")
+	if _, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, created.Run.ID, "过期版本", first.Run.RowVersion, "reply-stale"); err == nil {
+		t.Fatal("stale version reply error = nil")
+	}
+	second, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, first.Run.ID, "第二轮回答", waiting.Run.RowVersion, "reply-limit-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	waiting, err = service.ProcessRun(context.Background(), "family-1", created.Session.ID, second.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, second.Run.ID, "第三轮回答", waiting.Run.RowVersion, "reply-limit-3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, third.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed.Run.Status != RunFailed || processed.Run.ErrorCode != "clarification_limit_reached" || processed.Run.ClarificationCount != MaxClarifications {
+		t.Fatalf("clarification limit result = %+v", processed)
+	}
+	if _, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, third.Run.ID, "超过上限", processed.Run.RowVersion, "reply-limit-4"); err == nil {
+		t.Fatal("clarification limit reply error = nil")
 	}
 }
 

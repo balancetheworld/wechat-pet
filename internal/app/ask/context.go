@@ -42,6 +42,9 @@ func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot
 	for index := range value.RecentTurns {
 		value.RecentTurns[index].Input = contextSummary(value.RecentTurns[index].Input)
 	}
+	for index := range value.Messages {
+		value.Messages[index].Content = contextSummary(value.Messages[index].Content)
+	}
 	for index := range value.RecentRecords {
 		value.RecentRecords[index].Content = contextSummary(value.RecentRecords[index].Content)
 	}
@@ -59,6 +62,11 @@ func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot
 		value.Events = normalizeContextEvents(value.RecentTurns, value.RecentRecords)
 		value.CharCount = contextSnapshotChars(value)
 	}
+	for value.CharCount > maxChars && len(value.Messages) > 1 {
+		value.Messages = value.Messages[1:]
+		markContextSourceTruncated(&value, "ask_messages")
+		value.CharCount = contextSnapshotChars(value)
+	}
 	return value
 }
 
@@ -66,6 +74,9 @@ func contextSnapshotChars(value ContextSnapshot) int {
 	result := utf8.RuneCountInString(value.Pet.ID) + utf8.RuneCountInString(value.Pet.Name) + utf8.RuneCountInString(value.Pet.Breed) + utf8.RuneCountInString(value.Pet.Gender) + utf8.RuneCountInString(value.Pet.Birthday) + utf8.RuneCountInString(value.Pet.HealthStatus) + utf8.RuneCountInString(value.Pet.Allergies) + utf8.RuneCountInString(value.Pet.LongTermMedication)
 	for _, turn := range value.RecentTurns {
 		result += utf8.RuneCountInString(turn.Input)
+	}
+	for _, message := range value.Messages {
+		result += utf8.RuneCountInString(message.Role) + utf8.RuneCountInString(message.Content)
 	}
 	for _, record := range value.RecentRecords {
 		result += utf8.RuneCountInString(record.Content) + utf8.RuneCountInString(record.Category) + utf8.RuneCountInString(record.MedicalType)

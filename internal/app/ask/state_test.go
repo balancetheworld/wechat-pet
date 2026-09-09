@@ -16,6 +16,8 @@ func TestCanTransitionRun(t *testing.T) {
 		{RunRunning, RunFailed, true},
 		{RunRunning, RunCanceled, true},
 		{RunRunning, RunInterrupted, true},
+		{RunWaitingInput, RunQueued, true},
+		{RunWaitingInput, RunCanceled, true},
 		{RunCompleted, RunRunning, false},
 		{RunWaitingInput, RunCompleted, false},
 		{RunFailed, RunRunning, false},

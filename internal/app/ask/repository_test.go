@@ -30,14 +30,14 @@ func TestSQLRepositoryPersistsRunAndEvents(t *testing.T) {
 		t.Fatal(err)
 	}
 	startedEvent := Event{ID: "event-2", SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: 2, Type: "run.started", Data: `{}`, CreatedAt: now.Add(time.Minute)}
-	if err := repository.TransitionRun(context.Background(), run.ID, RunQueued, RunRunning, RiskUnknown, "", now.Add(time.Minute), startedEvent); err != nil {
+	if err := repository.TransitionRun(context.Background(), run.ID, 1, RunQueued, RunRunning, RiskUnknown, "", now.Add(time.Minute), startedEvent, Message{}); err != nil {
 		t.Fatal(err)
 	}
 	completedEvent := Event{ID: "event-3", SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: 3, Type: "run.completed", Data: `{"risk_level":"green"}`, CreatedAt: now.Add(2 * time.Minute)}
-	if err := repository.TransitionRun(context.Background(), run.ID, RunQueued, RunRunning, RiskGreen, "", now.Add(2*time.Minute), completedEvent); !errors.Is(err, ErrRunStateConflict) {
+	if err := repository.TransitionRun(context.Background(), run.ID, 1, RunRunning, RunCompleted, RiskGreen, "", now.Add(2*time.Minute), completedEvent, Message{}); !errors.Is(err, ErrRunStateConflict) {
 		t.Fatalf("conflict error = %v, want %v", err, ErrRunStateConflict)
 	}
-	if err := repository.TransitionRun(context.Background(), run.ID, RunRunning, RunCompleted, RiskGreen, "", now.Add(2*time.Minute), completedEvent); err != nil {
+	if err := repository.TransitionRun(context.Background(), run.ID, 2, RunRunning, RunCompleted, RiskGreen, "", now.Add(2*time.Minute), completedEvent, Message{}); err != nil {
 		t.Fatal(err)
 	}
 	result, err := repository.ListEvents(context.Background(), session.ID, run.ID, 0)
@@ -53,6 +53,20 @@ func TestSQLRepositoryPersistsRunAndEvents(t *testing.T) {
 	}
 	if loaded.ID != session.ID || loaded.Status != SessionCompleted || loaded.RiskLevel != RiskGreen {
 		t.Fatalf("loaded session = %+v", loaded)
+	}
+	loadedRun, err := repository.GetRun(context.Background(), session.ID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loadedRun.RowVersion != 3 || loadedRun.ClarificationCount != 0 {
+		t.Fatalf("loaded run = %+v", loadedRun)
+	}
+	snapshotTurns, err := repository.GetSnapshotTurns(context.Background(), session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshotTurns) != 1 || snapshotTurns[0].Turn.ID != turn.ID || snapshotTurns[0].Run.RowVersion != 3 || len(snapshotTurns[0].Events) != 3 || snapshotTurns[0].Events[2].Sequence != 3 {
+		t.Fatalf("snapshot turns = %+v", snapshotTurns)
 	}
 }
 
@@ -143,8 +157,10 @@ func createAskSchema(t *testing.T, db *sql.DB) {
 		`CREATE TABLE ask_sessions (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, created_by TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, turn_count INTEGER NOT NULL, prompt_version TEXT NOT NULL, rule_version TEXT NOT NULL, knowledge_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, completed_at TIMESTAMP)`,
 		`CREATE TABLE ask_session_pets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, pet_id TEXT NOT NULL, mention TEXT NOT NULL, sort_order INTEGER NOT NULL, UNIQUE(session_id, pet_id), UNIQUE(session_id, sort_order))`,
 		`CREATE TABLE ask_turns (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, status TEXT NOT NULL, input TEXT NOT NULL, selected_run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(session_id, turn_index))`,
-		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL REFERENCES ask_turns(id), run_index INTEGER NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL, UNIQUE(turn_id, run_index))`,
+		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL REFERENCES ask_turns(id), run_index INTEGER NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, clarification_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, risk_level TEXT NOT NULL, rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL, UNIQUE(turn_id, run_index))`,
 		`CREATE TABLE ask_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(run_id, sequence))`,
+		`CREATE TABLE ask_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT, role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL)`,
+		`CREATE TABLE ask_idempotency_keys (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, response_data TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(user_id, operation, idempotency_key))`,
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {

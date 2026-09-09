@@ -13,6 +13,8 @@ func CanTransitionRun(from, to RunStatus) bool {
 		return to == RunRunning || to == RunCanceled
 	case RunRunning:
 		return to == RunWaitingInput || to == RunCompleted || to == RunEscalated || to == RunFailed || to == RunCanceled || to == RunInterrupted
+	case RunWaitingInput:
+		return to == RunQueued || to == RunCanceled
 	default:
 		return false
 	}

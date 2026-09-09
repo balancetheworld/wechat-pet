@@ -19,5 +19,7 @@ func RegisterRoutes(router *gin.RouterGroup, signer *jwtpkg.Signer, familyReposi
 	group.POST("/ask/sessions/:session_id/runs/:run_id/process", handler.ProcessRun)
 	group.POST("/ask/sessions/:session_id/runs/:run_id/reply", handler.Reply)
 	group.GET("/ask/sessions/:session_id", handler.GetSession)
+	group.GET("/ask/sessions/:session_id/snapshot", handler.GetSnapshot)
 	group.GET("/ask/sessions/:session_id/runs/:run_id/events", handler.Events)
+	group.GET("/ask/sessions/:session_id/runs/:run_id/events/stream", handler.StreamEvents)
 }

@@ -19,6 +19,13 @@ var analysisRequiredFields = []string{
 var unsafeAnalysisTerms = []string{"确诊", "诊断为", "处方", "用药剂量", "服用剂量", "毫克", "mg"}
 
 func ValidateAnalysisOutput(decision RunDecision) error {
+	if decision.Status == RunWaitingInput {
+		question, ok := decision.Data["question"].(string)
+		if !ok || strings.TrimSpace(question) == "" {
+			return fmt.Errorf("%w: invalid question", ErrInvalidAnalysisOutput)
+		}
+		return nil
+	}
 	if decision.Status != RunCompleted {
 		return nil
 	}

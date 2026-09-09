@@ -2,6 +2,8 @@ import type { AuthSession, Identity, User } from '../types/auth'
 import type { FamilyRole, FamilySummary } from '../types/family'
 import Taro from '@tarojs/taro'
 import { create } from 'zustand'
+import { queryClient } from '../services/query-client'
+import { useAskStore } from './ask-store'
 import { useFamilyStore } from './family-store'
 
 interface AuthStore {
@@ -18,7 +20,7 @@ interface AuthStore {
 
 const storageKey = 'auth_token'
 
-export const useAuthStore = create<AuthStore>(set => ({
+export const useAuthStore = create<AuthStore>((set, get) => ({
   token: '',
   user: null,
   identity: 'guest',
@@ -42,6 +44,11 @@ export const useAuthStore = create<AuthStore>(set => ({
   },
 
   async setSession(session) {
+    const current = get()
+    if (current.user?.id !== session.user.id || current.family?.id !== session.family?.id) {
+      queryClient.clear()
+      useAskStore.getState().reset()
+    }
     set({
       token: session.token,
       user: session.user,
@@ -64,6 +71,8 @@ export const useAuthStore = create<AuthStore>(set => ({
   },
 
   async clearSession() {
+    queryClient.clear()
+    useAskStore.getState().reset()
     set({
       token: '',
       user: null,
