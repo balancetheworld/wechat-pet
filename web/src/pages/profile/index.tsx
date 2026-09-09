@@ -1,9 +1,10 @@
-import type { CalendarRecordCategory, MedicalType } from '../../types/calendar'
 import type { Pet, PetProfile } from '../../types/pet'
-import { Button, Image, Input, Picker, ScrollView, Slider, Text, Textarea, View } from '@tarojs/components'
+import { Button, Image, Picker, ScrollView, Slider, Text, Textarea, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { CSSProperties } from 'react'
 import backgroundImage from '../../assets/background1.png'
+import bookPaperImage from '../../assets/book-page-bg.jpg'
 import passportImage from '../../assets/passport.png'
 import { routes } from '../../constants/routes'
 import { createCalendarRecord } from '../../services/calendar'
@@ -72,7 +73,7 @@ const CHAPTER_EN: Record<ChapterKey, string> = {
 }
 
 /* 每页可容纳的条数（超出自动开新页） */
-const PERSONALITY_PER_PAGE = 3
+const PERSONALITY_PER_PAGE = 5
 const BIRTHDAY_PER_PAGE = 3
 const GROWTH_FIRST_PAGE_EVENTS = 2
 const GROWTH_PER_PAGE = 3
@@ -80,14 +81,85 @@ const GROWTH_PER_PAGE = 3
 /* 书本长宽比（拉长版） */
 const BOOK_RATIO = '1086 / 1620'
 
-/* 医疗类型标签(对应日历 GrowthEvent 标题) */
-const MEDICAL_TYPE_LABEL: Record<MedicalType, string> = {
-  vaccine: '疫苗',
-  deworming: '驱虫',
-  checkup: '体检',
-  visit: '就诊',
-  medication: '用药',
-  other: '其他',
+/* 内页纸张背景（右上角猫咪 + 纸纹，已按 1086/1620 裁剪压缩至 32KB） */
+const PAGE_PAPER_STYLE: CSSProperties = {
+  backgroundImage: `url(${bookPaperImage})`,
+  backgroundSize: '100% 100%',
+  backgroundRepeat: 'no-repeat',
+}
+
+/* 体重数值统一保留两位小数展示 */
+const fmtWeight = (value: number) => Number(value).toFixed(2)
+
+/* 个性说明书初始预置(后端暂无数据时的默认展示, 有数据则以服务端为准) */
+const DEFAULT_PERSONALITY: PersonalityItem[] = [
+  { id: 'preset-tag-1', trait: '亲人', value: '' },
+  { id: 'preset-tag-2', trait: '活泼', value: '' },
+  { id: 'preset-tag-3', trait: '贪吃', value: '' },
+  { id: 'preset-tag-4', trait: '喜欢同伴', value: '' },
+]
+
+const DEFAULT_QUESTIONS: QuestionItem[] = [
+  { id: 'preset-q-1', question: '它喜欢什么', answer: '散步、草地和家人陪伴' },
+  { id: 'preset-q-2', question: '它害怕什么', answer: '突然靠近的陌生声音' },
+  { id: 'preset-q-3', question: '它有哪些生活习惯', answer: '早晚各散步一次' },
+  { id: 'preset-q-4', question: '和它相处时需要注意', answer: '见面时先保持一点距离' },
+  { id: 'preset-q-5', question: '我们眼中的他', answer: '家里的热情陪伴者' },
+]
+
+/* 成长事件去重键: 后端映射出的正式记录与本地乐观记录用 类型+时间+内容 关联 */
+const growthEventKey = (event: GrowthEvent) => `${event.type}|${event.occurred_at}|${event.content}`
+
+/* 合并后端列表与本地乐观列表: 以服务端为准, 同时保留服务端尚未映射出来的本地记录,
+   避免"重拉覆盖"把刚添加的日常记录从事件记录里冲掉 */
+function mergeGrowthEvents(fresh: GrowthEvent[], local: GrowthEvent[]): GrowthEvent[] {
+  const seen = new Set<string>()
+  const merged: GrowthEvent[] = []
+  const pushIfNew = (event: GrowthEvent) => {
+    const key = growthEventKey(event)
+    if (seen.has(key)) {
+      return
+    }
+    seen.add(key)
+    merged.push(event)
+  }
+  fresh.forEach(pushIfNew)
+  /* 只补本地乐观添加(local- 前缀)的记录; 本地与服务端同键的以服务端为准 */
+  local
+    .filter(event => event.id.startsWith('local-'))
+    .forEach(pushIfNew)
+  return merged.sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
+}
+
+/* 成长足迹"本地补充记录"的本地持久化:
+   日历记录接口写入成功后, 后端 growth-events 资源的映射可能延迟甚至缺失,
+   把刚加的记录缓存到本地, 每次加载时与服务端列表合并, 保证事件记录下同步可见 */
+const localGrowthStorageKey = (petID: string) => `pet-growth-local-${petID}`
+
+function readLocalGrowthEvents(petID: string): GrowthEvent[] {
+  try {
+    const stored = Taro.getStorageSync<unknown>(localGrowthStorageKey(petID))
+    return Array.isArray(stored) ? (stored as GrowthEvent[]) : []
+  }
+  catch {
+    return []
+  }
+}
+
+function writeLocalGrowthEvents(petID: string, events: GrowthEvent[]) {
+  try {
+    Taro.setStorageSync(localGrowthStorageKey(petID), events)
+  }
+  catch {
+    /* 存储失败静默忽略: 记录仍会在本次会话内显示 */
+  }
+}
+
+/* 服务端列表 + 本地补充记录 合并, 并顺手清理已被服务端"认领"的本地缓存 */
+function syncGrowthEventsWithLocal(fresh: GrowthEvent[], stored: GrowthEvent[]): GrowthEvent[] {
+  const freshKeys = new Set(fresh.map(growthEventKey))
+  const kept = stored.filter(event => !freshKeys.has(growthEventKey(event)))
+  return mergeGrowthEvents(fresh, kept)
 }
 
 interface BookPage {
@@ -140,11 +212,8 @@ export default function Profile() {
   const [switcherOpen, setSwitcherOpen] = useState(false)
   /* 档案页内联编辑状态：null=正常, 其它=对应章节进入"页面内可编辑"模式 */
   const [editingChapter, setEditingChapter] = useState<ChapterKey | null>(null)
-  /* ===== 成长足迹添加事件 (沿用 calendar 的 cal-* 弹层 + createCalendarRecord) ===== */
+  /* ===== 成长足迹添加事件 (沿用 calendar 的 cal-* 弹层 + createCalendarRecord; 仅日常) ===== */
   const [growthFormVisible, setGrowthFormVisible] = useState(false)
-  const [growthFormCategory, setGrowthFormCategory] = useState<CalendarRecordCategory>('daily')
-  const [growthFormMedicalType, setGrowthFormMedicalType] = useState<MedicalType>('vaccine')
-  const [growthFormCustomMedicalType, setGrowthFormCustomMedicalType] = useState('')
   const [growthFormContent, setGrowthFormContent] = useState('')
   const [growthFormDate, setGrowthFormDate] = useState<string>(() => {
     const d = new Date()
@@ -212,11 +281,26 @@ export default function Profile() {
         getPetResource<GrowthEvent[]>(pet.id, 'growth-events'),
       ])
       setProfile(petProfile)
-      setPersonality(personalityItems)
-      setQuestions(questionItems)
+      /* 个性页: 预置标签/问答固定展示在前, 后端已有且不重复的条目追加在后 */
+      const presetTraits = new Set(DEFAULT_PERSONALITY.map(tag => tag.trait))
+      const presetQuestions = new Set(DEFAULT_QUESTIONS.map(q => q.question))
+      setPersonality([
+        ...DEFAULT_PERSONALITY,
+        ...personalityItems.filter(item => !presetTraits.has(item.trait)),
+      ])
+      setQuestions([
+        ...DEFAULT_QUESTIONS,
+        ...questionItems.filter(item => !presetQuestions.has(item.question)),
+      ])
       setBirthdayRecords(records)
       setWeights(weightItems)
-      setGrowthEvents(eventItems)
+      /* 服务端成长事件 + 本地补充记录 合并展示 */
+      const stored = readLocalGrowthEvents(pet.id)
+      const merged = syncGrowthEventsWithLocal(eventItems, stored)
+      /* 重写缓存: 只保留仍在展示中的本地补充记录(已被服务端认领的清除) */
+      const mergedKeys = new Set(merged.map(growthEventKey))
+      writeLocalGrowthEvents(pet.id, stored.filter(event => mergedKeys.has(growthEventKey(event))))
+      setGrowthEvents(merged)
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '加载档案失败'
@@ -364,9 +448,6 @@ export default function Profile() {
     const targetPetID = currentPetId || pets[0]?.id || ''
     const today = new Date()
     const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-    setGrowthFormCategory('daily')
-    setGrowthFormMedicalType('vaccine')
-    setGrowthFormCustomMedicalType('')
     setGrowthFormContent('')
     setGrowthFormDate(todayStr)
     setGrowthFormPetID(targetPetID)
@@ -405,46 +486,45 @@ export default function Profile() {
       await Taro.showToast({ title: '请选择宠物', icon: 'none' })
       return
     }
-    if (growthFormCategory === 'daily' && !growthFormContent.trim()) {
+    if (!growthFormContent.trim()) {
       await Taro.showToast({ title: '请写点内容', icon: 'none' })
-      return
-    }
-    if (growthFormCategory === 'medical' && growthFormMedicalType === 'other' && !growthFormCustomMedicalType.trim()) {
-      await Taro.showToast({ title: '请填写医疗类型', icon: 'none' })
       return
     }
     setGrowthSubmitting(true)
     const occurredAt = `${growthFormDate}T12:00:00+09:00`
-    /* 同步到日历所需字段: type 标题 */
-    const typeLabel = growthFormCategory === 'medical'
-      ? (growthFormMedicalType === 'other' ? growthFormCustomMedicalType.trim() : MEDICAL_TYPE_LABEL[growthFormMedicalType])
-      : '日常'
     try {
-      /* 1) 写入后端日历记录(同步到日历) */
+      /* 1) 写入后端日历记录(同步到日历), 成长足迹仅支持日常类型 */
       await createCalendarRecord({
-        category: growthFormCategory,
-        medical_type: growthFormCategory === 'medical' ? growthFormMedicalType : undefined,
-        custom_medical_type: growthFormCategory === 'medical' && growthFormMedicalType === 'other'
-          ? growthFormCustomMedicalType.trim()
-          : undefined,
+        category: 'daily',
         pet_id: petID,
-        content: growthFormContent.trim() || undefined,
+        content: growthFormContent.trim(),
         occurred_at: occurredAt,
       })
       /* 2) 立即在档案页成长足迹中追加一条(乐观更新,无需等后端推送) */
       const newEvent: GrowthEvent = {
         id: `local-${Date.now()}`,
-        type: typeLabel,
+        type: '日常',
         occurred_at: occurredAt,
         recorder: '我',
-        content: growthFormContent.trim() || (growthFormCategory === 'medical' ? '已记录医疗事项' : '已记录今日小事'),
+        content: growthFormContent.trim(),
       }
+      /* 2) 写入本地补充缓存 + 乐观更新, 保证"事件记录"下立即出现 */
+      writeLocalGrowthEvents(petID, [newEvent, ...readLocalGrowthEvents(petID)])
       setGrowthEvents(previous => [newEvent, ...previous])
       setGrowthFormVisible(false)
       await Taro.showToast({ title: '已记一笔', icon: 'success' })
-      /* 3) 后台静默重拉一次成长足迹,以防后端做了转换映射 */
+      /* 3) 后台静默重拉并与本地缓存合并: 服务端映射出的正式记录自然取代本地记录 */
       void getPetResource<GrowthEvent[]>(petID, 'growth-events')
-        .then(fresh => setGrowthEvents(fresh))
+        .then(fresh => {
+          if (!Array.isArray(fresh)) {
+            return
+          }
+          const currentStored = readLocalGrowthEvents(petID)
+          const merged = syncGrowthEventsWithLocal(fresh, currentStored)
+          const mergedKeys = new Set(merged.map(growthEventKey))
+          writeLocalGrowthEvents(petID, currentStored.filter(event => mergedKeys.has(growthEventKey(event))))
+          setGrowthEvents(merged)
+        })
         .catch(() => {})
     }
     catch (error) {
@@ -486,7 +566,7 @@ export default function Profile() {
 
   /* ===== 章节: 身份名片 ===== */
   const renderProfilePage = () => (
-    <View className="page content-page">
+    <View className="page content-page" style={PAGE_PAPER_STYLE}>
       <View className="page-body">
         <View className="page-head">
           <View className="page-head-title">
@@ -550,7 +630,7 @@ export default function Profile() {
     const start = (part - 1) * PERSONALITY_PER_PAGE
     const partQuestions = questions.slice(start, start + PERSONALITY_PER_PAGE)
     return (
-      <View className="page content-page">
+      <View className="page content-page" style={PAGE_PAPER_STYLE}>
         <View className="page-body">
           <View className="page-head">
             <View className="page-head-title">
@@ -650,7 +730,7 @@ export default function Profile() {
   /* ===== 章节: 健康资料 ===== */
   const renderHealthPage = () => {
     return (
-      <View className="page content-page">
+      <View className="page content-page" style={PAGE_PAPER_STYLE}>
         <View className="page-body">
           <View className="page-head">
             <View className="page-head-title">
@@ -714,7 +794,7 @@ export default function Profile() {
     const start = (part - 1) * BIRTHDAY_PER_PAGE
     const partRecords = birthdayRecords.slice(start, start + BIRTHDAY_PER_PAGE)
     return (
-      <View className="page content-page">
+      <View className="page content-page" style={PAGE_PAPER_STYLE}>
         <View className="page-body">
           <View className="page-head">
             <View className="page-head-title">
@@ -797,7 +877,7 @@ export default function Profile() {
     const isEditing = editingChapter === 'growth'
 
     return (
-      <View className="page content-page">
+      <View className="page content-page" style={PAGE_PAPER_STYLE}>
         <View className="page-body">
           <View className="page-head">
             <View className="page-head-title">
@@ -812,7 +892,7 @@ export default function Profile() {
               <View
                 className="weight-card detail-trigger"
                 onClick={() => wLatest
-                  ? openDetail('体重记录', `当前 ${wLatest.weight} kg，比上次${wDiff < 0 ? '减少' : '增加'} ${Math.abs(wDiff).toFixed(1)} kg`, `最近记录：${sortedWeights.map(w => `${w.measured_at} ${w.weight} kg`).join('；')}。`)
+                  ? openDetail('体重记录', `当前 ${fmtWeight(wLatest.weight)} kg，比上次${wDiff < 0 ? '减少' : '增加'} ${Math.abs(wDiff).toFixed(2)} kg`, `最近记录：${sortedWeights.map(w => `${w.measured_at} ${fmtWeight(w.weight)} kg`).join('；')}。`)
                   : openDetail('体重记录', '暂无记录', '还没有体重记录，添加后这里会展示体重变化趋势。')}
               >
                 {wLatest
@@ -822,12 +902,12 @@ export default function Profile() {
                       <View className="weight-head-main">
                         <Text className="span">当前体重</Text>
                         <Text className="weight-value">
-{wLatest.weight}
+{fmtWeight(wLatest.weight)}
 {' '}
 kg
                         </Text>
                       </View>
-                      <View className="weight-change">{wPrev ? `较上次 ${wDiff < 0 ? '−' : '+'}${Math.abs(wDiff).toFixed(1)}` : '首次记录'}</View>
+                      <View className="weight-change">{wPrev ? `较上次 ${wDiff < 0 ? '−' : '+'}${Math.abs(wDiff).toFixed(2)}` : '首次记录'}</View>
                     </View>
                     <View className="chart">
                       <View className="chart-line" />
@@ -923,26 +1003,7 @@ kg
       default:
         body = renderBackCover()
     }
-    // 封面与封底不加修改按钮, 其它每页右下角浮动一个 "修改" 入口
-    const showEditButton = info.chapter !== 'cover' && info.chapter !== 'back'
-    const isEditingThis = editingChapter === info.chapter
-    return (
-      <>
-        {body}
-        {showEditButton && (
-          <View
-            className={`page-edit-button${isEditingThis ? ' editing' : ''}`}
-            onClick={(event) => {
-              event.stopPropagation()
-              handleEditPage(info.chapter)
-            }}
-          >
-            <Text className="page-edit-icon">{isEditingThis ? '√' : '✎'}</Text>
-            <Text className="page-edit-text">{isEditingThis ? '完成' : '修改'}</Text>
-          </View>
-        )}
-      </>
-    )
+    return body
   }
 
   /* 目录：按章节跳转（跳到该章节的第 1 页） */
@@ -965,17 +1026,28 @@ kg
         <Text className="pet-switcher-caret">▾</Text>
       </Button>
 
+      {/* 右上角档案外编辑入口：作用于当前所在章节（封面/封底不显示） */}
+      {currentPageInfo && currentPageInfo.chapter !== 'cover' && currentPageInfo.chapter !== 'back' && (
+        <View
+          className={`page-edit-button${editingChapter === currentPageInfo.chapter ? ' editing' : ''}`}
+          onClick={() => handleEditPage(currentPageInfo.chapter)}
+        >
+          <Text className="page-edit-icon">{editingChapter === currentPageInfo.chapter ? '√' : '✎'}</Text>
+          <Text className="page-edit-text">{editingChapter === currentPageInfo.chapter ? '完成' : '修改'}</Text>
+        </View>
+      )}
+
       <View className="book-container" style={{ aspectRatio: BOOK_RATIO }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
         {adjacentPage !== null && (
           <View
-            className={`book-card book-card-adjacent${flippingPrevious ? ' is-flipping' : ''}${flippingPrevious && isDragging ? ' dragging' : ''}`}
+            className={`book-card book-card-adjacent${flippingPrevious ? ' is-flipping' : ''}${isDragging ? ' dragging' : ''}`}
             style={flippingPrevious ? { transform: `rotateY(${adjacentRotation}deg)`, boxShadow: flipShadow } : undefined}
           >
             {renderBookPage(adjacentPage)}
           </View>
         )}
         <View
-          className={`book-card book-card-current${flippingNext ? ' is-flipping' : ''}${flippingNext && isDragging ? ' dragging' : ''}`}
+          className={`book-card book-card-current${flippingNext ? ' is-flipping' : ''}${isDragging ? ' dragging' : ''}`}
           style={flippingNext ? { transform: `rotateY(${currentRotation}deg)`, boxShadow: flipShadow } : undefined}
         >
           {renderBookPage(currentPage)}
@@ -1195,12 +1267,6 @@ kg
             <View className="cal-sheet-handle" />
             <Text className="cal-sheet-title">添加记录</Text>
 
-            <Text className="cal-field-label">分类</Text>
-            <View className="cal-segments">
-              <View className={`cal-segment${growthFormCategory === 'daily' ? ' selected' : ''}`} onClick={() => setGrowthFormCategory('daily')}>日常</View>
-              <View className={`cal-segment medical${growthFormCategory === 'medical' ? ' selected' : ''}`} onClick={() => setGrowthFormCategory('medical')}>医疗</View>
-            </View>
-
             <Text className="cal-field-label">宠物</Text>
             <View className="cal-pet-chips">
               {pets.map(pet => (
@@ -1216,22 +1282,8 @@ kg
               </View>
             </Picker>
 
-            {growthFormCategory === 'medical' && (
-              <>
-                <Text className="cal-field-label">医疗类型</Text>
-                <View className="cal-type-chips">
-                  {(['vaccine', 'deworming', 'checkup', 'visit', 'medication', 'other'] as MedicalType[]).map(type => (
-                    <View key={type} className={`cal-type-chip${growthFormMedicalType === type ? ' selected' : ''}`} onClick={() => setGrowthFormMedicalType(type)}>{MEDICAL_TYPE_LABEL[type]}</View>
-                  ))}
-                </View>
-                {growthFormMedicalType === 'other' && (
-                  <Input className="cal-custom-medical-type" value={growthFormCustomMedicalType} maxlength={50} placeholder="请输入医疗类型" onInput={event => setGrowthFormCustomMedicalType(event.detail.value)} />
-                )}
-              </>
-            )}
-
             <Text className="cal-field-label">记录内容</Text>
-            <Textarea className="cal-textarea" value={growthFormContent} maxlength={1000} placeholder={growthFormCategory === 'medical' ? '医院、药品等需要备注的写在这里哦～' : '写下今天发生的事'} onInput={event => setGrowthFormContent(event.detail.value)} />
+            <Textarea className="cal-textarea" value={growthFormContent} maxlength={1000} placeholder="写下今天发生的事" onInput={event => setGrowthFormContent(event.detail.value)} />
 
             <View className="cal-sheet-actions">
               <View className="cal-cancel-button" onClick={closeGrowthForm}>取消</View>
