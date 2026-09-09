@@ -12,8 +12,8 @@
   height: 100vh;
   min-height: 100vh;
   box-sizing: border-box;
-  /* 底部留 220rpx 避开 navtab(提问框与导航栏不重合) */
-  padding: 0 24rpx 220rpx;
+  /* 底部留出安全区，避免输入栏贴住系统手势区 */
+  padding: 0 24rpx calc(112rpx + env(safe-area-inset-bottom));
   /* 整体背景: 半透明白玻璃 */
   background: rgba(255, 254, 251, 0.2);
 }
@@ -33,6 +33,15 @@
 .ask-page > view {
   position: relative;
   z-index: 1;
+}
+
+.ask-content-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
 }
 
 /* --- ai 精灵(猫)— 精准定位到画面右侧红圈处 ---
@@ -92,7 +101,9 @@
 /* --- 输入栏(自然流贴底,避开 navtab) — 单一定义避免合并 --- */
 .ask-input-bar {
   position: relative;
+  z-index: 2;
   flex-shrink: 0;
+  box-sizing: border-box;
   margin: 24rpx 0 0;
   padding: 14rpx 18rpx;
   border: 1rpx solid rgba(163, 194, 232, 0.44);
@@ -162,3 +173,124 @@
 
 /* --- 顶部导航(已弃用,避免误显示) --- */
 .ask-header { display: none; }
+
+.ask-conversation {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.ask-conversation-inner {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+  min-height: 100%;
+  padding: calc(72rpx + env(safe-area-inset-top)) 68rpx 28rpx;
+}
+
+.ask-bound-pets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  align-self: center;
+  justify-content: center;
+}
+
+.ask-bound-pet {
+  padding: 8rpx 14rpx;
+  color: var(--primary-deep);
+  border: 1rpx solid rgba(127, 165, 214, 0.34);
+  border-radius: 8rpx;
+  background: rgba(255, 254, 251, 0.68);
+  font-size: 22rpx;
+}
+
+.ask-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.ask-message--user {
+  align-self: flex-end;
+  color: #FFFEFB;
+  border-radius: 8rpx 8rpx 2rpx 8rpx;
+  background: rgba(74, 100, 137, 0.88);
+  box-shadow: var(--shadow-sm);
+}
+
+.ask-processing {
+  align-self: flex-start;
+  padding: 14rpx 18rpx;
+  color: var(--primary-deep);
+  border-radius: 8rpx;
+  background: rgba(255, 254, 251, 0.66);
+  font-size: 24rpx;
+}
+
+.ask-processing::after {
+  content: '...';
+}
+
+.ask-error-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  padding: 20rpx;
+  color: #7B4C3D;
+  border: 1rpx solid rgba(224, 153, 88, 0.42);
+  border-radius: 8rpx;
+  background: rgba(255, 250, 242, 0.9);
+  font-size: 25rpx;
+  line-height: 1.45;
+}
+
+.ask-inline-button,
+.ask-new-button {
+  min-height: 60rpx;
+  box-sizing: border-box;
+  padding: 0 20rpx;
+  color: var(--primary-deep);
+  border: 1rpx solid rgba(127, 165, 214, 0.38);
+  border-radius: 8rpx;
+  background: rgba(255, 254, 251, 0.76);
+  font-size: 24rpx;
+  line-height: 58rpx;
+}
+
+.ask-inline-button {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.ask-new-button {
+  align-self: center;
+  margin: 4rpx 0 0;
+}
+
+.ask-inline-button::after,
+.ask-new-button::after,
+.ask-add-img::after,
+.ask-send-btn::after {
+  border: 0;
+}
+
+.ask-add-img,
+.ask-send-btn {
+  min-height: 72rpx;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  line-height: 72rpx;
+}
+
+.ask-add-img[disabled] {
+  color: rgba(74, 100, 137, 0.42);
+  background: rgba(163, 194, 232, 0.1);
+}
+
+.ask-send-btn[disabled] {
+  opacity: 0.46;
+}

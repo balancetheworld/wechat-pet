@@ -18,6 +18,39 @@ type SQLRepository struct {
 	driver string
 }
 
+func (r *SQLRepository) ListRecentRecords(ctx context.Context, familyID, petID string, since time.Time, limit int) ([]ContextRecord, error) {
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT id, category, COALESCE(medical_type, ''), COALESCE(custom_medical_type, ''), content, occurred_at FROM calendar_records WHERE family_id = ? AND pet_id = ? AND occurred_at >= ? AND deleted_at IS NULL ORDER BY occurred_at DESC, id DESC LIMIT ?"), familyID, petID, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]ContextRecord, 0)
+	for rows.Next() {
+		var value ContextRecord
+		if err := rows.Scan(&value.ID, &value.Category, &value.MedicalType, &value.CustomMedicalType, &value.Content, &value.OccurredAt); err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
+func (r *SQLRepository) FindLatestFact(ctx context.Context, familyID, petID, factType string) (FactRecord, error) {
+	condition := "medical_type = ?"
+	value := factType
+	if factType == "bath" {
+		condition = "(content LIKE ? OR content LIKE ?)"
+		value = "%洗澡%"
+	}
+	args := []any{familyID, petID, value}
+	if factType == "bath" {
+		args = []any{familyID, petID, "%洗澡%", "%洗浴%"}
+	}
+	var result FactRecord
+	err := r.db.QueryRowContext(ctx, r.query("SELECT id, COALESCE(medical_type, ''), COALESCE(custom_medical_type, ''), content, occurred_at FROM calendar_records WHERE family_id = ? AND pet_id = ? AND deleted_at IS NULL AND "+condition+" ORDER BY occurred_at DESC, id DESC LIMIT 1"), args...).Scan(&result.ID, &result.MedicalType, &result.CustomMedicalType, &result.Content, &result.OccurredAt)
+	return result, err
+}
+
 func NewRepository(db *sql.DB, driver string) (*SQLRepository, error) {
 	if db == nil {
 		return nil, errors.New("database is required")

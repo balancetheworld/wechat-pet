@@ -23,6 +23,7 @@ type Config struct {
 	WeChatAppSecret  string `yaml:"wechat_app_secret"`
 	StorageDriver    string `yaml:"storage_driver"`
 	LocalUploadDir   string `yaml:"local_upload_dir"`
+	PublicBaseURL    string `yaml:"public_base_url"`
 	COSSecretID      string `yaml:"cos_secret_id"`
 	COSSecretKey     string `yaml:"cos_secret_key"`
 	COSBucket        string `yaml:"cos_bucket"`
@@ -94,6 +95,7 @@ func applyEnvironment(cfg *Config) error {
 	setString("WECHAT_APP_SECRET", &cfg.WeChatAppSecret)
 	setString("STORAGE_DRIVER", &cfg.StorageDriver)
 	setString("LOCAL_UPLOAD_DIR", &cfg.LocalUploadDir)
+	setString("PUBLIC_BASE_URL", &cfg.PublicBaseURL)
 	setString("COS_SECRET_ID", &cfg.COSSecretID)
 	setString("COS_SECRET_KEY", &cfg.COSSecretKey)
 	setString("COS_BUCKET", &cfg.COSBucket)
@@ -152,6 +154,9 @@ func (c Config) Validate() error {
 		}
 		if strings.TrimSpace(c.WeChatAppID) == "" || strings.TrimSpace(c.WeChatAppSecret) == "" {
 			return errors.New("WECHAT_APP_ID and WECHAT_APP_SECRET are required in production")
+		}
+		if c.StorageDriver == "local" && strings.TrimSpace(c.PublicBaseURL) == "" {
+			return errors.New("PUBLIC_BASE_URL is required for local storage in production")
 		}
 	}
 	return nil

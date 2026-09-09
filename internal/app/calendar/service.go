@@ -22,6 +22,9 @@ type Repository interface {
 type Service struct {
 	repository Repository
 	assetURLs  AssetURLResolver
+	assetAuth  interface {
+		AuthorizeFamily(context.Context, string, string) error
+	}
 }
 
 type AssetURLResolver interface {
@@ -37,6 +40,12 @@ func NewService(repository Repository, assetURLs ...AssetURLResolver) (*Service,
 		assetURLResolver = assetURLs[0]
 	}
 	return &Service{repository: repository, assetURLs: assetURLResolver}, nil
+}
+
+func (s *Service) SetAssetAuthorizer(value interface {
+	AuthorizeFamily(context.Context, string, string) error
+}) {
+	s.assetAuth = value
 }
 
 func (s *Service) ListMonth(ctx context.Context, familyID, month, petID string) (MonthDTO, error) {
@@ -68,6 +77,9 @@ func (s *Service) CreateRecord(ctx context.Context, familyID, userID string, req
 	if err := validateCreateRequest(&request); err != nil {
 		return RecordDTO{}, err
 	}
+	if err := s.authorizeMedia(ctx, familyID, request.MediaAssetIDs); err != nil {
+		return RecordDTO{}, err
+	}
 	occurredAt, err := parseDateTime(request.OccurredAt)
 	if err != nil {
 		return RecordDTO{}, err
@@ -89,6 +101,9 @@ func (s *Service) CompleteReminder(ctx context.Context, familyID, userID, remind
 	if err := validateMedia(request.MediaAssetIDs); err != nil {
 		return CompleteReminderDTO{}, err
 	}
+	if err := s.authorizeMedia(ctx, familyID, request.MediaAssetIDs); err != nil {
+		return CompleteReminderDTO{}, err
+	}
 	request.Content = strings.TrimSpace(request.Content)
 	if len(request.Content) > 2000 {
 		return CompleteReminderDTO{}, appErrors.InvalidParam("记录内容不能超过 2000 个字符")
@@ -105,6 +120,18 @@ func (s *Service) CompleteReminder(ctx context.Context, familyID, userID, remind
 		return CompleteReminderDTO{}, err
 	}
 	return value, nil
+}
+
+func (s *Service) authorizeMedia(ctx context.Context, familyID string, assetIDs []string) error {
+	if s.assetAuth == nil {
+		return nil
+	}
+	for _, assetID := range assetIDs {
+		if err := s.assetAuth.AuthorizeFamily(ctx, assetID, familyID); err != nil {
+			return appErrors.Forbidden()
+		}
+	}
+	return nil
 }
 
 func (s *Service) resolveDayMedia(ctx context.Context, value *DayDTO) error {

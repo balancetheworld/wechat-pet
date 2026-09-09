@@ -3,6 +3,7 @@ package httpapi
 import (
 	"log/slog"
 
+	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
 	appauth "github.com/balancetheworld/wechat-pet/internal/app/auth"
 	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
 	familyapp "github.com/balancetheworld/wechat-pet/internal/app/family"
@@ -22,6 +23,7 @@ type Dependencies struct {
 	PetService       *petapp.Service
 	PetRepository    petapp.Repository
 	CalendarService  *calendarapp.Service
+	AskService       *askapp.Service
 	TokenSigner      *jwtpkg.Signer
 	FileService      *fileservice.Service
 	LocalUploadDir   string
@@ -42,9 +44,6 @@ func NewWithDependencies(dependencies Dependencies, loggers ...*slog.Logger) *gi
 	router.GET("/healthz", func(c *gin.Context) {
 		response.Success(c, map[string]string{"status": "ok"})
 	})
-	if dependencies.LocalUploadDir != "" {
-		router.Static("/uploads", dependencies.LocalUploadDir)
-	}
 	v1 := router.Group("/api/v1")
 	registerV1Routes(v1, dependencies)
 

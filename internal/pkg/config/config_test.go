@@ -72,6 +72,24 @@ func TestProductionRequiresSecrets(t *testing.T) {
 	}
 }
 
+func TestProductionLocalStorageRequiresPublicBaseURL(t *testing.T) {
+	cfg := Config{
+		AppEnv:           "production",
+		HTTPAddr:         ":8080",
+		DatabaseDriver:   "postgres",
+		DatabaseDSN:      "postgres://example",
+		JWTSecret:        "secret",
+		JWTExpireMinutes: 120,
+		WeChatAppID:      "app-id",
+		WeChatAppSecret:  "app-secret",
+		StorageDriver:    "local",
+		LocalUploadDir:   "data/uploads",
+	}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "PUBLIC_BASE_URL") {
+		t.Fatalf("Validate() error = %v, want PUBLIC_BASE_URL validation error", err)
+	}
+}
+
 func TestStringRedactsSecrets(t *testing.T) {
 	cfg := Config{JWTSecret: "jwt", WeChatAppSecret: "wechat", COSSecretKey: "cos"}
 	value := cfg.String()

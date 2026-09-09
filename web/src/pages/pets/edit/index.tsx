@@ -145,7 +145,6 @@ export default function PetEdit() {
   /* --- 选择头像 --- */
   async function chooseAvatar() {
     try {
-      // @ts-expect-error - Taro.chooseImage 在类型里需要扩展
       const res = await Taro.chooseImage({
         count: 1,
         sizeType: ['compressed'],
@@ -307,7 +306,7 @@ export default function PetEdit() {
             <Picker
               mode="date"
               value={formBirth}
-              max={maxDate}
+              end={maxDate}
               onChange={event => setFormBirth(event.detail.value)}
             >
               <View className="capsule-input date-view">{formBirth || '选择日期'}</View>
@@ -318,7 +317,7 @@ export default function PetEdit() {
             <Picker
               mode="date"
               value={formArrival}
-              max={maxDate}
+              end={maxDate}
               onChange={event => setFormArrival(event.detail.value)}
             >
               <View className="capsule-input date-view">{formArrival || '选择日期'}</View>
@@ -347,7 +346,7 @@ export default function PetEdit() {
       {/* 操作: 必须放在 .add-pet-form 外面 —— 表单毛玻璃的 backdrop-filter
           会把内部 position:fixed 的定位基准改成表单自身, 导致按钮条不吸底并遮住健康状态 */}
       <View className="add-pet-form-actions">
-        <Button className="secondary-button" onClick={navigateBack}>取消</Button>
+        <Button className="secondary-button" onClick={() => { void navigateBack() }}>取消</Button>
         <Button
           className="primary-button"
           disabled={!formName.trim() || !formBreed.trim() || submitting || loading}

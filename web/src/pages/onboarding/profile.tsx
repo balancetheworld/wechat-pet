@@ -182,6 +182,7 @@ export default function ProfileOnboarding() {
               <Text className="profile-onboarding__title">欢迎来到宠物小程序</Text>
               <Button
                 className="profile-onboarding__login profile-onboarding__login--welcome"
+                hoverClass="profile-onboarding__login--welcome-hover"
                 onClick={handleLogin}
               >
                 登录
