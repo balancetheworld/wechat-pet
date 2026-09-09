@@ -16,7 +16,7 @@ if (!apiBaseURL) {
   throw new Error('缺少 TARO_APP_API_BASE_URL 配置')
 }
 
-function requestURL(path: string) {
+export function requestURL(path: string) {
   return `${apiBaseURL}${path}`
 }
 

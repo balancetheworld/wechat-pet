@@ -13,7 +13,7 @@
   min-height: 100vh;
   box-sizing: border-box;
   /* 底部留出安全区，避免输入栏贴住系统手势区 */
-  padding: 0 24rpx calc(24rpx + env(safe-area-inset-bottom));
+  padding: 0 24rpx calc(112rpx + env(safe-area-inset-bottom));
   /* 整体背景: 半透明白玻璃 */
   background: rgba(255, 254, 251, 0.2);
 }
@@ -42,44 +42,6 @@
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-}
-
-.ask-nav-arrow {
-  position: absolute;
-  z-index: 3;
-  top: 46%;
-  width: 56rpx;
-  height: 88rpx;
-  min-height: 0;
-  padding: 0;
-  border: 1rpx solid rgba(255, 255, 255, 0.62);
-  border-radius: 28rpx;
-  color: rgba(74, 100, 137, 0.86);
-  background: rgba(255, 254, 251, 0.54);
-  box-shadow: 0 6rpx 18rpx rgba(74, 100, 137, 0.12);
-  font-size: 48rpx;
-  font-weight: 300;
-  line-height: 78rpx;
-  text-align: center;
-  transform: translateY(-50%);
-}
-
-.ask-nav-arrow::after {
-  border: 0;
-}
-
-.ask-nav-arrow:active {
-  color: #2A2520;
-  background: rgba(245, 214, 138, 0.86);
-  transform: translateY(-50%) scale(0.94);
-}
-
-.ask-nav-arrow--left {
-  left: 12rpx;
-}
-
-.ask-nav-arrow--right {
-  right: 12rpx;
 }
 
 /* --- ai 精灵(猫)— 精准定位到画面右侧红圈处 ---
@@ -148,12 +110,6 @@
   border-radius: 12rpx;
   background: rgba(255, 254, 251, 0.84);
   box-shadow: var(--glass-shadow);
-  transform: translateY(132rpx);
-  transition: transform 220ms ease-out;
-}
-
-.ask-page.nav-hidden .ask-input-bar {
-  transform: translateY(0);
 }
 
 .ask-bottom-row {
@@ -217,3 +173,124 @@
 
 /* --- 顶部导航(已弃用,避免误显示) --- */
 .ask-header { display: none; }
+
+.ask-conversation {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+
+.ask-conversation-inner {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 22rpx;
+  min-height: 100%;
+  padding: calc(72rpx + env(safe-area-inset-top)) 68rpx 28rpx;
+}
+
+.ask-bound-pets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  align-self: center;
+  justify-content: center;
+}
+
+.ask-bound-pet {
+  padding: 8rpx 14rpx;
+  color: var(--primary-deep);
+  border: 1rpx solid rgba(127, 165, 214, 0.34);
+  border-radius: 8rpx;
+  background: rgba(255, 254, 251, 0.68);
+  font-size: 22rpx;
+}
+
+.ask-turn {
+  display: flex;
+  flex-direction: column;
+  gap: 18rpx;
+}
+
+.ask-message--user {
+  align-self: flex-end;
+  color: #FFFEFB;
+  border-radius: 8rpx 8rpx 2rpx 8rpx;
+  background: rgba(74, 100, 137, 0.88);
+  box-shadow: var(--shadow-sm);
+}
+
+.ask-processing {
+  align-self: flex-start;
+  padding: 14rpx 18rpx;
+  color: var(--primary-deep);
+  border-radius: 8rpx;
+  background: rgba(255, 254, 251, 0.66);
+  font-size: 24rpx;
+}
+
+.ask-processing::after {
+  content: '...';
+}
+
+.ask-error-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  padding: 20rpx;
+  color: #7B4C3D;
+  border: 1rpx solid rgba(224, 153, 88, 0.42);
+  border-radius: 8rpx;
+  background: rgba(255, 250, 242, 0.9);
+  font-size: 25rpx;
+  line-height: 1.45;
+}
+
+.ask-inline-button,
+.ask-new-button {
+  min-height: 60rpx;
+  box-sizing: border-box;
+  padding: 0 20rpx;
+  color: var(--primary-deep);
+  border: 1rpx solid rgba(127, 165, 214, 0.38);
+  border-radius: 8rpx;
+  background: rgba(255, 254, 251, 0.76);
+  font-size: 24rpx;
+  line-height: 58rpx;
+}
+
+.ask-inline-button {
+  flex-shrink: 0;
+  margin: 0;
+}
+
+.ask-new-button {
+  align-self: center;
+  margin: 4rpx 0 0;
+}
+
+.ask-inline-button::after,
+.ask-new-button::after,
+.ask-add-img::after,
+.ask-send-btn::after {
+  border: 0;
+}
+
+.ask-add-img,
+.ask-send-btn {
+  min-height: 72rpx;
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  line-height: 72rpx;
+}
+
+.ask-add-img[disabled] {
+  color: rgba(74, 100, 137, 0.42);
+  background: rgba(163, 194, 232, 0.1);
+}
+
+.ask-send-btn[disabled] {
+  opacity: 0.46;
+}

@@ -1170,3 +1170,554 @@ pnpm build:weapp
 ### 下一步计划
 
 第十七步实现问问前端基础契约：先新增 `types/ask.ts` 和 `services/ask.ts`，让页面具备可调用后端的类型安全 API；暂不修改视觉布局和图片入口，完成接口层后再接入状态机。
+
+## 第十七步：TanStack Query、Zustand 和事件轮询基础层
+
+### 实现内容
+
+- 前端新增 `@tanstack/react-query`，并在应用根节点接入全局 `QueryClientProvider`。
+- QueryClient 统一配置查询缓存、垃圾回收时间、失败重试和窗口聚焦策略。
+- 新增完整问问 TypeScript 契约，覆盖 Session、Run、事件、宠物绑定、事实结果、追问、风险升级和结构化分析。
+- 新增问问 API Service，封装自然语言创建会话、处理 Run、提交追问、读取会话和增量读取事件五个接口。
+- 新增 Ask Zustand Store，只保存输入草稿、当前 Session/Run 标识和事件游标。
+- 新增 `useAskSession`，使用 TanStack Mutation 编排 `create → process` 与 `reply → process`，使用 Query 管理会话和事件服务端状态。
+- 事件查询使用 `after` 游标，只读取已消费序号之后的事件；事件写入 Query Cache 时按 `sequence` 去重并排序。
+- Run 为 `queued` 或 `running` 时每 1.5 秒轮询，收到完成、追问、风险升级或失败事件后停止定时请求。
+- 如果 process 响应因网络中断丢失，但事件轮询获取到服务端终态事件，页面状态以持久化事件为准。
+- 登录清理或用户/家庭身份切换时，同时清空 Query Cache 和 Ask UI Store，避免显示上一身份的数据。
+
+### 状态职责
+
+TanStack Query 保存：
+
+- `AskSession` 服务端快照。
+- 当前 `AskExecution` 响应。
+- 当前 Run 的已消费事件列表。
+- 带 `after` 游标的增量事件响应。
+- Mutation 的请求中、成功和错误状态。
+
+Zustand 保存：
+
+- 未提交的输入草稿。
+- 当前 Session ID 和 Run ID。
+- 最后消费的事件序号。
+
+Zustand 不保存宠物列表、会话详情、Run DTO 或完整事件副本，避免两套状态源产生不一致。
+
+### 当前实时策略
+
+本步没有引入 SSE。当前后端已经提供持久化事件和 `after` 游标，前端先使用短轮询实现可恢复的增量消费。SSE 或微信小程序 chunked request 后续只能作为实时传输加速层，不能替代数据库事件、游标去重和断线补偿。
+
+### 修改文件
+
+- `web/package.json`、`web/pnpm-lock.yaml`：新增 TanStack Query 依赖。
+- `web/src/app.ts`：接入 `QueryClientProvider`。
+- `web/src/services/query-client.ts`：统一 QueryClient 配置。
+- `web/src/types/ask.ts`：问问接口和事件类型契约。
+- `web/src/services/ask.ts`：问问 HTTP API 封装。
+- `web/src/stores/ask-store.ts`：问问客户端 UI 状态。
+- `web/src/hooks/use-ask-session.ts`：请求编排、Query Cache 同步、事件轮询和工作流状态推导。
+- `web/src/stores/auth-store.ts`：认证身份变化时清理问问缓存和 UI 状态。
+
+### 验证结果
+
+已通过：
+
+```bash
+cd web
+pnpm typecheck
+pnpm lint
+```
+
+Lint 没有错误，现有 `web/src/pages/profile/index.tsx` 保留两条与本次无关的 `react-hooks/exhaustive-deps` 警告。
+
+微信构建首次在 macOS 环境触发 `system-configuration` 的 `Attempted to create a NULL object` panic；随后已在 `/tmp` 临时副本中重新执行并构建成功，全程未修改 `web/dist`。TypeScript 编译和 ESLint 也已确认新增代码可通过。
+
+### 下一步计划
+
+第十八步将 `useAskSession` 接入问问页面：实现文本输入提交、处理中状态、追问、风险升级、失败提示和多宠物事实结果展示；继续保持图片按钮不可操作，直到后端图片协议完成。
+
+## 第十八步：问问页面接入服务端状态
+
+### 实现内容
+
+- 问问页面通过 `useAskSession` 发起自然语言咨询，不再由页面直接调用多个后端接口。
+- 用户点击发送后，reducer 立即写入本地乐观 Turn 并进入处理中状态，不等待创建会话接口返回。
+- 创建接口成功后，使用服务端返回的 Session、Run 和 Events 替换本地临时 Run，服务端快照成为后续状态基准。
+- 页面按 Session 中的 `pets` 展示服务端实际绑定的宠物，支持一句话同时绑定多只宠物，不提供手动宠物选择覆盖自然语言结果。
+- 页面按事件类型展示追问、多宠物事实结果、结构化分析、风险升级和失败状态。
+- `fact.completed` 按服务端 `items` 顺序逐只展示；`found=false` 明确显示“暂无记录”。
+- 输入为空或超过 4000 字符时在前端拦截；400、409、网络失败和 Run 失败分别映射到独立页面状态。
+- 图片入口继续保持禁用，避免在后端尚无图片协议时形成不可用入口。
+
+### 状态边界
+
+- TanStack Query 保存 Session、Execution 和原始事件日志等服务端状态。
+- reducer 保存当前页面需要渲染的会话投影和阶段。
+- Zustand 只保存草稿、当前 Session/Run ID 和事件游标，不复制完整服务端快照。
+- 页面只消费 Hook 返回的状态和动作，不负责判断事件顺序、去重或接口调用时序。
+
+### 修改文件
+
+- `web/src/pages/ask/index.tsx`：接入提交、追问、重试、重置和各运行阶段。
+- `web/src/components/ask/ask-event.tsx`：按事件类型渲染事实、追问、分析、风险和失败结果。
+- `web/src/components/ask/ask-event.scss`：补充事件结果视图样式。
+- `web/src/hooks/use-ask-session.ts`：统一编排创建、处理、追问和状态同步。
+
+### 当前边界
+
+当前的 `snapshot.restored` 使用创建、处理和追问接口返回的 `AskExecution` 快照。页面重新进入后完整恢复历史仍未完成，因为后端目前只有 Session 详情接口，尚缺少同时返回 Turns、Runs 和 Events 的完整 Snapshot 接口。
+
+### 下一步计划
+
+第十九步实现真正的增量流：后端输出 NDJSON，H5 使用递归 `ReadableStream.read()`，微信小程序使用 chunked request；前端通过共享 decoder 处理半包和粘包，再统一交给 reducer。
+
+## 第十九步：NDJSON 流式传输、递归读取和事件 reducer
+
+### 后端流协议
+
+- 新增 `GET /api/v1/ask/sessions/{session_id}/runs/{run_id}/events/stream?after={sequence}`。
+- 响应类型为 `application/x-ndjson`，每一行只包含一个完整事件 JSON，不使用公共响应 wrapper。
+- 事件增加 `run_id`，前端使用 `run_id + sequence` 作为幂等键。
+- 服务端先读取 `after` 之后的持久化事件，再每 500 毫秒查询增量并立即 flush。
+- 收到终态事件后关闭本次流；如果 25 秒内没有终态，也正常关闭，由客户端携带最新 `after` 重连。
+- 流只是实时传输层，数据库事件和游标仍是断线恢复依据。
+
+### 前端读取链路
+
+```text
+用户发送
+→ local.submitted 立即创建乐观 Turn
+→ REST 响应恢复 AskExecution 快照
+→ 建立 events/stream?after=N
+→ read() 递归读取下一个 Uint8Array
+→ NDJSONDecoder 将字节追加到 buffer
+→ 只按换行提取完整 JSON
+→ 校验 AskEvent 协议
+→ events.received 交给 reducer
+→ 更新 Query Cache、游标和页面投影
+```
+
+- H5 使用 `fetch`、`response.body.getReader()` 和递归 `read()`。
+- 微信小程序使用 `Taro.request` 的 `enableChunked` 与 `onChunkReceived`。
+- 两端共用 `NDJSONDecoder`，同一个 chunk 可包含多行，一行也可以跨多个 chunk。
+- 半包只留在 decoder buffer 中，不触发 reducer，因此不会渲染不完整 JSON。
+- decoder 使用流式 UTF-8 解码；小程序运行时没有 `TextDecoder` 时使用内置后备实现，中文字符跨 chunk 不会乱码。
+- 流关闭时调用 `finish()`；若最后仍有完整但没有换行的 JSON，则解析后再交付。
+- JSON 语法错误或事件字段不符合协议时停止重连并进入失败状态，避免错误数据污染 reducer。
+
+### reducer 事件规则
+
+```text
+run.queued / run.started  → thinking
+assistant.question       → waiting_input
+fact.completed           → completed
+run.completed            → completed
+risk.escalated           → escalated
+run.failed               → failed
+未知事件                  → 保留事件，不改变页面阶段
+```
+
+- `local.submitted` 先生成临时 Run，使用户发送后立刻看到处理中状态。
+- `snapshot.restored` 用服务端 Run ID 替换临时 Run，并合并快照中的事件。
+- `events.received` 先按 `sequence` 排序，再逐条归约。
+- 已见过的 `run_id + sequence` 直接忽略，保证快照和流重复到达时不会重复渲染。
+- 迟到的旧事件仍补入事件日志，但不能把较新的完成态回退为思考态。
+- 只有当前 Run 的事件可以改变当前页面阶段，历史 Run 的迟到事件只更新对应历史 Turn。
+
+### 重连规则
+
+- 服务端 25 秒正常关闭或网络中断：1 秒后使用最新游标重连。
+- 同一时刻只保留一个重连定时器，页面卸载或 Run 切换时同时关闭请求和定时器。
+- 收到追问、事实完成、分析完成、风险升级或失败事件后关闭流，不再重连。
+- HTTP 4xx/5xx、JSON 解析错误和事件协议错误不无限重连，直接进入失败状态。
+- Human in the loop 当前只保留 `assistant.question → reply` 基础路径，审批、工具确认和复杂消歧延后实现。
+
+### 测试覆盖
+
+- NDJSON 半包不会提前输出。
+- 一个 chunk 中多个 JSON 可以一次输出。
+- 递归 `read()` 只交付完整 JSON。
+- 没有原生 `TextDecoder` 时中文跨字节 chunk 仍能正确恢复。
+- 本地提交立即创建乐观状态。
+- 快照替换临时 Run。
+- 重复事件幂等去重。
+- 所有终态事件映射到正确阶段。
+- 未知事件被保留但不改变阶段。
+- 终态先到、旧快照后到时不会发生状态回退。
+
+### 修改文件
+
+- `internal/app/ask/dto.go`：事件 DTO 增加 `run_id`。
+- `internal/httpapi/ask/handler.go`：实现 NDJSON 增量流和终态关闭。
+- `internal/httpapi/ask/routes.go`：注册事件流路由。
+- `internal/httpapi/ask_routes_test.go`：增加流接口契约测试。
+- `web/src/services/ndjson.ts`：实现 buffer、UTF-8 解码和递归 `read()`。
+- `web/src/services/ask-stream.ts`：实现 H5/微信双 Transport、事件校验和错误分类。
+- `web/src/hooks/ask-reducer.ts`：实现统一 reducer、幂等和时序保护。
+- `web/src/hooks/use-ask-session.ts`：接入快照、增量、游标和重连。
+- `web/src/services/ndjson.test.ts`、`web/src/hooks/ask-reducer.test.ts`：补充核心单元测试。
+- `web/package.json`、`web/pnpm-lock.yaml`：增加兼容当前工程的 Vitest 0.34.6 和测试命令。
+
+### 验证结果
+
+已通过：
+
+```bash
+cd web
+pnpm test
+pnpm typecheck
+pnpm lint
+
+cd ..
+GOCACHE=/tmp/pet-go-build go test ./...
+git diff --check
+```
+
+前端共 2 个测试文件、8 个用例通过。Lint 没有错误，仍有 `web/src/pages/profile/index.tsx` 中两条与本步无关的既有 Hook 依赖警告。
+
+### 当前未完成项
+
+- 尚未提供完整会话 Snapshot 接口，页面重进后不能恢复 Turns、Runs 和 Events 全量视图。
+- 尚未实现图片上传、图片质量检测和多模态分析事件。
+- 尚未实现复杂 Human in the loop。
+- 尚未做本轮页面视觉检查，按当前约定由后续实际使用反馈驱动。
+
+## 第二十步：完整 Snapshot 与 Run 版本化状态
+
+### 本步目标
+
+本步解决两个会直接影响 Agent 可恢复性和并发正确性的问题：
+
+- 页面只有单次接口返回的局部执行结果，重新进入页面后无法恢复完整会话。
+- Run 状态更新只校验旧状态，同一状态下的迟到任务仍可能覆盖更新后的执行结果。
+
+Snapshot 只表示前端恢复所需的权威 UI 状态，不保存完整 Prompt，也不把每次组装的模型上下文重复写入数据库。
+
+### 数据库变更
+
+新增迁移 `000012_ask_run_version`，为 `ask_runs` 增加：
+
+```text
+row_version INTEGER NOT NULL DEFAULT 1
+clarification_count INTEGER NOT NULL DEFAULT 0
+```
+
+- `row_version` 是 Run 的乐观锁版本。新 Run 从 1 开始，每次状态切换成功后加 1。
+- `clarification_count` 为下一步同 Run 追问恢复预留，当前创建值为 0，尚不改变 Reply 行为。
+- 迁移会清理已有 `waiting_input` Run 上错误写入的 `completed_at`。
+- 迁移会为历史单宠物会话补齐 `ask_session_pets`，新建会话无论绑定一只还是多只宠物都会持久化绑定关系。
+
+### 版本化状态更新
+
+Run 状态切换现在同时校验状态和版本：
+
+```sql
+WHERE id = ? AND status = ? AND row_version = ?
+```
+
+更新成功时在同一个事务内完成：
+
+```text
+Run 状态更新并递增 row_version
+→ Turn 状态同步
+→ Session 状态和风险等级同步
+→ ask_events 追加持久化事件
+→ 提交事务
+```
+
+任一校验失败都返回状态冲突，事件不会单独写入。这样即使两个 Worker 同时读取到 `running`，也只有持有当前版本的 Worker 能提交最终结果。
+
+`waiting_input` 现在明确是暂停态，不再写入 `completed_at`。只有 `completed`、`escalated`、`failed`、`canceled` 和 `interrupted` 才会记录 Run 完成时间。
+
+当前一次普通执行的版本变化为：
+
+```text
+queued(row_version=1)
+→ running(row_version=2)
+→ waiting_input 或终态(row_version=3)
+```
+
+### 完整 Snapshot 接口
+
+新增：
+
+```http
+GET /api/v1/ask/sessions/{session_id}/snapshot
+```
+
+响应数据结构：
+
+```text
+session
+pets[]
+turns[]
+  turn
+  run
+  events[]
+event_cursors[]
+  run_id
+  sequence
+```
+
+- `turns` 按 `turn_index` 升序返回。
+- 每个 Turn 返回当前 `selected_run_id` 指向的 Run。
+- 每个 Run 的事件按 `sequence` 升序返回。
+- `event_cursors` 返回每个 Run 已持久化的最新事件序号，前端可以从该游标继续接增量流。
+- Run DTO 新增 `run_index`、`row_version` 和 `clarification_count`。
+- Snapshot 查询前先使用当前家庭 ID 读取 Session，不属于当前家庭的会话不会被聚合查询返回。
+
+### 后端实现思路
+
+Service 先按 `family_id + session_id` 验证会话归属并加载绑定宠物，再由 Repository 读取所有 Turn 及其选中 Run。Repository 随后一次读取该 Session 的持久化事件，在内存中按 `run_id` 归组，避免对每个 Run 分别查询事件。
+
+数据库仍保存 Session、Turn、Run 和结构化事件这些可恢复事实。模型执行时按需组装的 `ContextSnapshot` 继续只受上下文预算控制，不因为新增 UI Snapshot 而扩大模型输入。
+
+### 修改文件
+
+- `migrations/000012_ask_run_version.up.sql`、`migrations/000012_ask_run_version.down.sql`：新增 Run 版本和追问计数字段，修复历史等待态时间并补齐单宠物绑定。
+- `internal/app/ask/model.go`：增加 Run 版本字段和 Snapshot 领域模型。
+- `internal/app/ask/repository.go`：实现版本化 CAS、Snapshot 聚合查询和正确的等待态时间语义。
+- `internal/app/ask/service.go`：新增 Snapshot 用例，传递当前 Run 版本并同步内存结果。
+- `internal/app/ask/dto.go`：增加 Turn、Snapshot、事件游标 DTO 和 Run 版本字段。
+- `internal/httpapi/ask/handler.go`、`internal/httpapi/ask/routes.go`：注册并实现 Snapshot 接口。
+- `internal/app/ask/repository_test.go`、`internal/app/ask/service_test.go`、`internal/httpapi/ask_routes_test.go`：覆盖版本冲突、等待态、Snapshot 顺序和 HTTP 契约。
+
+### 验证结果
+
+已通过：
+
+```bash
+GOCACHE=/tmp/pet-go-build go test ./...
+git diff --check
+```
+
+后端所有包测试通过，`gofmt -d` 对本步涉及的 Go 文件无输出。
+
+### 当前边界
+
+- Reply 仍沿用“创建新 Turn 和新 Run”的旧协议，本步没有提前改变追问请求语义。
+- 前端尚未调用完整 Snapshot 接口，也尚未在事件序号缺口时触发 Snapshot 恢复。
+- `clarification_count` 当前只完成存储与输出，下一步才在同 Run 恢复事务中递增。
+- 请求幂等键尚未实现。
+
+### 下一步计划
+
+第二十一步实现同一个 Run 的追问暂停与恢复，并增加创建会话、回答追问的请求幂等：Reply 携带 `expected_version`，在一个事务内写入回答、递增 `clarification_count`、将 Run 从 `waiting_input` 恢复为 `queued`，保持 `run_id` 和 `turn_id` 不变。随后再调整前端 Snapshot 恢复和事件缺口处理。
+
+## 第二十一步：同 Run 追问恢复与请求幂等
+
+### 本步目标
+
+第二十步完成了 Run 版本和完整 Snapshot，本步将追问真正改造成一个可暂停、可恢复的执行过程，并解决移动网络环境下重复提交的问题。
+
+原实现存在三个问题：
+
+- 用户每回答一次追问就创建新的 Turn 和 Run，一个问题被拆成多个不连续的执行单元。
+- 用户回答没有进入 `ask_messages`，改成同 Run 后如果不补消息上下文，Executor 无法看到补充内容。
+- 创建和回答接口没有幂等键，请求在服务端成功但客户端超时后，重试可能重复创建资源或重复写入回答。
+
+### 数据库变更
+
+新增迁移 `000013_ask_idempotency`，创建 `ask_idempotency_keys`：
+
+```text
+id
+family_id
+user_id
+operation
+idempotency_key
+request_hash
+response_data
+session_id
+turn_id
+run_id
+created_at
+```
+
+唯一约束：
+
+```text
+user_id + operation + idempotency_key
+```
+
+`request_hash` 使用家庭、资源 ID、请求内容和期望版本等实际输入计算，避免用户切换家庭后错误重放旧资源。`response_data` 保存首次事务提交时的执行结果，使重试返回首次响应，而不是读取一个可能已经继续变化的 Run。
+
+### 幂等协议
+
+以下接口要求 `Idempotency-Key`：
+
+```http
+POST /api/v1/pets/{pet_id}/ask/sessions
+POST /api/v1/ask/sessions
+POST /api/v1/ask/sessions/{session_id}/runs/{run_id}/reply
+```
+
+规则：
+
+```text
+新 key
+→ 在业务事务内写资源和幂等结果
+
+相同 key + 相同请求哈希
+→ 返回首次持久化的 ExecutionResult
+
+相同 key + 不同请求哈希
+→ 409 Conflict
+```
+
+幂等键不能为空，最大 128 个字符。创建会话时，Session、宠物绑定、Turn、Run、初始用户消息、`run.queued` 事件和幂等记录处于同一个事务；任一写入失败都会全部回滚。
+
+### 同 Run 追问恢复
+
+Reply 请求体改为：
+
+```json
+{
+  "input": "从今天早上开始，已经吐了两次",
+  "expected_version": 3
+}
+```
+
+Service 先验证：
+
+- 当前用户和家庭身份。
+- Session 属于当前家庭且仍为 `active`。
+- Run 属于 Session 且状态为 `waiting_input`。
+- `expected_version` 等于 Run 当前 `row_version`。
+- Run 是当前 Turn 的 `selected_run_id`。
+- `clarification_count` 尚未达到上限。
+
+随后 Repository 在一个事务中执行：
+
+```text
+写入 ask_messages 用户回答
+→ Run waiting_input → queued
+→ row_version + 1
+→ clarification_count + 1
+→ 清空 completed_at 和 error_code
+→ Turn 恢复 queued
+→ Session 保持 active
+→ 追加同 Run 的 run.queued 事件
+→ 写入幂等结果
+→ 提交事务
+```
+
+整个过程保持以下身份不变：
+
+```text
+session_id 不变
+turn_id 不变
+run_id 不变
+```
+
+例如一次追问链的状态与事件序号为：
+
+```text
+run.queued sequence=1, row_version=1
+run.started sequence=2, row_version=2
+assistant.question sequence=3, row_version=3
+用户回答
+run.queued sequence=4, row_version=4, clarification_count=1
+run.started sequence=5, row_version=5
+下一结果 sequence=6, row_version=6
+```
+
+### 消息上下文与安全规则
+
+现在会写入三类消息：
+
+```text
+user      原始问题和用户补充回答
+question  Agent 主动追问
+assistant 后续正式回答预留
+```
+
+每次 Run 再执行前，Repository 按当前 `session_id + run_id` 读取消息，Service 将其放入 `ContextSnapshot.Messages`。上下文版本升级为 `ask-context-v5`，消息文本继续经过单项裁剪和总字符预算，不会无上限增长。
+
+确定性风险规则会同时检查原始 Turn 输入和该 Run 下的所有用户回答。因此原问题是“最近没精神”，用户补充“现在呼吸困难”时，恢复执行会优先触发红色风险升级，不会进入普通模型追问。
+
+Agent 最多允许三次补充。第三次补充后如果 Executor 仍返回 `waiting_input`，Service 将结果收敛为：
+
+```text
+status=failed
+error_code=clarification_limit_reached
+```
+
+避免 Run 永久停留在不可继续回答的等待状态。
+
+### 前端请求编排
+
+- `web/src/services/ask.ts` 统一为创建和回答请求写入 `Idempotency-Key`，页面仍不直接调用 `Taro.request`。
+- Reply DTO 增加 `expected_version`，值来自当前服务端 Run 的 `row_version`。
+- 一次逻辑提交的幂等键保存在 `useAskSession` 的 `ref` 中，不进入 TanStack Query 或 Zustand。
+- 认证刷新导致的底层重试天然复用相同请求参数和幂等键。
+- 网络错误后用户再次提交相同输入时复用待处理 key，不重复创建乐观消息。
+- 一旦业务响应成功，或收到不可重试的业务错误，待处理 key 会被清理。
+
+同一个 Run 现在可能对应多条用户消息。Reducer 为每条页面消息保留独立的客户端 ID，事件仍使用 `run_id + sequence` 去重，并将恢复后的新事件归到同 Run 的最新用户消息之后，避免新追问显示在用户回答之前。
+
+Zustand 新增 `activeRunVersion`。同 Run 从 `waiting_input` 恢复为 `queued` 时 ID 不变，但版本变化会重新建立事件流；游标继续从当前 Run 已知的最大 `sequence` 开始，不会重复消费旧事件。
+
+页面发送逻辑改为依据 `run.status` 判断新问题或追问回答。这样回答请求发生网络错误后，即使页面阶段变成 `network_error`，再次点击发送仍会重试原 Reply，而不会错误创建新 Session。
+
+### 修改文件
+
+- `migrations/000013_ask_idempotency.up.sql`、`migrations/000013_ask_idempotency.down.sql`：新增请求幂等表。
+- `internal/app/ask/model.go`：新增消息上下文、Message 和 IdempotencyRecord。
+- `internal/app/ask/state.go`：允许 `waiting_input → queued`。
+- `internal/app/ask/output.go`：校验追问必须包含非空问题。
+- `internal/app/ask/context.go`：将消息纳入上下文裁剪和字符预算。
+- `internal/app/ask/repository.go`：实现幂等创建、同 Run 恢复、消息持久化和幂等重放查询。
+- `internal/app/ask/service.go`：实现幂等入口、同 Run Reply、消息上下文、补充回答风险复检和追问上限。
+- `internal/httpapi/ask/handler.go`：读取幂等头、用户身份和 `expected_version`。
+- `web/src/types/ask.ts`、`web/src/services/ask.ts`：同步 Run 与 Reply 请求契约。
+- `web/src/hooks/use-ask-session.ts`：管理逻辑请求幂等键、版本化流重连和请求编排。
+- `web/src/hooks/ask-reducer.ts`、`web/src/pages/ask/index.tsx`、`web/src/stores/ask-store.ts`：支持同 Run 多条用户消息和版本变化。
+- `docs/api/ask.md`：同步接口协议。
+
+### 测试覆盖
+
+- 创建会话同 key 同请求只生成一个 Session 和一条原始用户消息。
+- 创建会话同 key 不同请求返回冲突。
+- Reply 保持 Session、Turn 和 Run ID 不变。
+- Reply 正确递增 `row_version`、`clarification_count` 和事件序号。
+- Reply 同 key 同请求只写入一次用户回答。
+- Reply 同 key 不同请求返回冲突。
+- 旧 `expected_version` 无法恢复 Run。
+- 原始问题、追问和用户回答按顺序进入消息历史。
+- 用户补充中的红旗症状触发确定性红色升级。
+- 达到三次补充后不再生成第四次追问。
+- 前端同 Run 回答保留独立用户消息，新事件追加到回答之后。
+
+### 验证结果
+
+已通过：
+
+```bash
+GOCACHE=/tmp/pet-go-build go test ./...
+
+cd web
+pnpm test
+pnpm typecheck
+pnpm lint
+
+cd ..
+git diff --check
+```
+
+前端共 2 个测试文件、9 个用例通过。ESLint 没有错误，仍只有 `web/src/pages/profile/index.tsx` 两条与本步无关的既有 Hook 依赖警告。
+
+数据库迁移已在独立临时 SQLite 数据库中验证：从 `000001` 顺序升级到 `000013` 成功，`000013` 回滚后再次升级成功。未操作项目实际数据库。
+
+### 当前边界
+
+- 完整 Snapshot 后端接口已经存在，但前端页面重新进入时尚未主动读取并恢复完整历史。
+- 前端尚未检测事件 `sequence` 缺口并自动回源 Snapshot。
+- `response_data` 当前保存内部 ExecutionResult，未来如调整领域模型需要考虑幂等记录的兼容读取期限。
+- 仍使用同步 Process 接口驱动 Executor，尚未拆出后台 `AskRunWorker`。
+- Human in the loop 当前只覆盖文本追问暂停与恢复，工具审批和复杂消歧仍未实现。
+
+### 下一步计划
+
+第二十二步接通前端完整 Snapshot 恢复和事件缺口补偿：页面有活动 Session 时先加载 Snapshot，按 Turn、Run、事件游标恢复 reducer；流收到非连续 `sequence` 时暂停增量归约，重新获取 Snapshot，再从新游标建立事件流。

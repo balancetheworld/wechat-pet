@@ -37,7 +37,10 @@ func TestValidateAnalysisOutputRejectsUnsafeOrIncompleteData(t *testing.T) {
 }
 
 func TestValidateAnalysisOutputIgnoresNonCompletedDecision(t *testing.T) {
-	if err := ValidateAnalysisOutput(RunDecision{Status: RunWaitingInput}); err != nil {
+	if err := ValidateAnalysisOutput(RunDecision{Status: RunWaitingInput, Data: map[string]any{"question": "什么时候开始？"}}); err != nil {
 		t.Fatalf("waiting input error = %v", err)
+	}
+	if err := ValidateAnalysisOutput(RunDecision{Status: RunWaitingInput, Data: map[string]any{}}); !errors.Is(err, ErrInvalidAnalysisOutput) {
+		t.Fatalf("invalid question error = %v", err)
 	}
 }

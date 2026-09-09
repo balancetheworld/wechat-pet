@@ -100,6 +100,12 @@ type ContextTurn struct {
 	CreatedAt time.Time
 }
 
+type ContextMessage struct {
+	Role      string
+	Content   string
+	CreatedAt time.Time
+}
+
 type ContextSource struct {
 	Name      string
 	Version   string
@@ -120,24 +126,38 @@ type ContextSnapshot struct {
 	CharCount     int
 	Pet           PetContext
 	RecentTurns   []ContextTurn
+	Messages      []ContextMessage
 	RecentRecords []calendarapp.ContextRecord
 	Sources       []ContextSource
 	Events        []ContextEvent
 }
 
 type Run struct {
-	ID            string
-	SessionID     string
-	TurnID        string
-	RunIndex      int
-	Status        RunStatus
-	RiskLevel     RiskLevel
-	RuleVersion   string
-	PromptVersion string
-	CreatedAt     time.Time
-	StartedAt     *time.Time
-	CompletedAt   *time.Time
-	ErrorCode     string
+	ID                 string
+	SessionID          string
+	TurnID             string
+	RunIndex           int
+	RowVersion         int
+	ClarificationCount int
+	Status             RunStatus
+	RiskLevel          RiskLevel
+	RuleVersion        string
+	PromptVersion      string
+	CreatedAt          time.Time
+	StartedAt          *time.Time
+	CompletedAt        *time.Time
+	ErrorCode          string
+}
+
+type SnapshotTurn struct {
+	Turn   Turn
+	Run    Run
+	Events []Event
+}
+
+type Snapshot struct {
+	Session Session
+	Turns   []SnapshotTurn
 }
 
 type Event struct {
@@ -149,4 +169,28 @@ type Event struct {
 	Type      string
 	Data      string
 	CreatedAt time.Time
+}
+
+type Message struct {
+	ID        string
+	SessionID string
+	TurnID    string
+	RunID     string
+	Role      string
+	Content   string
+	CreatedAt time.Time
+}
+
+type IdempotencyRecord struct {
+	ID             string
+	FamilyID       string
+	UserID         string
+	Operation      string
+	IdempotencyKey string
+	RequestHash    string
+	ResponseData   string
+	SessionID      string
+	TurnID         string
+	RunID          string
+	CreatedAt      time.Time
 }
