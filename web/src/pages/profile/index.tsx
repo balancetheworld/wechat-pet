@@ -1,9 +1,9 @@
 import type { CommonEvent, ITouchEvent } from '@tarojs/components/types/common'
+import type { CSSProperties } from 'react'
 import type { Pet, PetProfile } from '../../types/pet'
 import { Button, Image, Picker, ScrollView, Slider, Text, Textarea, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import type { CSSProperties } from 'react'
 import backgroundImage from '../../assets/background1.jpg'
 import bookPaperImage from '../../assets/book-page-bg.jpg'
 import passportImage from '../../assets/passport.jpg'
@@ -373,7 +373,7 @@ export default function Profile() {
     }
     setTouchDeltaX(Math.max(-360, Math.min(360, deltaX)))
     setTurnDirection(deltaX < 0 ? 'next' : 'previous')
-  }, [currentPage, pageCount, touchStartX, turning])
+  }, [currentPage, pageCount, touchStartX])
 
   const handleTouchEnd = useCallback((event: CommonEvent) => {
     if (touchStartX === null) {
@@ -412,7 +412,7 @@ export default function Profile() {
         setTurning(false)
       }, 30)
     }, 400)
-  }, [currentPage, goToPage, pageCount, touchStartX, turning])
+  }, [currentPage, goToPage, pageCount, touchStartX])
 
   const openDetail = (title: string, subtitle: string, body: string, onSave?: (newBody: string) => void) => {
     /* 编辑章节下若调用方未传 onSave, 自动提供一个本地保存提示 */
@@ -529,7 +529,7 @@ export default function Profile() {
       await Taro.showToast({ title: '已记一笔', icon: 'success' })
       /* 3) 后台静默重拉并与本地缓存合并: 服务端映射出的正式记录自然取代本地记录 */
       void getPetResource<GrowthEvent[]>(petID, 'growth-events')
-        .then(fresh => {
+        .then((fresh) => {
           if (!Array.isArray(fresh)) {
             return
           }
