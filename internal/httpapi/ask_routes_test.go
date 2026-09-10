@@ -59,7 +59,8 @@ func TestAskRoutesLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := NewWithDependencies(Dependencies{AskService: askService, FamilyRepository: familyRepository, TokenSigner: signer})
+	runQueue := &recordingRunQueue{service: askService}
+	router := NewWithDependencies(Dependencies{AskService: askService, AskRunQueue: runQueue, FamilyRepository: familyRepository, TokenSigner: signer})
 	unauthorized := httptest.NewRecorder()
 	router.ServeHTTP(unauthorized, httptest.NewRequest(http.MethodPost, "/api/v1/pets/pet-1/ask/sessions", strings.NewReader(`{"input":"最近没精神"}`)))
 	if unauthorized.Code != http.StatusUnauthorized {
@@ -91,6 +92,9 @@ func TestAskRoutesLifecycle(t *testing.T) {
 	if sessionID == "" || runID == "" {
 		t.Fatalf("missing IDs: %s", create.Body.String())
 	}
+	if len(runQueue.jobs) != 1 || runQueue.jobs[0].FamilyID != "family-1" || runQueue.jobs[0].SessionID != sessionID || runQueue.jobs[0].RunID != runID || runQueue.jobs[0].RowVersion != 1 {
+		t.Fatalf("created run jobs = %+v", runQueue.jobs)
+	}
 	replayedCreate := askRouteRequestWithKey(t, router, token, http.MethodPost, "/api/v1/pets/pet-1/ask/sessions", `{"input":"最近没精神"}`, "create-lifecycle")
 	if replayedCreate.Code != http.StatusOK || !strings.Contains(replayedCreate.Body.String(), `"id":"`+sessionID+`"`) || !strings.Contains(replayedCreate.Body.String(), `"id":"`+runID+`"`) {
 		t.Fatalf("replayed create status = %d, body = %s", replayedCreate.Code, replayedCreate.Body.String())
@@ -107,7 +111,7 @@ func TestAskRoutesLifecycle(t *testing.T) {
 		t.Fatalf("process version fields missing: %s", process.Body.String())
 	}
 	snapshot := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/snapshot", "")
-	if snapshot.Code != http.StatusOK || !strings.Contains(snapshot.Body.String(), `"pets":[{"pet_id":"pet-1","pet_name":"团子"`) || !strings.Contains(snapshot.Body.String(), `"turn_index":0`) || !strings.Contains(snapshot.Body.String(), `"row_version":3`) || !strings.Contains(snapshot.Body.String(), `"event_cursors":[{"run_id":"`+runID+`","sequence":3}]`) {
+	if snapshot.Code != http.StatusOK || !strings.Contains(snapshot.Body.String(), `"pets":[{"pet_id":"pet-1","pet_name":"团子"`) || !strings.Contains(snapshot.Body.String(), `"turn_index":0`) || !strings.Contains(snapshot.Body.String(), `"row_version":3`) || !strings.Contains(snapshot.Body.String(), `"runs":[{"run":{"id":"`+runID+`"`) || !strings.Contains(snapshot.Body.String(), `"messages":[{"role":"user","content":"最近没精神"`) || !strings.Contains(snapshot.Body.String(), `"event_cursors":[{"run_id":"`+runID+`","sequence":3}]`) {
 		t.Fatalf("snapshot status = %d, body = %s", snapshot.Code, snapshot.Body.String())
 	}
 	stream := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events/stream?after=1", "")
@@ -123,6 +127,9 @@ func TestAskRoutesLifecycle(t *testing.T) {
 	reply := askRouteRequest(t, router, token, http.MethodPost, replyPath, replyBody)
 	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), `"turn_count":1`) || !strings.Contains(reply.Body.String(), `"id":"`+runID+`"`) || !strings.Contains(reply.Body.String(), `"row_version":4`) || !strings.Contains(reply.Body.String(), `"clarification_count":1`) || !strings.Contains(reply.Body.String(), `"sequence":4`) || !strings.Contains(reply.Body.String(), `"status":"queued"`) {
 		t.Fatalf("reply status = %d, body = %s", reply.Code, reply.Body.String())
+	}
+	if queued := runQueue.jobs[len(runQueue.jobs)-1]; queued.RunID != runID || queued.RowVersion != 4 {
+		t.Fatalf("replied run job = %+v", queued)
 	}
 	replayedReply := askRouteRequest(t, router, token, http.MethodPost, replyPath, replyBody)
 	if replayedReply.Code != http.StatusOK || !strings.Contains(replayedReply.Body.String(), `"row_version":4`) || !strings.Contains(replayedReply.Body.String(), `"sequence":4`) {
@@ -203,7 +210,7 @@ func TestAskRoutesMultiPetFactContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	router := NewWithDependencies(Dependencies{AskService: askService, FamilyRepository: familyRepository, TokenSigner: signer})
+	router := NewWithDependencies(Dependencies{AskService: askService, AskRunQueue: &recordingRunQueue{service: askService}, FamilyRepository: familyRepository, TokenSigner: signer})
 	token, err := signer.Sign("user-1")
 	if err != nil {
 		t.Fatal(err)
@@ -234,6 +241,20 @@ func TestAskRoutesMultiPetFactContract(t *testing.T) {
 func askRouteRequest(t *testing.T, router http.Handler, token, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	return askRouteRequestWithKey(t, router, token, method, path, body, askRouteIdempotencyKey(method, path, body))
+}
+
+type recordingRunQueue struct {
+	service *askapp.Service
+	jobs    []askapp.RunJob
+}
+
+func (q *recordingRunQueue) Enqueue(ctx context.Context, job askapp.RunJob) error {
+	q.jobs = append(q.jobs, job)
+	if q.service == nil {
+		return nil
+	}
+	_, err := q.service.ProcessRunVersion(ctx, job.FamilyID, job.SessionID, job.RunID, job.RowVersion)
+	return err
 }
 
 func askRouteRequestWithKey(t *testing.T, router http.Handler, token, method, path, body, idempotencyKey string) *httptest.ResponseRecorder {
@@ -285,7 +306,7 @@ func setupAskRouteSchema(t *testing.T, db *sql.DB) {
 		`CREATE TABLE ask_sessions (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, created_by TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, turn_count INTEGER NOT NULL, prompt_version TEXT NOT NULL, rule_version TEXT NOT NULL, knowledge_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, completed_at TIMESTAMP)`,
 		`CREATE TABLE ask_session_pets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, pet_id TEXT NOT NULL, mention TEXT NOT NULL, sort_order INTEGER NOT NULL, UNIQUE(session_id, pet_id), UNIQUE(session_id, sort_order))`,
 		`CREATE TABLE ask_turns (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, status TEXT NOT NULL, input TEXT NOT NULL, selected_run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(session_id, turn_index))`,
-		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_index INTEGER NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, clarification_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, risk_level TEXT NOT NULL, rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL, UNIQUE(turn_id, run_index))`,
+		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_index INTEGER NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, clarification_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, risk_level TEXT NOT NULL, rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at TIMESTAMP, attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TIMESTAMP, UNIQUE(turn_id, run_index))`,
 		`CREATE TABLE ask_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(run_id, sequence))`,
 		`CREATE TABLE ask_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT, role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL)`,
 		`CREATE TABLE ask_idempotency_keys (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, response_data TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(user_id, operation, idempotency_key))`,

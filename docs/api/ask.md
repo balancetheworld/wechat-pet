@@ -26,7 +26,7 @@ Idempotency-Key: ask-client-generated-key
 }
 ```
 
-当前版本只创建排队中的 Run，不调用真实模型。
+当前版本先在事务中创建排队中的 Run，再投递到进程内 Worker 异步执行。接口响应仍返回事务提交时的 `queued` 快照，后续状态通过 Snapshot 或事件流获取。
 
 响应中的关键字段：
 
@@ -47,8 +47,10 @@ Idempotency-Key: ask-client-generated-key
       "run_index": 0,
       "row_version": 1,
       "clarification_count": 0,
+      "attempt_count": 0,
       "status": "queued",
-      "risk_level": "unknown"
+      "risk_level": "unknown",
+      "next_attempt_at": null
     },
     "events": [
       {
@@ -65,7 +67,7 @@ Idempotency-Key: ask-client-generated-key
 
 `POST /api/v1/ask/sessions/:session_id/runs/:run_id/process`
 
-当前使用确定性 Executor，成功后会进入 `waiting_input`，并返回一个追问事件。后续接入真实 Agent 后，接口路径保持不变。
+该接口保留为兼容和人工重试入口。正常创建和 Reply 流程不需要调用；接口读取当前 Run，若仍为 `queued` 则重新投递 Worker，不会在 HTTP 请求内直接执行。当前使用确定性 Executor，成功后会进入 `waiting_input` 并写入追问事件。
 
 可能的 Run 状态：
 
@@ -75,6 +77,8 @@ completed
 escalated
 failed
 ```
+
+Worker 每次执行前会领取数据库租约。基础设施错误会写入 `run.retry_scheduled` 并在 `next_attempt_at` 后重试；进程中断留下的过期 `running` Run 会写入 `run.recovered` 后重新执行。超过最大尝试次数会写入 `run.failed`，`error_code` 为 `worker_attempts_exhausted`。
 
 ## 回复问问追问
 
@@ -98,7 +102,7 @@ waiting_input(row_version=N)
 → queued(row_version=N+1, clarification_count+1)
 ```
 
-同一事务还会写入用户回答、追加新的 `run.queued` 事件和幂等结果。回答内容不能为空，长度不能超过 4000 个字符。最多允许三次追问补充；达到上限后若 Agent 仍要求追问，Run 会收敛为 `failed`。
+同一事务还会写入用户回答、追加新的 `run.queued` 事件和幂等结果，提交后将新版本 Run 投递到 Worker。回答内容不能为空，长度不能超过 4000 个字符。最多允许三次追问补充；达到上限后若 Agent 仍要求追问，Run 会收敛为 `failed`。
 
 ## 查询问问会话
 
@@ -110,7 +114,7 @@ waiting_input(row_version=N)
 
 `GET /api/v1/ask/sessions/:session_id/snapshot`
 
-返回 Session、绑定宠物、全部 Turn、每个 Turn 的选中 Run、Run 事件和 `event_cursors`。前端页面恢复时以该接口为权威状态，再从每个 Run 的最新事件游标继续消费增量。
+返回 Session、绑定宠物、全部 Turn、每个 Turn 的全部 Run、选中 Run 快捷字段、Run 消息、Run 事件和 `event_cursors`。`runs` 中每项包含 `run`、`messages` 和 `events`；快捷字段对应 `turn.selected_run_id`。`messages` 包含 `role`、`content` 和 `created_at`，用于恢复同一 Run 内的原始问题、Agent 追问和用户补充回答。前端页面恢复时以该接口为权威状态，再从当前 Run 的最新事件游标继续消费增量。
 
 ## 查询问问事件
 

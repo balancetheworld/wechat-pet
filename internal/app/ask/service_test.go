@@ -150,6 +150,41 @@ func TestServiceCreateAndProcessRun(t *testing.T) {
 	}
 }
 
+func TestServiceProcessRunVersionRejectsStaleJob(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pet: petapp.Pet{ID: "pet-1", FamilyID: "family-1"}}, DeterministicExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "问题", "create-version")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale, err := service.ProcessRunVersion(context.Background(), "family-1", created.Session.ID, created.Run.ID, created.Run.RowVersion+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stale.Run.Status != RunQueued || stale.Run.RowVersion != created.Run.RowVersion || len(stale.Events) != 1 {
+		t.Fatalf("stale job result = %+v", stale)
+	}
+	processed, err := service.ProcessRunVersion(context.Background(), "family-1", created.Session.ID, created.Run.ID, created.Run.RowVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed.Run.Status != RunWaitingInput {
+		t.Fatalf("processed run status = %s", processed.Run.Status)
+	}
+}
+
 func TestServiceProcessRunCompletesMultiPetFactWithoutExecutor(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {

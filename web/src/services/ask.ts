@@ -1,4 +1,4 @@
-import type { AskEvent, AskExecution, AskSession, CreateAskSessionRequest, ReplyAskRunRequest } from '../types/ask'
+import type { AskEvent, AskExecution, AskSession, AskSnapshot, CreateAskSessionRequest, ReplyAskRunRequest } from '../types/ask'
 import { request } from './request'
 
 export function createAskSession(data: CreateAskSessionRequest, idempotencyKey: string) {
@@ -29,6 +29,12 @@ export function replyAskRun(sessionID: string, runID: string, data: ReplyAskRunR
 export function getAskSession(sessionID: string) {
   return request<AskSession>({
     path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}`,
+  })
+}
+
+export function getAskSnapshot(sessionID: string) {
+  return request<AskSnapshot>({
+    path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/snapshot`,
   })
 }
 

@@ -1,16 +1,17 @@
-import type { AskEvent, AskExecution } from '../types/ask'
+import type { AskEvent, AskExecution, AskSnapshot } from '../types/ask'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { createAskSession, processAskRun, replyAskRun } from '../services/ask'
+import { createAskSession, getAskSnapshot, processAskRun, replyAskRun } from '../services/ask'
 import { openAskEventStream } from '../services/ask-stream'
 import { ApiError } from '../services/request'
 import { useAskStore } from '../stores/ask-store'
-import { askReducer, initialAskRuntimeState } from './ask-reducer'
+import { askReducer, hasSequenceGap, initialAskRuntimeState } from './ask-reducer'
 
 export const askQueryKeys = {
   session: (sessionID: string) => ['ask', 'session', sessionID] as const,
   execution: (sessionID: string, runID: string) => ['ask', 'execution', sessionID, runID] as const,
   eventLog: (sessionID: string, runID: string) => ['ask', 'events', sessionID, runID] as const,
+  snapshot: (sessionID: string) => ['ask', 'snapshot', sessionID] as const,
 }
 
 function latestSequence(events: AskEvent[]) {
@@ -98,6 +99,25 @@ export function useAskSession() {
     dispatch({ type: 'snapshot.restored', execution: value })
   }
 
+  const restoreFullSnapshot = useCallback((value: AskSnapshot) => {
+    queryClient.setQueryData(askQueryKeys.snapshot(value.session.id), value)
+    queryClient.setQueryData(askQueryKeys.session(value.session.id), value.session)
+    for (const turn of value.turns) {
+      queryClient.setQueryData(askQueryKeys.execution(value.session.id, turn.run.id), {
+        session: value.session,
+        run: turn.run,
+        events: turn.events,
+      })
+      queryClient.setQueryData<AskEvent[]>(askQueryKeys.eventLog(value.session.id, turn.run.id), turn.events)
+    }
+    const selected = value.turns[value.turns.length - 1]
+    const sequence = selected ? latestSequence(selected.events) : 0
+    if (selected) {
+      useAskStore.getState().setActiveExecution(value.session.id, selected.run.id, selected.run.row_version, sequence)
+    }
+    dispatch({ type: 'snapshot.loaded', snapshot: value })
+  }, [queryClient])
+
   const createMutation = useMutation({
     mutationFn: ({ input, key }: { input: string, key: string }) => createAskSession({ input }, key),
     onSuccess: restoreSnapshot,
@@ -131,6 +151,7 @@ export function useAskSession() {
     let disposed = false
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null
     let stream: ReturnType<typeof openAskEventStream> | null = null
+    let recovering = false
     function reconnect() {
       if (disposed || reconnectTimer) {
         return
@@ -151,6 +172,10 @@ export function useAskSession() {
         after: useAskStore.getState().lastEventSequence,
         onEvents(events) {
           if (disposed) {
+            return
+          }
+          if (hasSequenceGap(events, useAskStore.getState().lastEventSequence)) {
+            void recover()
             return
           }
           syncEvents(sessionID, runID, events)
@@ -178,7 +203,46 @@ export function useAskSession() {
         },
       })
     }
-    connect()
+    async function recover() {
+      if (disposed || recovering) {
+        return
+      }
+      recovering = true
+      stream?.close()
+      dispatch({ type: 'stream.reconnecting' })
+      try {
+        const snapshot = await getAskSnapshot(sessionID)
+        if (disposed) {
+          return
+        }
+        restoreFullSnapshot(snapshot)
+        recovering = false
+        connect()
+      }
+      catch (error) {
+        recovering = false
+        if (!disposed) {
+          dispatch({ type: 'request.failed', phase: errorPhase(error), message: errorMessage(error) })
+          reconnect()
+        }
+      }
+    }
+    async function initialize() {
+      try {
+        const snapshot = await getAskSnapshot(sessionID)
+        if (disposed) {
+          return
+        }
+        restoreFullSnapshot(snapshot)
+        connect()
+      }
+      catch {
+        if (!disposed) {
+          connect()
+        }
+      }
+    }
+    void initialize()
     return () => {
       disposed = true
       stream?.close()
@@ -186,7 +250,7 @@ export function useAskSession() {
         clearTimeout(reconnectTimer)
       }
     }
-  }, [activeRunId, activeRunVersion, activeSessionId, syncEvents])
+  }, [activeRunId, activeRunVersion, activeSessionId, restoreFullSnapshot, syncEvents])
 
   async function submit(input = draft) {
     const value = input.trim()
@@ -201,7 +265,7 @@ export function useAskSession() {
       const created = await createMutation.mutateAsync({ input: value, key: pending.idempotencyKey })
       pendingRequest.current = null
       useAskStore.getState().setDraft('')
-      return processMutation.mutateAsync({ sessionID: created.session.id, runID: created.run.id })
+      return created
     }
     catch (error) {
       if (!isRetryableRequest(error)) {
@@ -228,7 +292,7 @@ export function useAskSession() {
       const queued = await replyMutation.mutateAsync({ sessionID: activeSessionId, runID: activeRunId, input: value, expectedVersion, key: pending.idempotencyKey })
       pendingRequest.current = null
       useAskStore.getState().setDraft('')
-      return processMutation.mutateAsync({ sessionID: queued.session.id, runID: queued.run.id })
+      return queued
     }
     catch (error) {
       if (!isRetryableRequest(error)) {

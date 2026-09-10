@@ -31,12 +31,14 @@ type RunDTO struct {
 	RunIndex           int        `json:"run_index"`
 	RowVersion         int        `json:"row_version"`
 	ClarificationCount int        `json:"clarification_count"`
+	AttemptCount       int        `json:"attempt_count"`
 	Status             RunStatus  `json:"status"`
 	RiskLevel          RiskLevel  `json:"risk_level"`
 	ErrorCode          string     `json:"error_code"`
 	CreatedAt          time.Time  `json:"created_at"`
 	StartedAt          *time.Time `json:"started_at"`
 	CompletedAt        *time.Time `json:"completed_at"`
+	NextAttemptAt      *time.Time `json:"next_attempt_at"`
 }
 
 type TurnDTO struct {
@@ -57,6 +59,12 @@ type EventDTO struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
+type MessageDTO struct {
+	Role      string    `json:"role"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 type ExecutionDTO struct {
 	Session SessionDTO `json:"session"`
 	Run     RunDTO     `json:"run"`
@@ -64,9 +72,17 @@ type ExecutionDTO struct {
 }
 
 type SnapshotTurnDTO struct {
-	Turn   TurnDTO    `json:"turn"`
-	Run    RunDTO     `json:"run"`
-	Events []EventDTO `json:"events"`
+	Turn     TurnDTO          `json:"turn"`
+	Run      RunDTO           `json:"run"`
+	Events   []EventDTO       `json:"events"`
+	Messages []MessageDTO     `json:"messages"`
+	Runs     []SnapshotRunDTO `json:"runs"`
+}
+
+type SnapshotRunDTO struct {
+	Run      RunDTO       `json:"run"`
+	Events   []EventDTO   `json:"events"`
+	Messages []MessageDTO `json:"messages"`
 }
 
 type EventCursorDTO struct {
@@ -90,7 +106,7 @@ func NewSessionDTO(value Session) SessionDTO {
 }
 
 func NewRunDTO(value Run) RunDTO {
-	return RunDTO{ID: value.ID, SessionID: value.SessionID, TurnID: value.TurnID, RunIndex: value.RunIndex, RowVersion: value.RowVersion, ClarificationCount: value.ClarificationCount, Status: value.Status, RiskLevel: value.RiskLevel, ErrorCode: value.ErrorCode, CreatedAt: value.CreatedAt, StartedAt: value.StartedAt, CompletedAt: value.CompletedAt}
+	return RunDTO{ID: value.ID, SessionID: value.SessionID, TurnID: value.TurnID, RunIndex: value.RunIndex, RowVersion: value.RowVersion, ClarificationCount: value.ClarificationCount, AttemptCount: value.AttemptCount, Status: value.Status, RiskLevel: value.RiskLevel, ErrorCode: value.ErrorCode, CreatedAt: value.CreatedAt, StartedAt: value.StartedAt, CompletedAt: value.CompletedAt, NextAttemptAt: value.NextAttemptAt}
 }
 
 func NewTurnDTO(value Turn) TurnDTO {
@@ -122,12 +138,34 @@ func NewSnapshotDTO(value Snapshot) SnapshotDTO {
 	turns := make([]SnapshotTurnDTO, 0, len(value.Turns))
 	cursors := make([]EventCursorDTO, 0, len(value.Turns))
 	for _, value := range value.Turns {
-		turns = append(turns, SnapshotTurnDTO{Turn: NewTurnDTO(value.Turn), Run: NewRunDTO(value.Run), Events: NewEventDTOs(value.Events)})
+		messages := make([]MessageDTO, 0, len(value.Messages))
+		for _, message := range value.Messages {
+			messages = append(messages, MessageDTO{Role: message.Role, Content: message.Content, CreatedAt: message.CreatedAt})
+		}
+		runs := make([]SnapshotRunDTO, 0, len(value.Runs))
+		for _, run := range value.Runs {
+			runMessages := make([]MessageDTO, 0, len(run.Messages))
+			for _, message := range run.Messages {
+				runMessages = append(runMessages, MessageDTO{Role: message.Role, Content: message.Content, CreatedAt: message.CreatedAt})
+			}
+			runs = append(runs, SnapshotRunDTO{Run: NewRunDTO(run.Run), Events: NewEventDTOs(run.Events), Messages: runMessages})
+		}
+		turns = append(turns, SnapshotTurnDTO{Turn: NewTurnDTO(value.Turn), Run: NewRunDTO(value.Run), Events: NewEventDTOs(value.Events), Messages: messages, Runs: runs})
 		sequence := 0
 		if len(value.Events) > 0 {
 			sequence = value.Events[len(value.Events)-1].Sequence
 		}
 		cursors = append(cursors, EventCursorDTO{RunID: value.Run.ID, Sequence: sequence})
+		for _, run := range value.Runs {
+			if run.Run.ID == value.Run.ID {
+				continue
+			}
+			sequence = 0
+			if len(run.Events) > 0 {
+				sequence = run.Events[len(run.Events)-1].Sequence
+			}
+			cursors = append(cursors, EventCursorDTO{RunID: run.Run.ID, Sequence: sequence})
+		}
 	}
 	return SnapshotDTO{Session: session, Pets: session.Pets, Turns: turns, EventCursors: cursors}
 }

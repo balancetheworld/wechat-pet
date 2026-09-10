@@ -1454,6 +1454,7 @@ pets[]
 turns[]
   turn
   run
+  messages[]
   events[]
 event_cursors[]
   run_id
@@ -1721,3 +1722,352 @@ git diff --check
 ### 下一步计划
 
 第二十二步接通前端完整 Snapshot 恢复和事件缺口补偿：页面有活动 Session 时先加载 Snapshot，按 Turn、Run、事件游标恢复 reducer；流收到非连续 `sequence` 时暂停增量归约，重新获取 Snapshot，再从新游标建立事件流。
+
+## 第二十二步：前端 Snapshot 恢复与事件缺口补偿
+
+### 本步目标
+
+第二十一步已经提供了完整 Snapshot 接口和按 Run 递增的事件序号，但前端仍然只依赖当前页面内存中的单次 `ExecutionResult`。页面重新进入、网络断线或事件流丢包时，内存状态可能缺少历史 Turn，或者无法判断当前游标与服务端是否连续。
+
+本步把 Snapshot 设为前端恢复的权威来源，并在增量流消费前增加序号连续性检查。
+
+### Snapshot 前端契约
+
+新增 `AskSnapshot` 类型，对应服务端：
+
+```text
+session
+pets
+turns[]
+  turn
+  run
+  messages[]
+  events[]
+event_cursors[]
+```
+
+`getAskSnapshot(sessionID)` 统一通过 `web/src/services/ask.ts` 请求 `/api/v1/ask/sessions/:session_id/snapshot`，并写入 TanStack Query：
+
+```text
+['ask', 'snapshot', sessionID]
+['ask', 'session', sessionID]
+['ask', 'execution', sessionID, runID]
+['ask', 'events', sessionID, runID]
+```
+
+这样 Snapshot、单 Run 执行结果和事件日志共享同一缓存边界，页面组件不直接发起底层请求。
+
+### Reducer 恢复规则
+
+新增 `snapshot.loaded` 动作。Reducer 收到完整 Snapshot 后：
+
+1. 按服务端 Turn 顺序重建全部会话消息。
+2. 使用每个 Turn 的 `messages` 恢复原始问题和同 Run 的用户补充回答，无消息时回退到 `turn.input`。
+3. 将 Run 事件按 `sequence` 排序并重建 `cursors`、`seenEvents`。
+4. 以最新 Turn 的 Run 作为当前活动 Run，依据 Run 状态和最后事件恢复页面阶段。
+5. Snapshot 恢复会清除旧错误状态，避免网络错误覆盖已经恢复的权威状态。
+
+恢复期间仍可能存在尚未落库的乐观消息。原始提交通过输入内容匹配服务端 Turn，避免重复显示；同 Run 的补充回答输入不同于原问题时继续保留在最新 Turn 后面，待服务端事件到达后再追加事件。
+
+### 页面进入时的恢复顺序
+
+当 Zustand 中存在 `activeSessionId` 和 `activeRunId` 时，`useAskSession` 的事件流 Effect 先执行：
+
+```text
+读取完整 Snapshot
+→ snapshot.loaded 重建 reducer
+→ 更新当前 Run 和最新 sequence
+→ 从该 sequence 建立 NDJSON 事件流
+```
+
+Snapshot 请求失败时保留原有内存状态并尝试建立事件流；后续事件缺口恢复失败则进入网络错误阶段并按既有重连策略继续尝试。
+
+### 事件序号缺口检测
+
+事件流每次收到一批事件时，先按 `sequence` 排序，并与当前 Run 的 `lastEventSequence` 比较：
+
+```text
+sequence <= cursor       → 已消费事件，交给去重逻辑
+sequence == cursor + 1   → 可以增量归约
+sequence > cursor + 1    → 检测到缺口，暂停本批归约
+```
+
+缺口不会把不连续事件写入 Reducer。客户端会关闭当前流并执行：
+
+```text
+重新 GET Snapshot
+→ 用 Snapshot 覆盖会话状态和事件游标
+→ 从新的最大 sequence 重建事件流
+```
+
+恢复流程使用 `recovering` 标志防止同一时间重复请求 Snapshot。重连和组件卸载都会清理定时器与流连接，避免旧连接在新 Run 上继续派发事件。
+
+### 测试覆盖
+
+- 完整 Snapshot 可以从多个 Turn 重建会话状态。
+- Snapshot 会把服务端原始问题与本地乐观提交合并为一条消息。
+- 同 Run 的未落库补充回答在 Snapshot 恢复后仍然保留。
+- Snapshot 恢复会重建最新事件游标并依据终态事件恢复阶段。
+- 已消费事件不会被判定为缺口。
+- 单批事件跳过序号或批内不连续时会判定为缺口。
+
+### 修改文件
+
+- `web/src/types/ask.ts`：新增 Snapshot、Snapshot Turn 和事件游标类型。
+- `web/src/services/ask.ts`：新增 Snapshot 查询 API。
+- `web/src/hooks/ask-reducer.ts`：新增完整 Snapshot 恢复和序号缺口检测。
+- `web/src/hooks/use-ask-session.ts`：接通页面进入恢复、缺口回源和从新游标重建事件流。
+- `web/src/hooks/ask-reducer.test.ts`：补充 Snapshot 恢复与事件缺口测试。
+
+### 验证结果
+
+```text
+Go 全部测试通过
+前端 2 个测试文件、12 个用例通过
+TypeScript 类型检查通过
+ESLint 0 个错误，仍只有 profile 页面既有的 2 条 Hook 警告
+```
+
+### 当前边界
+
+- 当前活动 Session ID 仍由 Zustand 生命周期维护，尚未增加跨进程持久化；同一小程序运行期间重新进入页面可以恢复。
+- 事件流仍按当前活动 Run 建立；历史 Turn 的事件由 Snapshot 一次性恢复，不为每个历史 Run 长连接。
+- Snapshot 恢复失败时会保留内存状态并尝试普通重连，尚未增加独立的恢复失败退避上限和人工刷新入口。
+
+## 第二十三步：多 Run 快照与 Worker 执行边界
+
+### 本步目标
+
+第 22 步解决了当前活动 Run 的 Snapshot 恢复和事件缺口。本步把一个 Turn 下的多个 Run 暴露为可审计数据，并抽出后台执行 Worker 边界，为后续异步任务队列接入做准备。
+
+Snapshot 的多 Run 结构解决了一个 Turn 中多次执行、重试和追问恢复时的审计问题。当前选中的 Run 仍由 `turn.selected_run_id` 确定，历史 Run 不会覆盖页面当前状态。
+
+新增 `RunWorker` 作为后台执行边界：
+
+```text
+Enqueue(RunJob)
+→ Worker 调用 Service.ProcessRun
+→ Service 统一负责 CAS、规则、Executor 和事件持久化
+```
+
+Worker 支持显式 `Start`、`Enqueue` 和 `Close`，使用有界队列，队列满时调用方可以等待或响应取消。当前主程序仍使用同步 `ProcessRun` 接口，Worker 只作为可测试的后台执行基础，不改变现有 HTTP 行为；后续接入任务队列时可以把创建或 Reply 成功后的 Run 投递到该边界。
+
+### 修改文件
+
+- `internal/app/ask/model.go`、`internal/app/ask/repository.go`、`internal/app/ask/dto.go`：将一个 Turn 下全部 Run、事件和消息聚合到 Snapshot。
+- `internal/app/ask/worker.go`：新增可独立启动、投递和停止的 Run Worker 边界。
+- `internal/app/ask/worker_test.go`、`internal/app/ask/repository_test.go`、`internal/httpapi/ask_routes_test.go`：覆盖 Worker 配置、Snapshot 多 Run 和消息聚合。
+- `web/src/types/ask.ts`：增加 Snapshot 的 `runs[]` 类型，兼容当前选中 Run 展示。
+
+### 验证结果
+
+```text
+Go 全部测试通过
+前端 2 个测试文件、12 个用例通过
+TypeScript 类型检查通过
+ESLint 0 个错误，仍只有 profile 页面既有的 2 条 Hook 警告
+```
+
+### 下一步计划
+
+第二十四步接入 Worker 的真实投递入口：创建会话和 Reply 成功后将 Run 放入后台队列，并增加任务去重、失败重试和优雅停机策略。
+
+## 第二十四步：异步 Run 投递与 Worker 生命周期
+
+### 本步目标
+
+第 23 步只建立了 Worker 抽象，本步将创建会话和 Reply 成功后的 `queued` Run 真正投递到后台执行，并移除前端正常流程对同步 `/process` 请求的依赖。
+
+### 异步执行流程
+
+创建和 Reply 继续先完成数据库事务，再执行投递：
+
+```text
+持久化 Session / Run / Message / run.queued / 幂等结果
+→ Enqueue(RunJob)
+→ HTTP 返回 queued 快照
+→ Worker 调用 Service.ProcessRunVersion
+→ CAS 推进 running 和最终状态
+→ 前端通过 Snapshot 和事件流恢复结果
+```
+
+`POST /ask/sessions/:session_id/runs/:run_id/process` 继续保留为兼容和人工重试入口，但前端正常提交和回答不再自动调用该接口。
+
+### 去重与版本保护
+
+任务身份由以下字段共同确定：
+
+```text
+family_id + session_id + run_id + row_version
+```
+
+Worker 的 `pending` 集合覆盖排队中和执行中的任务，相同版本重复投递时直接返回成功。追问恢复会复用 `run_id`，但 `row_version` 会递增，因此新版本仍可正常入队。
+
+Worker 调用 `ProcessRunVersion` 时再次核对持久化 Run 的当前版本。旧版本任务即使晚到，也只返回当前持久化结果，不会误执行追问后的新一代 `queued` Run。Run 状态 CAS 和事件唯一约束继续作为数据库层的最终重复执行保护。
+
+### 失败重试与停机
+
+Worker 使用有界队列，当前主程序配置为：
+
+```text
+queue_size=100
+max_attempts=3
+retry_delay=500ms
+```
+
+`ProcessRunVersion` 返回错误时在 Worker 内有限重试；耗尽后通过结构化日志记录任务标识和错误。Executor 返回的受控失败仍由 Service 写为 `run.failed`，不作为 Worker 基础设施错误重复执行。
+
+进程收到 `SIGINT` 或 `SIGTERM` 后先停止 HTTP Server 接收新请求，再关闭 Worker。`Close` 会停止新投递、等待并发投递退出、关闭队列并处理完已经接收的任务，最后才允许数据库连接关闭。
+
+### 修改文件
+
+- `internal/app/ask/worker.go`：增加版本化任务身份、进程内去重、有限重试和队列排空。
+- `internal/app/ask/worker_test.go`：覆盖配置校验、重复任务、新版本任务、失败重试、取消和优雅停止。
+- `internal/app/ask/service.go`、`internal/app/ask/service_test.go`：增加 `ProcessRunVersion` 和旧任务版本保护。
+- `internal/httpapi/ask/handler.go`、`internal/httpapi/ask/routes.go`、`internal/httpapi/router.go`、`internal/httpapi/v1.go`：在创建和 Reply 事务成功后投递 Run。
+- `internal/httpapi/ask_routes_test.go`：验证创建和 Reply 的投递任务及版本。
+- `cmd/api/main.go`：组装并启动 Worker，接入 HTTP Server 与 Worker 的停机顺序。
+- `web/src/hooks/use-ask-session.ts`：正常创建和 Reply 后改为依赖 Snapshot 与事件流，不再同步调用 Process。
+- `docs/api/ask.md`：同步异步执行契约。
+
+### 验证结果
+
+```text
+Go Ask 和 HTTP 测试通过
+Go race 检测通过
+前端 2 个测试文件、12 个用例通过
+TypeScript 类型检查通过
+gofmt 通过
+git diff --check 通过
+```
+
+### 当前边界
+
+- 队列和去重集合仍在单进程内存中，进程崩溃会丢失尚未执行的任务。
+- 数据库中的 `queued` Run 尚未在进程启动时扫描恢复。
+- `running` Run 尚未引入执行租约和超时回收；进程在 CAS 到 `running` 后退出时可能留下悬挂状态。
+- Worker 当前为单消费者，尚未增加并发度配置和跨实例协调。
+
+### 下一步计划
+
+第二十五步实现可恢复执行：启动时扫描并恢复 `queued` Run，为 `running` Run 增加执行租约、超时回收和跨实例领取语义，消除数据库提交与内存投递之间的崩溃窗口。
+
+## 第二十五步：持久化租约与崩溃恢复
+
+### 本步目标
+
+第 24 步接通了进程内队列，但数据库事务提交和内存投递之间仍存在崩溃窗口；Worker 在 Run 进入 `running` 后退出也会留下无法自动恢复的状态。本步将数据库提升为任务调度的事实源，内存队列只保留低延迟通知职责。
+
+### 持久化字段
+
+迁移 `000014_ask_run_leases` 为 `ask_runs` 增加：
+
+```text
+lease_owner
+lease_expires_at
+attempt_count
+next_attempt_at
+```
+
+- `lease_owner` 标识当前执行实例。
+- `lease_expires_at` 是执行所有权的有效期。
+- `attempt_count` 记录当前执行代次已经领取的次数。
+- `next_attempt_at` 持久化失败后的下一次可领取时间。
+
+创建的新 Run 从零次尝试开始。用户回答追问并恢复同一个 Run 时，`attempt_count` 会归零，使每次补充后的新执行代次拥有独立的重试预算。
+
+### 领取与恢复
+
+Worker 启动时立即扫描数据库，之后每秒扫描一次可运行任务：
+
+```text
+到期 queued Run
+或租约过期的 running Run
+→ 条件更新领取租约
+→ attempt_count + 1
+→ ProcessRunVersion
+```
+
+PostgreSQL 领取事务使用行锁；最终更新仍同时校验状态、`row_version` 和租约条件。多个实例即使扫描到同一候选项，也只有一个能成功领取。每次成功领取都会递增 `row_version`，使租约过期前的旧 Worker 无法提交迟到结果。
+
+过期 `running` Run 被领取时会：
+
+```text
+running → queued
+row_version + 1
+写入 run.recovered
+重新绑定新租约
+```
+
+版本递增会使旧 Worker 持有的最终状态 CAS 失败，避免租约回收后迟到结果覆盖新执行。
+
+### 续租、重试与失败
+
+执行期间按租约时长的三分之一续租。当前配置为 30 秒租约和 2 分钟单次执行超时。续租失败会取消执行上下文，等待租约过期后的数据库恢复。
+
+基础设施错误不会只保存在内存：
+
+```text
+清理当前租约
+→ queued + row_version 递增
+→ 写入 run.retry_scheduled
+→ 保存 next_attempt_at
+→ 后续轮询重新领取
+```
+
+当前最多领取三次。达到上限后 Run、Turn 会进入 `failed`，写入 `run.failed`，错误码为 `worker_attempts_exhausted`。受控 Executor 失败仍由 Service 按原协议直接写入 `run.failed`。
+
+正常进入 `waiting_input` 或终态时，状态事务会清理租约和下次重试时间。`attempt_count` 与 `next_attempt_at` 会通过 Run DTO 暴露用于审计，租约所有者和过期时间不对客户端公开。
+
+### HTTP 与停机边界
+
+兼容 `/process` 接口不再直接调用 Executor。它读取当前 Run，仅在状态仍为 `queued` 时重新通知 Worker，因此不会绕过租约与跨实例领取规则。
+
+优雅停机仍按以下顺序执行：
+
+```text
+停止 HTTP 接收新请求
+→ 停止 Worker 接收新内存任务
+→ 排空已接收任务
+→ 关闭数据库
+```
+
+进程非正常退出时无需依赖内存清理；新实例会从数据库恢复 `queued` 或租约过期的 `running` Run。
+
+### 修改文件
+
+- `migrations/000014_ask_run_leases.up.sql`、`migrations/000014_ask_run_leases.down.sql`：增加租约、尝试次数、重试时间和可运行索引。
+- `internal/app/ask/model.go`、`internal/app/ask/dto.go`：增加内部租约字段和客户端审计字段。
+- `internal/app/ask/repository.go`：实现候选扫描、原子领取、续租、持久化重试、过期执行回收和次数耗尽失败。
+- `internal/app/ask/service.go`：正常完成和追问恢复时同步清理或重置租约状态。
+- `internal/app/ask/worker.go`：接入数据库轮询、领取、心跳续租和执行超时。
+- `internal/httpapi/ask/handler.go`：将兼容 Process 接口改为重新投递。
+- `internal/app/ask/repository_test.go`、`internal/app/ask/worker_test.go`、`internal/app/ask/state_test.go`、`internal/httpapi/ask_routes_test.go`：覆盖租约竞争、崩溃恢复、迟到提交、重试上限、启动恢复、续租和超时。
+- `web/src/types/ask.ts`、`web/src/hooks/ask-reducer.test.ts`：同步 Run 审计字段。
+
+### 验证结果
+
+```text
+Go 全部测试通过
+go vet 全部通过
+Go Ask 和 HTTP race 检测通过
+前端 2 个测试文件、12 个用例通过
+TypeScript 类型检查通过
+本步前端文件 ESLint 0 个错误
+迁移 000001 → 000014、000014 回滚及再次升级通过
+gofmt 通过
+git diff --check 通过
+```
+
+完整 ESLint 仍被 `web/src/pages/onboarding/profile.tsx` 的 1 条既有 import 顺序错误阻断；另有 onboarding/profile 和 profile 页面的 3 条既有 Hook 警告，均与本步无关。
+
+### 当前边界
+
+- 当前轮询按单批 20 个候选顺序执行，尚未引入并行消费者。
+- 重试间隔为固定 500ms，尚未增加指数退避和随机抖动。
+- 租约续期依赖 Executor 响应 context 取消；不响应取消的第三方调用仍需由 Provider 自身设置超时。
+- 当前通过数据库行锁和条件更新协调实例，没有引入独立消息中间件。
+
+### 下一步计划
+
+第二十六步接入真实 AI Provider 边界：配置请求超时、结构化输出、错误分类和可重试策略，使 Provider 限流、超时和不可重试响应能够正确映射到现有 Worker 与 Run 状态机。
