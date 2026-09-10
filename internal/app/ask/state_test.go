@@ -9,6 +9,7 @@ func TestCanTransitionRun(t *testing.T) {
 		want bool
 	}{
 		{RunQueued, RunRunning, true},
+		{RunQueued, RunFailed, true},
 		{RunQueued, RunCanceled, true},
 		{RunRunning, RunWaitingInput, true},
 		{RunRunning, RunCompleted, true},

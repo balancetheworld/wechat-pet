@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"errors"
+	"net/http"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 
 	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
@@ -131,13 +135,50 @@ func main() {
 		os.Exit(1)
 	}
 	askService.SetCalendarRepository(calendarRepository)
+	askWorker, err := askapp.NewRunWorker(askService, askRepository, askapp.RunWorkerConfig{
+		QueueSize:        100,
+		MaxAttempts:      3,
+		RetryDelay:       500 * time.Millisecond,
+		PollInterval:     time.Second,
+		LeaseDuration:    30 * time.Second,
+		ExecutionTimeout: 2 * time.Minute,
+		BatchSize:        20,
+		OnError: func(job askapp.RunJob, err error) {
+			logger.Error("process ask run", "family_id", job.FamilyID, "session_id", job.SessionID, "run_id", job.RunID, "row_version", job.RowVersion, "error", err)
+		},
+	})
+	if err != nil {
+		logger.Error("create ask run worker", "error", err)
+		os.Exit(1)
+	}
+	askWorker.Start(context.Background())
 	localUploadDir := ""
 	if cfg.StorageDriver == "local" {
 		localUploadDir = cfg.LocalUploadDir
 	}
-	server := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, FamilyService: familyService, FamilyRepository: familyRepository, PetService: petService, PetRepository: petRepository, CalendarService: calendarService, AskService: askService, TokenSigner: tokenSigner, FileService: fileService, LocalUploadDir: localUploadDir}, logger)
+	router := httpapi.NewWithDependencies(httpapi.Dependencies{AuthService: authService, UserService: userService, FamilyService: familyService, FamilyRepository: familyRepository, PetService: petService, PetRepository: petRepository, CalendarService: calendarService, AskService: askService, AskRunQueue: askWorker, TokenSigner: tokenSigner, FileService: fileService, LocalUploadDir: localUploadDir}, logger)
+	server := &http.Server{Addr: cfg.HTTPAddr, Handler: router}
+	serverErrors := make(chan error, 1)
 	logger.Info("api server starting", "addr", cfg.HTTPAddr)
-	if err := server.Run(cfg.HTTPAddr); err != nil {
+	go func() {
+		serverErrors <- server.ListenAndServe()
+	}()
+	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSignals()
+	select {
+	case <-shutdownSignal.Done():
+		logger.Info("api server stopping")
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutdownCancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Error("shutdown api server", "error", err)
+		}
+		askWorker.Close()
+	case err := <-serverErrors:
+		askWorker.Close()
+		if errors.Is(err, http.ErrServerClosed) {
+			return
+		}
 		logger.Error("api server stopped", "error", err)
 		os.Exit(1)
 	}

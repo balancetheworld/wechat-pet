@@ -24,6 +24,7 @@ type Dependencies struct {
 	PetRepository    petapp.Repository
 	CalendarService  *calendarapp.Service
 	AskService       *askapp.Service
+	AskRunQueue      askapp.RunEnqueuer
 	TokenSigner      *jwtpkg.Signer
 	FileService      *fileservice.Service
 	LocalUploadDir   string

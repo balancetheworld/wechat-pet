@@ -139,6 +139,25 @@ func (s *Service) GetEvents(ctx context.Context, familyID, sessionID, runID stri
 	return values, nil
 }
 
+func (s *Service) GetExecution(ctx context.Context, familyID, sessionID, runID string) (ExecutionResult, error) {
+	session, err := s.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID))
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	run, err := s.repository.GetRun(ctx, session.ID, strings.TrimSpace(runID))
+	if errors.Is(err, ErrRunNotFound) {
+		return ExecutionResult{}, appErrors.NotFound("问问执行不存在")
+	}
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	events, err := s.repository.ListEvents(ctx, session.ID, run.ID, 0)
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	return ExecutionResult{Session: session, Run: run, Events: events}, nil
+}
+
 type Service struct {
 	repository Repository
 	pets       petapp.Repository
@@ -320,6 +339,14 @@ func (s *Service) createSession(ctx context.Context, familyID, userID, input str
 }
 
 func (s *Service) ProcessRun(ctx context.Context, familyID, sessionID, runID string) (ExecutionResult, error) {
+	return s.processRun(ctx, familyID, sessionID, runID, 0)
+}
+
+func (s *Service) ProcessRunVersion(ctx context.Context, familyID, sessionID, runID string, expectedVersion int) (ExecutionResult, error) {
+	return s.processRun(ctx, familyID, sessionID, runID, expectedVersion)
+}
+
+func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID string, expectedVersion int) (ExecutionResult, error) {
 	session, err := s.repository.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID))
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
@@ -341,6 +368,9 @@ func (s *Service) ProcessRun(ctx context.Context, familyID, sessionID, runID str
 	events, err := s.repository.ListEvents(ctx, session.ID, run.ID, 0)
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	if expectedVersion > 0 && run.RowVersion != expectedVersion {
+		return ExecutionResult{Session: session, Run: run, Events: events}, nil
 	}
 	if run.Status != RunQueued {
 		return ExecutionResult{Session: session, Run: run, Events: events}, nil
@@ -500,6 +530,9 @@ func (s *Service) ProcessRun(ctx context.Context, familyID, sessionID, runID str
 	run.RowVersion++
 	run.RiskLevel = decision.RiskLevel
 	run.ErrorCode = decision.ErrorCode
+	run.LeaseOwner = ""
+	run.LeaseExpiresAt = nil
+	run.NextAttemptAt = nil
 	if decision.Status == RunCompleted || decision.Status == RunEscalated || decision.Status == RunFailed || decision.Status == RunCanceled || decision.Status == RunInterrupted {
 		run.CompletedAt = &finishedAt
 	}
@@ -605,6 +638,10 @@ func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID,
 	run.ClarificationCount++
 	run.CompletedAt = nil
 	run.ErrorCode = ""
+	run.LeaseOwner = ""
+	run.LeaseExpiresAt = nil
+	run.AttemptCount = 0
+	run.NextAttemptAt = nil
 	session.Status = SessionActive
 	session.RiskLevel = RiskUnknown
 	session.UpdatedAt = now

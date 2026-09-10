@@ -2,51 +2,65 @@ import type { ButtonProps } from '@tarojs/components'
 import { Button, Image, Input, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useEffect, useRef, useState } from 'react'
-import backgroundImage from '../../assets/background2.png'
+import bg1Image from '../../assets/bg1.png'
+import cat2Image from '../../assets/cat2.png'
+import catImage from '../../assets/cat.png'
+import logoImage from '../../assets/logo.png'
 import { routes } from '../../constants/routes'
 import { silentLogin } from '../../services/auth'
+import { applyJoinFamily, createFamily } from '../../services/family'
 import { updateProfile, uploadAvatar } from '../../services/user'
-import { reLaunch } from '../../utils/navigation'
+import { useAuthStore } from '../../stores/auth-store'
+import { useFamilyStore } from '../../stores/family-store'
+import { navigateTo, reLaunch } from '../../utils/navigation'
 import './profile.scss'
 
 type ChooseAvatarEvent = Parameters<NonNullable<ButtonProps['onChooseAvatar']>>[0]
 
 export default function ProfileOnboarding() {
   const [loading, setLoading] = useState(false)
-  const [profileVisible, setProfileVisible] = useState(false)
   const [loginCompleted, setLoginCompleted] = useState(false)
-  const [loginFailed, setLoginFailed] = useState(false)
   const [nickname, setNickname] = useState('')
   const [avatarPath, setAvatarPath] = useState('')
   const [avatarAssetID, setAvatarAssetID] = useState('')
   const [choosingAvatar, setChoosingAvatar] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [speechText, setSpeechText] = useState('')
+  const [helloDisabled, setHelloDisabled] = useState(false)
+  const [helloMounted, setHelloMounted] = useState(true)
+  const [helloOut, setHelloOut] = useState(false)
+  const [loginMounted, setLoginMounted] = useState(false)
+  const [authDisabled, setAuthDisabled] = useState(false)
+  const [loginOut, setLoginOut] = useState(false)
+  const [profileMounted, setProfileMounted] = useState(false)
+  const [profileSubmitted, setProfileSubmitted] = useState(false)
+  const [avatarOut, setAvatarOut] = useState(false)
+  const [fieldsOut, setFieldsOut] = useState(false)
+  const [familyStep, setFamilyStep] = useState<'choice' | 'create' | 'join' | null>(null)
+  const [familyName, setFamilyName] = useState('')
+  const [familyCode, setFamilyCode] = useState('')
+  const [familySubmitting, setFamilySubmitting] = useState(false)
   const choosingAvatarRef = useRef(false)
 
   function handleLogin() {
-    if (loading) {
+    if (loading || authDisabled) {
       return
     }
-    const alreadyVisible = profileVisible
-    setProfileVisible(true)
-    setLoading(true)
-    setLoginFailed(false)
-    void Taro.showToast({ title: '正在打开资料', icon: 'none', duration: 1000 })
-    if (alreadyVisible) {
-      void login()
-    }
+    void login()
   }
 
   async function login() {
     setLoading(true)
+    setAuthDisabled(true)
     try {
       const session = await silentLogin()
       setNickname(value => value || session.user.nickname)
       setLoginCompleted(true)
+      void playLoginSuccessFlow()
     }
     catch (error) {
-      setLoginFailed(true)
+      setAuthDisabled(false)
       const title = error instanceof Error && /timeout|超时/i.test(error.message) ? '登录超时，请重试' : '登录失败，请重试'
       await Taro.showToast({ title, icon: 'none' })
     }
@@ -55,12 +69,57 @@ export default function ProfileOnboarding() {
     }
   }
 
-  useEffect(() => {
-    if (!profileVisible) {
+  async function playLoginSuccessFlow() {
+    await eraseText('要使用的话需要先登录哦')
+    await typeText('好耶！登录成功了')
+    await sleep(500)
+    await eraseText('好耶！登录成功了')
+    await typeText('请设置你的头像和名字')
+    await sleep(300)
+    setLoginOut(true)
+    await sleep(420)
+    setLoginMounted(false)
+    setProfileMounted(true)
+  }
+
+  function sleep(ms: number) {
+    return new Promise<void>(resolve => setTimeout(resolve, ms))
+  }
+
+  async function typeText(text: string, speed = 150) {
+    for (let i = 0; i <= text.length; i += 1) {
+      setSpeechText(text.slice(0, i))
+      await sleep(speed)
+    }
+  }
+
+  async function eraseText(text: string, speed = 70) {
+    for (let i = text.length; i >= 0; i -= 1) {
+      setSpeechText(text.slice(0, i))
+      await sleep(speed)
+    }
+  }
+
+  async function handleHelloClick() {
+    if (helloDisabled) {
       return
     }
-    void login()
-  }, [profileVisible])
+    setHelloDisabled(true)
+    await eraseText('你好呀')
+    await typeText('欢迎来到宠物小程序')
+    await sleep(500)
+    await eraseText('欢迎来到宠物小程序')
+    await typeText('要使用的话需要先登录哦')
+    await sleep(400)
+    setHelloOut(true)
+    await sleep(420)
+    setHelloMounted(false)
+    setLoginMounted(true)
+  }
+
+  useEffect(() => {
+    void typeText('你好呀')
+  }, [])
 
   useEffect(() => {
     if (!loginCompleted || !avatarPath || avatarAssetID || uploading) {
@@ -121,74 +180,231 @@ export default function ProfileOnboarding() {
     setSubmitting(true)
     try {
       await updateProfile({ nickname: value, avatar_asset_id: avatarAssetID })
-      await reLaunch(routes.pages.home)
+      void playProfileSubmitFlow()
     }
     catch {
+      setSubmitting(false)
       await Taro.showToast({ title: '保存失败，请重试', icon: 'none' })
     }
+  }
+
+  async function playProfileSubmitFlow() {
+    setProfileSubmitted(true)
+    await typeText('太好了，这样基本的资料就填好了')
+    await sleep(500)
+    await eraseText('太好了，这样基本的资料就填好了')
+    await typeText('你可以选择创建一个家庭，\n或者知道家庭码加入一个家庭')
+    await sleep(500)
+    setAvatarOut(true)
+    setFieldsOut(true)
+    await sleep(420)
+    setProfileMounted(false)
+    setFamilyStep('choice')
+  }
+
+  async function handleCreateFamily() {
+    const value = familyName.trim()
+    if (value.length < 1 || value.length > 50) {
+      await Taro.showToast({ title: '家庭名称长度需为 1-50 个字符', icon: 'none' })
+      return
+    }
+    if (familySubmitting) {
+      return
+    }
+    setFamilySubmitting(true)
+    try {
+      const family = await createFamily({ name: value })
+      useFamilyStore.getState().setFamilyDetail(family)
+      const user = useAuthStore.getState().user
+      if (user) {
+        useAuthStore.getState().setUserProfile(user, { id: family.id, name: family.name }, 'owner')
+      }
+      await Taro.showToast({ title: '家庭已创建', icon: 'success' })
+      await reLaunch(routes.pages.home)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '创建失败，请重试'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
     finally {
-      setSubmitting(false)
+      setFamilySubmitting(false)
+    }
+  }
+
+  function handleBackToFamilyChoice() {
+    setFamilyStep('choice')
+    setFamilyName('')
+    setFamilyCode('')
+  }
+
+  function handleSkip() {
+    void reLaunch(routes.pages.home)
+  }
+
+  async function handleJoinFamily() {
+    const value = familyCode.trim().toUpperCase()
+    if (value.length < 4 || value.length > 32) {
+      await Taro.showToast({ title: '家庭码长度无效', icon: 'none' })
+      return
+    }
+    if (familySubmitting) {
+      return
+    }
+    setFamilySubmitting(true)
+    try {
+      await applyJoinFamily({ code: value })
+      await Taro.showToast({ title: '申请已提交', icon: 'success' })
+      await navigateTo(routes.pages.pendingFamily)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '申请失败，请重试'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setFamilySubmitting(false)
     }
   }
 
   return (
     <View className="profile-onboarding">
-      <Image className="profile-onboarding__background" src={backgroundImage} mode="aspectFill" />
-      {profileVisible
-        ? (
-            <>
-              <Text className="profile-onboarding__title">选择头像和名称</Text>
-              {loading && <Text className="profile-onboarding__login-hint">正在绑定微信账号...</Text>}
-              <Button
-                className="profile-onboarding__avatar-button"
-                disabled={choosingAvatar || uploading || submitting || Boolean(avatarPath && !avatarAssetID)}
-                loading={choosingAvatar || uploading}
-                openType="chooseAvatar"
-                onClick={handleAvatarClick}
-                onChooseAvatar={handleChooseAvatar}
-                onError={handleChooseAvatarError}
-              >
-                {avatarPath ? <Image className="profile-onboarding__avatar" src={avatarPath} /> : '选择头像'}
-              </Button>
-              <Input
-                className="profile-onboarding__input"
-                maxlength={50}
-                placeholder="请输入昵称"
-                type="nickname"
-                value={nickname}
-                onInput={event => setNickname(event.detail.value)}
-              />
-              <View className="profile-onboarding__actions">
-                <Button
-                  className={`profile-onboarding__login${loginFailed ? '' : ' profile-onboarding__login--idle'}`}
-                  disabled={loading}
-                  onClick={handleLogin}
-                >
-                  重新登录
-                </Button>
-                <Button
-                  className="profile-onboarding__submit"
-                  disabled={!loginCompleted || uploading || submitting}
-                  loading={submitting}
-                  onClick={handleSubmit}
-                >
-                  保存资料
-                </Button>
-              </View>
-            </>
-          )
-        : (
-            <>
-              <Text className="profile-onboarding__title">欢迎来到宠物小程序</Text>
-              <Button
-                className="profile-onboarding__login profile-onboarding__login--welcome"
-                hoverClass="profile-onboarding__login--welcome-hover"
-                onClick={handleLogin}
-              >
-                登录
-              </Button>
-            </>
-          )}
+      <Image className="profile-onboarding__bg" src={bg1Image} mode="aspectFill" />
+      <Image className="profile-onboarding__cat" src={profileSubmitted || !loginCompleted ? catImage : cat2Image} mode="scaleToFill" />
+      <Image className="profile-onboarding__logo" src={logoImage} mode="scaleToFill" />
+      <View className="profile-onboarding__bubble">
+        <Text className="profile-onboarding__bubble-text">{speechText}</Text>
+      </View>
+      {helloMounted && (
+        <Button
+          className={`profile-onboarding__hello${helloOut ? ' profile-onboarding__hello--out' : ''}${helloDisabled ? ' profile-onboarding__hello--disabled' : ''}`}
+          onClick={handleHelloClick}
+        >
+          你好
+        </Button>
+      )}
+
+      {helloMounted && (
+        <Button className="profile-onboarding__skip" onClick={handleSkip}>
+          跳过
+        </Button>
+      )}
+
+      {loginMounted && (
+        <Button
+          className={`profile-onboarding__auth${loginOut ? ' profile-onboarding__auth--out' : ''}${authDisabled ? ' profile-onboarding__auth--disabled' : ''}`}
+          onClick={handleLogin}
+        >
+          授权微信登录
+        </Button>
+      )}
+
+      {profileMounted && (
+        <View className="profile-onboarding__profile">
+          <Button
+            className={`profile-onboarding__avatar-button${avatarOut ? ' profile-onboarding__avatar-button--out-left' : ''}`}
+            disabled={choosingAvatar || uploading || submitting || Boolean(avatarPath && !avatarAssetID)}
+            loading={choosingAvatar || uploading || (submitting && !profileSubmitted)}
+            openType="chooseAvatar"
+            onClick={handleAvatarClick}
+            onChooseAvatar={handleChooseAvatar}
+            onError={handleChooseAvatarError}
+          >
+            {avatarPath ? <Image className="profile-onboarding__avatar" src={avatarPath} /> : '选择头像'}
+          </Button>
+          <View className={`profile-onboarding__profile-fields${fieldsOut ? ' profile-onboarding__profile-fields--out-right' : ''}`}>
+            <Input
+              className="profile-onboarding__input"
+              maxlength={50}
+              placeholder="请输入昵称"
+              type="nickname"
+              value={nickname}
+              onInput={event => setNickname(event.detail.value)}
+            />
+            <Button
+              className="profile-onboarding__submit"
+              disabled={!loginCompleted || uploading || submitting}
+              loading={submitting && !profileSubmitted}
+              onClick={handleSubmit}
+            >
+              保存资料
+            </Button>
+          </View>
+        </View>
+      )}
+
+      {familyStep === 'choice' && (
+        <View className="profile-onboarding__family">
+          <Button
+            className="profile-onboarding__create-btn"
+            onClick={() => setFamilyStep('create')}
+          >
+            创建家庭
+          </Button>
+          <Button
+            className="profile-onboarding__join-btn"
+            onClick={() => setFamilyStep('join')}
+          >
+            加入家庭
+          </Button>
+        </View>
+      )}
+
+      {familyStep === 'choice' && (
+        <Button className="profile-onboarding__skip" onClick={handleSkip}>
+          跳过
+        </Button>
+      )}
+
+      {familyStep === 'create' && (
+        <View className="profile-onboarding__family-form">
+          <Input
+            className="profile-onboarding__input"
+            maxlength={50}
+            placeholder="请输入家庭名称"
+            value={familyName}
+            onInput={event => setFamilyName(event.detail.value)}
+          />
+          <Button
+            className="profile-onboarding__family-submit"
+            disabled={familySubmitting}
+            loading={familySubmitting}
+            onClick={handleCreateFamily}
+          >
+            创建家庭
+          </Button>
+          <Button
+            className="profile-onboarding__family-back"
+            onClick={handleBackToFamilyChoice}
+          >
+            返回
+          </Button>
+        </View>
+      )}
+
+      {familyStep === 'join' && (
+        <View className="profile-onboarding__family-form">
+          <Input
+            className="profile-onboarding__input"
+            maxlength={32}
+            placeholder="请输入家庭码"
+            value={familyCode}
+            onInput={event => setFamilyCode(event.detail.value.toUpperCase())}
+          />
+          <Button
+            className="profile-onboarding__family-submit"
+            disabled={familySubmitting}
+            loading={familySubmitting}
+            onClick={handleJoinFamily}
+          >
+            提交申请
+          </Button>
+          <Button
+            className="profile-onboarding__family-back"
+            onClick={handleBackToFamilyChoice}
+          >
+            返回
+          </Button>
+        </View>
+      )}
     </View>
   )
 }

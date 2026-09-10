@@ -1,4 +1,4 @@
-import type { AskEvent, AskExecution, AskRun, AskSession } from '../types/ask'
+import type { AskEvent, AskExecution, AskRun, AskSession, AskSnapshot } from '../types/ask'
 
 export type AskRuntimePhase = 'idle' | 'creating' | 'thinking' | 'reconnecting' | 'waiting_input' | 'replying' | 'completed' | 'escalated' | 'failed' | 'input_error' | 'ambiguous' | 'network_error'
 
@@ -24,6 +24,7 @@ export type AskRuntimeAction
   = { type: 'local.submitted', input: string, clientRunID: string }
     | { type: 'local.replied', input: string, clientRunID: string, runID: string }
     | { type: 'snapshot.restored', execution: AskExecution }
+    | { type: 'snapshot.loaded', snapshot: AskSnapshot }
     | { type: 'events.received', events: AskEvent[] }
     | { type: 'stream.reconnecting' }
     | { type: 'request.failed', phase: 'failed' | 'input_error' | 'ambiguous' | 'network_error', message: string }
@@ -37,6 +38,20 @@ export const initialAskRuntimeState: AskRuntimeState = {
   cursors: {},
   seenEvents: {},
   error: '',
+}
+
+export function hasSequenceGap(events: AskEvent[], currentSequence: number) {
+  let expected = currentSequence + 1
+  for (const event of events.slice().sort((left, right) => left.sequence - right.sequence)) {
+    if (event.sequence <= currentSequence) {
+      continue
+    }
+    if (event.sequence !== expected) {
+      return true
+    }
+    expected++
+  }
+  return false
 }
 
 function phaseForEvent(state: AskRuntimeState, event: AskEvent): AskRuntimePhase {
@@ -146,6 +161,68 @@ function restoreSnapshot(state: AskRuntimeState, execution: AskExecution) {
   return latestEvent ? { ...value, phase: phaseForEvent(value, latestEvent) } : value
 }
 
+function restoreFullSnapshot(state: AskRuntimeState, snapshot: AskSnapshot) {
+  const turns: AskRuntimeTurn[] = []
+  for (const value of snapshot.turns) {
+    const messages = (value.messages ?? []).filter(message => message.role === 'user')
+    const entries = messages.length > 0 ? messages : [{ content: value.turn.input, created_at: value.turn.created_at }]
+    for (let index = 0; index < entries.length; index++) {
+      const message = entries[index]
+      const nextMessage = entries[index + 1]
+      const events = value.events.filter((event) => {
+        if (index === entries.length - 1) {
+          return event.created_at >= message.created_at
+        }
+        return event.created_at >= message.created_at && event.created_at < nextMessage.created_at
+      })
+      turns.push({
+        id: messages.length > 0 ? `${value.turn.id}:${index}` : value.turn.id,
+        runID: value.run.id,
+        input: message.content,
+        optimistic: false,
+        events: events.slice().sort((left, right) => left.sequence - right.sequence),
+      })
+    }
+  }
+  for (const current of state.turns.filter(value => value.optimistic)) {
+    const serverTurn = turns.find(value => value.runID === current.runID || value.input === current.input)
+    if (serverTurn && serverTurn.input === current.input) {
+      continue
+    }
+    if (!turns.some(value => value.id === current.id)) {
+      turns.push(current)
+    }
+  }
+  const cursors: Record<string, number> = {}
+  const seenEvents: Record<string, boolean> = {}
+  for (const value of snapshot.event_cursors) {
+    cursors[value.run_id] = value.sequence
+  }
+  for (const value of snapshot.turns) {
+    for (const event of value.events) {
+      seenEvents[`${event.run_id}:${event.sequence}`] = true
+      cursors[event.run_id] = Math.max(cursors[event.run_id] ?? 0, event.sequence)
+    }
+  }
+  const selected = snapshot.turns[snapshot.turns.length - 1]
+  const run = selected?.run ?? null
+  let phase = run ? phaseForRun(run.status, state.phase) : state.phase
+  if (selected?.events.length) {
+    const latestEvent = selected.events[selected.events.length - 1]
+    phase = phaseForEvent({ ...state, run }, latestEvent)
+  }
+  return {
+    ...state,
+    phase,
+    session: snapshot.session,
+    run,
+    turns,
+    cursors,
+    seenEvents,
+    error: '',
+  }
+}
+
 export function askReducer(state: AskRuntimeState, action: AskRuntimeAction): AskRuntimeState {
   switch (action.type) {
     case 'local.submitted':
@@ -156,6 +233,8 @@ export function askReducer(state: AskRuntimeState, action: AskRuntimeAction): As
       }
     case 'snapshot.restored':
       return restoreSnapshot(state, action.execution)
+    case 'snapshot.loaded':
+      return restoreFullSnapshot(state, action.snapshot)
     case 'local.replied':
       return {
         ...state,

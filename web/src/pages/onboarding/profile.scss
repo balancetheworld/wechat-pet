@@ -10,9 +10,11 @@
   justify-content: center;
   align-items: center;
   overflow: hidden;
+  background: #ffffff;
 }
 
-.profile-onboarding__background {
+/* 背景插画：铺满全屏，z-index 最低 */
+.profile-onboarding__bg {
   position: absolute;
   z-index: 0;
   top: 0;
@@ -23,6 +25,68 @@
   height: 100%;
   display: block;
   pointer-events: none;
+}
+
+.profile-onboarding__cat {
+  position: absolute;
+  z-index: 1;
+  left: -40rpx;
+  bottom: -40rpx;
+  width: 440rpx;
+  height: 524rpx;
+  display: block;
+  pointer-events: none;
+}
+
+/* 页面 logo：中间偏上常驻装饰 */
+.profile-onboarding__logo {
+  position: absolute;
+  z-index: 1;
+  top: 140rpx;
+  left: 50%;
+  width: 360rpx;
+  height: 430rpx;
+  transform: translateX(-50%);
+  display: block;
+  pointer-events: none;
+}
+
+/* ============ 小猫说话气泡（打字机） ============ */
+.profile-onboarding__bubble {
+  position: absolute;
+  z-index: 2;
+  left: 100rpx;
+  bottom: 430rpx;
+  padding: 24rpx 32rpx;
+  background: #ffffff;
+  border: 2rpx solid rgba(127, 165, 214, 0.7);
+  border-radius: 40rpx;
+  box-shadow: 0 10rpx 30rpx rgba(74, 100, 137, 0.22), 0 2rpx 8rpx rgba(74, 100, 137, 0.12);
+  pointer-events: none;
+}
+
+/* 气泡小尾巴，指向下方的小猫 */
+.profile-onboarding__bubble::after {
+  content: '';
+  position: absolute;
+  left: 44rpx;
+  bottom: -12rpx;
+  width: 0;
+  height: 0;
+  border-left: 12rpx solid transparent;
+  border-right: 12rpx solid transparent;
+  border-top: 12rpx solid #ffffff;
+}
+
+.profile-onboarding__bubble-text {
+  font-family: var(--handwritten);
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #3D5C82;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 540rpx;
 }
 
 .profile-onboarding__title {
@@ -157,7 +221,7 @@
   width: auto;
   margin-bottom: 0;
   /* 圆角加大到更圆 */
-  border-radius: 100px;
+  border-radius: 100px !important; /* 覆盖 app.scss 全局 button !important 圆角 */
   /* 字号加大,不另加粗 */
   font-size: 36px;
   font-weight: normal;
@@ -167,4 +231,320 @@
 /* 默认状态：未触发重新登录时，「重新登录」用更浅的颜色做弱化显示 */
 .profile-onboarding__login--idle {
   background: rgba(127,165,214,0.45);
+}
+
+/* ============ 欢迎页：你好按钮 + 授权微信登录按钮 ============ */
+.profile-onboarding__auth {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72%;
+  min-height: 144px;
+  margin-bottom: 32px;
+  border: 4rpx solid rgba(94, 139, 200, 0.85);
+  border-radius: 72px !important; /* 覆盖 app.scss 全局 button !important 圆角 */
+  font-size: 40px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #4A6489;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 10px 26px rgba(74, 100, 137, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+.profile-onboarding__auth::after {
+  border: none;
+}
+
+/* 你好按钮：玻璃组件风格 + 大圆角胶囊 */
+.profile-onboarding__hello {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 68%;
+  min-height: 156px;
+  margin-bottom: 32px;
+  border: 4rpx solid rgba(94, 139, 200, 0.85);
+  border-radius: 999px !important; /* 覆盖 app.scss 全局 button !important 圆角 */
+  font-size: 44px;
+  font-weight: 700;
+  letter-spacing: 4px;
+  color: #4A6489;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 10px 26px rgba(74, 100, 137, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  transition: transform 0.4s ease, opacity 0.4s ease;
+}
+
+.profile-onboarding__hello::after {
+  border: none;
+}
+
+/* 你好按钮：点击后向左滑出 */
+.profile-onboarding__hello--out {
+  transform: translateX(-140%);
+  opacity: 0;
+}
+
+.profile-onboarding__hello--disabled {
+  opacity: 0.65;
+  box-shadow: 0 6px 16px rgba(74, 100, 137, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+/* 授权登录按钮：从左侧滑入，登录成功后向右滑出 */
+.profile-onboarding__auth {
+  animation: auth-slide-in 0.4s ease forwards;
+}
+
+.profile-onboarding__auth--disabled {
+  opacity: 0.6;
+}
+
+.profile-onboarding__auth--out {
+  animation: auth-slide-out 0.4s ease forwards;
+}
+
+@keyframes auth-slide-in {
+  from {
+    transform: translateX(-140%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes auth-slide-out {
+  from {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  to {
+    transform: translateX(140%);
+    opacity: 0;
+  }
+}
+
+/* ============ 资料区：合并后从右侧滑入 ============ */
+.profile-onboarding__profile {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 24px;
+  animation: profile-slide-in 0.45s ease forwards;
+}
+
+@keyframes profile-slide-in {
+  from {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* 资料区里的保存按钮：全宽大圆角，统一玻璃风（!important 覆盖 app.scss 蓝底白字） */
+.profile-onboarding__profile .profile-onboarding__submit {
+  border: 4rpx solid rgba(94, 139, 200, 0.85);
+  border-radius: 100px !important; /* 覆盖 app.scss 全局 button !important 圆角 */
+  color: #4A6489 !important; /* 覆盖 app.scss 白字 */
+  background: rgba(255, 255, 255, 0.55) !important; /* 覆盖 app.scss 蓝底 */
+  box-shadow: 0 10rpx 26rpx rgba(74, 100, 137, 0.18), inset 0 1rpx 0 rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  font-size: 36px;
+  font-weight: normal;
+  letter-spacing: 2rpx;
+}
+
+.profile-onboarding__profile .profile-onboarding__submit::after {
+  border: none;
+}
+
+/* 头像左滑出：保存资料后从左侧飞出屏幕 */
+.profile-onboarding__avatar-button {
+  transition: transform 0.4s ease, opacity 0.4s ease;
+}
+
+.profile-onboarding__avatar-button--out-left {
+  transform: translateX(-150%);
+  opacity: 0;
+}
+
+/* 输入框 + 保存按钮整体右滑出 */
+.profile-onboarding__profile-fields {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 24px;
+  transition: transform 0.4s ease, opacity 0.4s ease;
+}
+
+.profile-onboarding__profile-fields--out-right {
+  transform: translateX(150%);
+  opacity: 0;
+}
+
+/* ============ 家庭按钮行：创建家庭（左滑入）+ 加入家庭（右滑入） ============ */
+.profile-onboarding__family {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: row;
+  justify-content: center;
+  align-items: stretch;
+  gap: 24rpx;
+  width: 84%;
+}
+
+.profile-onboarding__create-btn,
+.profile-onboarding__join-btn {
+  flex: 1 1 0;
+  min-height: 144rpx;
+  border: 4rpx solid rgba(94, 139, 200, 0.85);
+  border-radius: 72rpx !important; /* 覆盖 app.scss 全局 button !important 圆角 */
+  font-size: 38rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  color: #4A6489;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 10rpx 26rpx rgba(74, 100, 137, 0.18), inset 0 1rpx 0 rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+.profile-onboarding__create-btn::after,
+.profile-onboarding__join-btn::after {
+  border: none;
+}
+
+.profile-onboarding__create-btn {
+  animation: family-create-slide-in 0.4s ease forwards;
+}
+
+.profile-onboarding__join-btn {
+  animation: family-join-slide-in 0.4s ease forwards;
+}
+
+@keyframes family-create-slide-in {
+  from {
+    transform: translateX(-140%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+@keyframes family-join-slide-in {
+  from {
+    transform: translateX(140%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* ============ 家庭表单：创建 / 加入（本页面内联） ============ */
+.profile-onboarding__family-form {
+  position: relative;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 84%;
+  gap: 24rpx;
+  animation: family-form-slide-in 0.4s ease forwards;
+}
+
+.profile-onboarding__family-form .profile-onboarding__input {
+  width: 100%;
+  min-height: 100rpx;
+  font-size: 32rpx;
+}
+
+.profile-onboarding__family-submit {
+  width: 100%;
+  min-height: 100rpx;
+  border: 4rpx solid rgba(94, 139, 200, 0.85);
+  border-radius: 100rpx !important; /* 覆盖 app.scss 全局 button !important 圆角 */
+  font-size: 36rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  color: #4A6489;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 10rpx 26rpx rgba(74, 100, 137, 0.18), inset 0 1rpx 0 rgba(255, 255, 255, 0.8);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+}
+
+.profile-onboarding__family-submit::after {
+  border: none;
+}
+
+/* 返回按钮：弱化胶囊，点击回到「创建/加入」选择页 */
+.profile-onboarding__family-back {
+  width: 100%;
+  min-height: 88rpx;
+  border: 3rpx solid rgba(94, 139, 200, 0.55);
+  border-radius: 44rpx !important; /* 覆盖 app.scss 全局 button !important 圆角 */
+  font-size: 30rpx;
+  font-weight: 600;
+  letter-spacing: 2rpx;
+  color: #6B84A8;
+  background: rgba(255, 255, 255, 0.6);
+  box-shadow: 0 6rpx 18rpx rgba(74, 100, 137, 0.1);
+}
+
+.profile-onboarding__family-back::after {
+  border: none;
+}
+
+/* 开发用临时跳过按钮：右下角固定，弱化样式，直接进入应用 */
+.profile-onboarding__skip {
+  position: fixed;
+  right: 40rpx;
+  bottom: calc(48rpx + env(safe-area-inset-bottom));
+  z-index: 10;
+  padding: 14rpx 32rpx;
+  border: 3rpx solid rgba(94, 139, 200, 0.45);
+  border-radius: 40rpx !important; /* 覆盖 app.scss 全局 button !important 圆角 */
+  font-size: 26rpx;
+  font-weight: 500;
+  letter-spacing: 2rpx;
+  color: #7C92B4;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 6rpx 16rpx rgba(74, 100, 137, 0.1);
+}
+
+.profile-onboarding__skip::after {
+  border: none;
+}
+
+@keyframes family-form-slide-in {
+  from {
+    transform: translateX(120%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
