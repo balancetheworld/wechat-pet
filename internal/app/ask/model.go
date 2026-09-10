@@ -147,12 +147,24 @@ type Run struct {
 	StartedAt          *time.Time
 	CompletedAt        *time.Time
 	ErrorCode          string
+	LeaseOwner         string
+	LeaseExpiresAt     *time.Time
+	AttemptCount       int
+	NextAttemptAt      *time.Time
 }
 
 type SnapshotTurn struct {
-	Turn   Turn
-	Run    Run
-	Events []Event
+	Turn     Turn
+	Run      Run
+	Events   []Event
+	Messages []Message
+	Runs     []SnapshotRun
+}
+
+type SnapshotRun struct {
+	Run      Run
+	Events   []Event
+	Messages []Message
 }
 
 type Snapshot struct {

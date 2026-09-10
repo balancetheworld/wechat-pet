@@ -32,12 +32,14 @@ export interface AskRun {
   run_index: number
   row_version: number
   clarification_count: number
+  attempt_count: number
   status: AskRunStatus
   risk_level: AskRiskLevel
   error_code: string
   created_at: string
   started_at: string | null
   completed_at: string | null
+  next_attempt_at: string | null
 }
 
 export interface AskFactItem {
@@ -89,6 +91,46 @@ export interface AskExecution {
   session: AskSession
   run: AskRun
   events: AskEvent[]
+}
+
+export interface AskSnapshotTurn {
+  turn: {
+    id: string
+    session_id: string
+    turn_index: number
+    status: AskRunStatus
+    input: string
+    selected_run_id: string
+    created_at: string
+  }
+  run: AskRun
+  events: AskEvent[]
+  messages: AskMessage[]
+  runs: AskSnapshotRun[]
+}
+
+export interface AskSnapshotRun {
+  run: AskRun
+  events: AskEvent[]
+  messages: AskMessage[]
+}
+
+export interface AskMessage {
+  role: 'user' | 'assistant' | 'question'
+  content: string
+  created_at: string
+}
+
+export interface AskEventCursor {
+  run_id: string
+  sequence: number
+}
+
+export interface AskSnapshot {
+  session: AskSession
+  pets: AskSessionPet[]
+  turns: AskSnapshotTurn[]
+  event_cursors: AskEventCursor[]
 }
 
 export interface CreateAskSessionRequest {

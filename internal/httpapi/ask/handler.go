@@ -16,6 +16,7 @@ import (
 
 type Handler struct {
 	service *askapp.Service
+	worker  askapp.RunEnqueuer
 }
 
 type createSessionRequest struct {
@@ -27,8 +28,8 @@ type replyRequest struct {
 	ExpectedVersion int    `json:"expected_version" binding:"required,min=1"`
 }
 
-func NewHandler(service *askapp.Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *askapp.Service, worker askapp.RunEnqueuer) *Handler {
+	return &Handler{service: service, worker: worker}
 }
 
 func (h *Handler) CreateSession(c *gin.Context) {
@@ -46,6 +47,10 @@ func (h *Handler) CreateSession(c *gin.Context) {
 	result, err := h.service.CreateSession(c.Request.Context(), familyID, userID, c.Param("pet_id"), request.Input, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		response.Fail(c, asAppError(err))
+		return
+	}
+	if err := h.enqueue(c, result); err != nil {
+		response.Fail(c, appErrors.Internal(err))
 		return
 	}
 	response.Success(c, askapp.NewExecutionDTO(result))
@@ -68,6 +73,10 @@ func (h *Handler) CreateSessionFromInput(c *gin.Context) {
 		response.Fail(c, asAppErrorWithResolution(err, resolution))
 		return
 	}
+	if err := h.enqueue(c, result); err != nil {
+		response.Fail(c, appErrors.Internal(err))
+		return
+	}
 	response.Success(c, askapp.NewExecutionDTO(result))
 }
 
@@ -77,12 +86,25 @@ func (h *Handler) ProcessRun(c *gin.Context) {
 		response.Fail(c, appErrors.Forbidden())
 		return
 	}
-	result, err := h.service.ProcessRun(c.Request.Context(), familyID, c.Param("session_id"), c.Param("run_id"))
+	result, err := h.service.GetExecution(c.Request.Context(), familyID, c.Param("session_id"), c.Param("run_id"))
 	if err != nil {
 		response.Fail(c, asAppError(err))
 		return
 	}
+	if result.Run.Status == askapp.RunQueued {
+		if err := h.enqueue(c, result); err != nil {
+			response.Fail(c, appErrors.Internal(err))
+			return
+		}
+	}
 	response.Success(c, askapp.NewExecutionDTO(result))
+}
+
+func (h *Handler) enqueue(c *gin.Context, result askapp.ExecutionResult) error {
+	if h.worker == nil {
+		return nil
+	}
+	return h.worker.Enqueue(c.Request.Context(), askapp.RunJob{FamilyID: result.Session.FamilyID, SessionID: result.Session.ID, RunID: result.Run.ID, RowVersion: result.Run.RowVersion})
 }
 
 func (h *Handler) Reply(c *gin.Context) {
@@ -100,6 +122,10 @@ func (h *Handler) Reply(c *gin.Context) {
 	result, err := h.service.Reply(c.Request.Context(), familyID, userID, c.Param("session_id"), c.Param("run_id"), request.Input, request.ExpectedVersion, c.GetHeader("Idempotency-Key"))
 	if err != nil {
 		response.Fail(c, asAppError(err))
+		return
+	}
+	if err := h.enqueue(c, result); err != nil {
+		response.Fail(c, appErrors.Internal(err))
 		return
 	}
 	response.Success(c, askapp.NewExecutionDTO(result))

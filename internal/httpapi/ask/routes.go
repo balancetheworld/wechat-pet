@@ -8,11 +8,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterRoutes(router *gin.RouterGroup, signer *jwtpkg.Signer, familyRepository familyapp.ActiveFamilyRepository, service *askapp.Service) {
-	if signer == nil || familyRepository == nil || service == nil {
+func RegisterRoutes(router *gin.RouterGroup, signer *jwtpkg.Signer, familyRepository familyapp.ActiveFamilyRepository, service *askapp.Service, worker askapp.RunEnqueuer) {
+	if signer == nil || familyRepository == nil || service == nil || worker == nil {
 		return
 	}
-	handler := NewHandler(service)
+	handler := NewHandler(service, worker)
 	group := router.Group("", middleware.RequireAuth(signer), middleware.RequireFamily(familyRepository))
 	group.POST("/pets/:pet_id/ask/sessions", handler.CreateSession)
 	group.POST("/ask/sessions", handler.CreateSessionFromInput)

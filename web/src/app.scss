@@ -90,7 +90,7 @@ button {
 
 .index button,
 .themed-page button,
-.profile-onboarding button {
+.profile-onboarding button:not(.profile-onboarding__hello) {
   min-height: 44px;
   padding: 0 18px;
   color: var(--ink);
