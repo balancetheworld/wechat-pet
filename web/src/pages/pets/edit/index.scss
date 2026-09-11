@@ -41,7 +41,22 @@
   line-height: 1.5;
 }
 
-/* ============ 滚动容器: 不显示框, 让表单内容裸露 ============ */
+/* ============ 全屏毛玻璃纱 ============ */
+/* 铺在 PageBackground(z0) 之上、内容(z1)之下, 让毛玻璃覆盖整个界面而不是只有表单一块 */
+.pet-edit-page > .pet-edit-glass {
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  background: rgba(255, 255, 255, 0.35);
+  backdrop-filter: blur(4rpx);
+  -webkit-backdrop-filter: blur(4rpx);
+  pointer-events: none;
+}
+
+/* ============ 滚动容器: 透明 (毛玻璃已由全屏纱统一提供) ============ */
 /* 同样用 .pet-edit-page > .add-pet-form 抬优先级, 防被全局 .themed-page > view 兜底 */
 .pet-edit-page > .add-pet-form {
   position: relative;
@@ -50,9 +65,10 @@
   border: 0;
   border-radius: 0;
   box-shadow: none;
-  padding: 0;
+  padding: 0 0 160rpx;
   max-height: none;
   overflow: visible;
+  box-sizing: border-box;
 }
 
 /* ============ 表单字段 ============ */
@@ -117,11 +133,14 @@
   box-shadow: 0 0 0 6rpx rgba(127, 165, 214, 0.12);
 }
 
-/* 日期 Picker 包装: 模拟 capsule-input */
+/* 日期 Picker 包装: 半透明白胶囊, 字号比普通输入框小一号 (模糊由全屏玻璃纱统一提供) */
 .capsule-input.date-view {
   display: flex;
   align-items: center;
   color: #2A2520;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1rpx solid rgba(255, 255, 255, 0.9);
+  font-size: 30rpx;
 }
 
 /* species 选 other 时出现的额外输入 */
@@ -189,13 +208,13 @@
   display: inline-flex !important;
   align-items: center;
   justify-content: center;
-  gap: 12rpx;
-  padding: 18rpx 32rpx;
+  gap: 10rpx;
+  padding: 20rpx 26rpx;
   border: 1rpx solid #C9DDEF;
   background: #F5F9FE;
   color: #4A6489;
   border-radius: 999rpx;
-  font-size: 32rpx;
+  font-size: 30rpx;
   line-height: 1.2;
   font-weight: 400;
   box-sizing: border-box;
@@ -205,7 +224,7 @@
 
 .chip .span {
   display: inline-block;
-  font-size: 32rpx;
+  font-size: 30rpx;
   color: inherit;
   font-weight: inherit;
 }
@@ -226,32 +245,66 @@
 
 .chip-sm {
   flex: 1;
-  padding: 14rpx 16rpx;
-  font-size: 30rpx;
+  padding: 16rpx 12rpx;
+  font-size: 28rpx;
+  border-radius: 999rpx;
 }
 
-/* ============ 操作按钮行 ============ */
-/* 抬到 .pet-edit-page .add-pet-form .xxx (0,3,0) 压过全局 .themed-page button (0,1,1) 的白底 */
-.add-pet-form-actions {
+.chip-sm .span {
+  font-size: 28rpx;
+}
+
+/* 高优先级覆写: 全局 .themed-page button (0,1,1) 会把原生 Button 的 padding 清零,
+   这里用 (0,3,0) 确保 性别/绝育/健康 小标签真正生效 */
+.pet-edit-page .add-pet-form .chip {
+  padding: 20rpx 26rpx;
+  height: auto;
+  line-height: 1.2;
+  border-radius: 999rpx;
+}
+
+.pet-edit-page .add-pet-form .chip-sm {
+  padding: 16rpx 12rpx;
+  height: auto;
+  line-height: 1.2;
+  border-radius: 999rpx;
+}
+
+/* ============ 操作按钮行: 悬浮固定于屏幕底部上方(避开安全区) ============ */
+/* 注意: 必须是 .add-pet-form 的兄弟节点。若放进表单容器内,
+   容器的 backdrop-filter 会把 fixed 定位基准改成表单自身, 按钮条就不再吸附屏幕底部 */
+/* (0,2,0) 压过全局 .themed-page button (0,1,1) 的白底 */
+.pet-edit-page .add-pet-form-actions {
+  position: fixed;
+  z-index: 20;
+  left: 24rpx;
+  right: 24rpx;
+  bottom: calc(28rpx + env(safe-area-inset-bottom));
   display: flex;
   gap: 20rpx;
-  margin-top: 16rpx;
+  box-sizing: border-box;
+  margin: 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.pet-edit-page .add-pet-form .add-pet-form-actions .secondary-button,
-.pet-edit-page .add-pet-form .add-pet-form-actions .primary-button {
+.pet-edit-page .add-pet-form-actions .secondary-button,
+.pet-edit-page .add-pet-form-actions .primary-button {
   flex: 1;
-  height: 96rpx;
+  height: 92rpx;
+  min-width: 0;
   margin-top: 0;
   border-radius: 999rpx;
-  font-size: 34rpx;
+  font-size: 32rpx;
   font-weight: 400;
-  letter-spacing: 2rpx;
-  line-height: 94rpx;
+  letter-spacing: 0;
+  line-height: 90rpx;
 }
 
 /* 取消按钮: 淡蓝玻璃 + 白色边 */
-.pet-edit-page .add-pet-form .secondary-button {
+.pet-edit-page .secondary-button {
   width: 100%;
   height: 96rpx;
   border: 1rpx solid #FFFFFF;
@@ -264,12 +317,12 @@
   box-shadow: none;
 }
 
-.pet-edit-page .add-pet-form .secondary-button:active {
+.pet-edit-page .secondary-button:active {
   background: rgba(170, 200, 230, 0.9);
 }
 
 /* 主按钮: 与取消按钮同色 + 白色边 (完全统一淡蓝) */
-.pet-edit-page .add-pet-form .primary-button {
+.pet-edit-page .primary-button {
   width: 100%;
   height: 96rpx;
   border: 1rpx solid #FFFFFF;
@@ -281,13 +334,13 @@
   box-shadow: none;
 }
 
-.pet-edit-page .add-pet-form .primary-button:disabled {
+.pet-edit-page .primary-button:disabled {
   color: #B8C4D0;
   background: rgba(170, 200, 230, 0.4);
   border-color: rgba(255, 255, 255, 0.6);
 }
 
-.pet-edit-page .add-pet-form .primary-button:active:not(:disabled) {
+.pet-edit-page .primary-button:active:not(:disabled) {
   background: rgba(170, 200, 230, 0.9);
 }
 

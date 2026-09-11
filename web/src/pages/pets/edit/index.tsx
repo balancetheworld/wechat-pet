@@ -7,15 +7,6 @@ import { navigateBack } from '../../../utils/navigation'
 import './index.scss'
 
 /* ============ 选项常量(沿用 Pet-Manual 模式) ============ */
-const SPECIES_OPTIONS = [
-  { id: 'cat', label: '猫' },
-  { id: 'dog', label: '狗' },
-  { id: 'bird', label: '鸟' },
-  { id: 'rabbit', label: '兔' },
-  { id: 'fish', label: '鱼' },
-  { id: 'other', label: '其他' },
-]
-
 const GENDER_OPTIONS = [
   { id: 'male', label: '男孩' },
   { id: 'female', label: '女孩' },
@@ -49,8 +40,6 @@ export default function PetEdit() {
   /* --- 表单字段 --- */
   const [formName, setFormName] = useState('')
   const [formAvatar, setFormAvatar] = useState('')
-  const [formSpecies, setFormSpecies] = useState('cat')
-  const [formSpeciesOther, setFormSpeciesOther] = useState('')
   const [formGender, setFormGender] = useState('unknown')
   const [formNeutered, setFormNeutered] = useState('unknown')
   const [formBirth, setFormBirth] = useState('2024-01-01')
@@ -102,13 +91,11 @@ export default function PetEdit() {
             setFormArrival(profile.home_date)
           }
         }
-        /* 优先用本地缓存的额外数据 (物种/头像/健康状态) 覆盖, 因为这些字段后端暂未持久化 */
+        /* 优先用本地缓存的额外数据 (头像/健康状态等) 覆盖, 因为这些字段后端暂未持久化 */
         try {
           const cache = await Taro.getStorage({ key: `pet-extra-${pet.name}` })
           const data = cache.data as {
             avatar?: string
-            species?: string
-            speciesOther?: string
             gender?: string
             neutered?: string
             birth?: string
@@ -119,12 +106,6 @@ export default function PetEdit() {
           if (data) {
             if (data.avatar) {
               setFormAvatar(data.avatar)
-            }
-            if (data.species) {
-              setFormSpecies(data.species)
-            }
-            if (data.speciesOther) {
-              setFormSpeciesOther(data.speciesOther)
             }
             if (data.gender) {
               setFormGender(data.gender)
@@ -186,6 +167,11 @@ export default function PetEdit() {
       await Taro.showToast({ title: '名字长度需为 1-12 个字符', icon: 'none' })
       return
     }
+    const breedValue = formBreed.trim()
+    if (breedValue.length < 1) {
+      await Taro.showToast({ title: '请填写品种', icon: 'none' })
+      return
+    }
     if (submitting || loading) {
       return
     }
@@ -194,14 +180,12 @@ export default function PetEdit() {
       // 后端目前只接收 name, 其他字段先本地缓存
       const extraData = {
         avatar: formAvatar,
-        species: formSpecies,
-        speciesOther: formSpeciesOther,
         gender: formGender,
         neutered: formNeutered,
         birth: formBirth,
         arrival: formArrival,
         health: formHealth,
-        breed: formBreed,
+        breed: breedValue,
       }
       try {
         await Taro.setStorage({ key: `pet-extra-${value}`, data: extraData })
@@ -235,10 +219,12 @@ export default function PetEdit() {
     <View className="themed-page pet-edit-page">
       <PageBackground />
 
+      {/* 全屏毛玻璃纱: 覆盖整个界面 (垫在内容下面、背景图上面) */}
+      <View className="pet-edit-glass" />
+
       {/* 标题区 */}
       <View className="pet-edit-header">
         <Text className="h2">{isEdit ? '编辑宠物' : '添加宠物'}</Text>
-        <Text className="p">{isEdit ? '更新档案信息' : '填写档案信息后加入家庭'}</Text>
       </View>
 
       <View className="add-pet-form">
@@ -267,36 +253,9 @@ export default function PetEdit() {
           />
         </View>
 
-        {/* 物种 */}
-        <View className="form-field">
-          <Text className="label">物种</Text>
-          <View className="chip-group">
-            {SPECIES_OPTIONS.map(s => (
-              <Button
-                key={s.id}
-                className={`chip${formSpecies === s.id ? ' selected' : ''}`}
-                onClick={() => setFormSpecies(s.id)}
-              >
-                <Text className="span">{s.label}</Text>
-              </Button>
-            ))}
-          </View>
-          {formSpecies === 'other' && (
-            <Input
-              className={inputCls('speciesOther')}
-              maxlength={8}
-              placeholder={inputPh('speciesOther', '填写物种，如：刺猬')}
-              value={formSpeciesOther}
-              onInput={event => setFormSpeciesOther(event.detail.value)}
-              onFocus={focusOn('speciesOther')}
-              onBlur={focusOff('speciesOther')}
-            />
-          )}
-        </View>
-
         {/* 品种 */}
         <View className="form-field">
-          <Text className="label">品种（可选）</Text>
+          <Text className="label">品种 *</Text>
           <Input
             className={inputCls('breed')}
             maxlength={20}
@@ -382,17 +341,19 @@ export default function PetEdit() {
           </View>
         </View>
 
-        {/* 操作 */}
-        <View className="add-pet-form-actions">
-          <Button className="secondary-button" onClick={() => { void navigateBack() }}>取消</Button>
-          <Button
-            className="primary-button"
-            disabled={!formName.trim() || submitting || loading}
-            onClick={handleSubmit}
-          >
-            {isEdit ? '保存修改' : '添加到家庭'}
-          </Button>
-        </View>
+      </View>
+
+      {/* 操作: 必须放在 .add-pet-form 外面 —— 表单毛玻璃的 backdrop-filter
+          会把内部 position:fixed 的定位基准改成表单自身, 导致按钮条不吸底并遮住健康状态 */}
+      <View className="add-pet-form-actions">
+        <Button className="secondary-button" onClick={() => { void navigateBack() }}>取消</Button>
+        <Button
+          className="primary-button"
+          disabled={!formName.trim() || !formBreed.trim() || submitting || loading}
+          onClick={handleSubmit}
+        >
+          {isEdit ? '保存修改' : '添加到家庭'}
+        </Button>
       </View>
     </View>
   )

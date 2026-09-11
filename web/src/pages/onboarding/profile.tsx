@@ -2,7 +2,7 @@ import type { ButtonProps } from '@tarojs/components'
 import { Button, Image, Input, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useEffect, useRef, useState } from 'react'
-import bg1Image from '../../assets/bg1.png'
+import bg1Image from '../../assets/bg1.jpg'
 import cat2Image from '../../assets/cat2.png'
 import catImage from '../../assets/cat.png'
 import logoImage from '../../assets/logo.png'
@@ -69,6 +69,24 @@ export default function ProfileOnboarding() {
     }
   }
 
+  function sleep(ms: number) {
+    return new Promise<void>(resolve => setTimeout(resolve, ms))
+  }
+
+  const typeText = useCallback(async (text: string, speed = 150) => {
+    for (let i = 0; i <= text.length; i += 1) {
+      setSpeechText(text.slice(0, i))
+      await sleep(speed)
+    }
+  }, [])
+
+  const eraseText = useCallback(async (text: string, speed = 70) => {
+    for (let i = text.length; i >= 0; i -= 1) {
+      setSpeechText(text.slice(0, i))
+      await sleep(speed)
+    }
+  }, [])
+
   async function playLoginSuccessFlow() {
     await eraseText('要使用的话需要先登录哦')
     await typeText('好耶！登录成功了')
@@ -80,24 +98,6 @@ export default function ProfileOnboarding() {
     await sleep(420)
     setLoginMounted(false)
     setProfileMounted(true)
-  }
-
-  function sleep(ms: number) {
-    return new Promise<void>(resolve => setTimeout(resolve, ms))
-  }
-
-  async function typeText(text: string, speed = 150) {
-    for (let i = 0; i <= text.length; i += 1) {
-      setSpeechText(text.slice(0, i))
-      await sleep(speed)
-    }
-  }
-
-  async function eraseText(text: string, speed = 70) {
-    for (let i = text.length; i >= 0; i -= 1) {
-      setSpeechText(text.slice(0, i))
-      await sleep(speed)
-    }
   }
 
   async function handleHelloClick() {
@@ -119,7 +119,7 @@ export default function ProfileOnboarding() {
 
   useEffect(() => {
     void typeText('你好呀')
-  }, [])
+  }, [typeText])
 
   useEffect(() => {
     if (!loginCompleted || !avatarPath || avatarAssetID || uploading) {

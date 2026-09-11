@@ -27,3 +27,5 @@ coverage.out
 .vscode/*
 !.vscode/settings.json
 .spec-workflow/
+.workbuddy/
+
