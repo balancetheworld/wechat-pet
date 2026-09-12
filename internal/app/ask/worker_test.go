@@ -122,6 +122,27 @@ func TestRunWorkerSchedulesPersistentRetry(t *testing.T) {
 	worker.Close()
 }
 
+func TestRunWorkerUsesProviderRetryDelay(t *testing.T) {
+	processor := &workerTestProcessor{errorValue: NewExecutorError("provider_rate_limited", true, 7*time.Second, errors.New("rate limited")), started: make(chan string, 1)}
+	leases := &workerTestLeaseRepository{}
+	config := workerTestConfig()
+	config.Now = func() time.Time { return time.Unix(100, 0).UTC() }
+	worker, err := NewRunWorker(processor, leases, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	worker.Start(context.Background())
+	job := RunJob{FamilyID: "family-1", SessionID: "session-1", RunID: "run-1", RowVersion: 1}
+	if err := worker.Enqueue(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	retryAt := receiveWorkerValue(t, leases.retryTimes())
+	if !retryAt.Equal(time.Unix(107, 0).UTC()) {
+		t.Fatalf("retry at = %s", retryAt)
+	}
+	worker.Close()
+}
+
 func TestRunWorkerRecoversPersistedJobsOnStart(t *testing.T) {
 	job := RunJob{FamilyID: "family-1", SessionID: "session-1", RunID: "run-1", RowVersion: 1}
 	processor := &workerTestProcessor{started: make(chan string, 1)}
@@ -203,11 +224,12 @@ func workerTestConfig() RunWorkerConfig {
 }
 
 type workerTestProcessor struct {
-	mu       sync.Mutex
-	calls    int
-	failures int
-	started  chan string
-	release  chan struct{}
+	mu         sync.Mutex
+	calls      int
+	failures   int
+	errorValue error
+	started    chan string
+	release    chan struct{}
 }
 
 type workerContextProcessor struct{}
@@ -231,6 +253,9 @@ func (p *workerTestProcessor) ProcessRunVersion(_ context.Context, _, _, runID s
 	if call <= p.failures {
 		return ExecutionResult{}, errors.New("temporary failure")
 	}
+	if p.errorValue != nil {
+		return ExecutionResult{}, p.errorValue
+	}
 	return ExecutionResult{}, nil
 }
 
@@ -245,6 +270,7 @@ type workerTestLeaseRepository struct {
 	runnable []RunJob
 	retried  chan RunJob
 	renewed  chan string
+	retryAt  chan time.Time
 }
 
 func (r *workerTestLeaseRepository) ListRunnableRunJobs(context.Context, time.Time, int) ([]RunJob, error) {
@@ -267,9 +293,22 @@ func (r *workerTestLeaseRepository) RenewRunLease(_ context.Context, runID, _ st
 	return nil
 }
 
-func (r *workerTestLeaseRepository) RetryRunJob(_ context.Context, job RunJob, _ string, _, _ time.Time, _ int) (bool, error) {
+func (r *workerTestLeaseRepository) RetryRunJob(_ context.Context, job RunJob, _ string, _, nextAttemptAt time.Time, _ int) (bool, error) {
 	r.retriedJobs() <- job
+	select {
+	case r.retryTimes() <- nextAttemptAt:
+	default:
+	}
 	return false, nil
+}
+
+func (r *workerTestLeaseRepository) retryTimes() chan time.Time {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.retryAt == nil {
+		r.retryAt = make(chan time.Time, 1)
+	}
+	return r.retryAt
 }
 
 func (r *workerTestLeaseRepository) retriedJobs() chan RunJob {

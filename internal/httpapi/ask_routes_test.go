@@ -111,7 +111,7 @@ func TestAskRoutesLifecycle(t *testing.T) {
 		t.Fatalf("process version fields missing: %s", process.Body.String())
 	}
 	snapshot := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/snapshot", "")
-	if snapshot.Code != http.StatusOK || !strings.Contains(snapshot.Body.String(), `"pets":[{"pet_id":"pet-1","pet_name":"团子"`) || !strings.Contains(snapshot.Body.String(), `"turn_index":0`) || !strings.Contains(snapshot.Body.String(), `"row_version":3`) || !strings.Contains(snapshot.Body.String(), `"runs":[{"run":{"id":"`+runID+`"`) || !strings.Contains(snapshot.Body.String(), `"messages":[{"role":"user","content":"最近没精神"`) || !strings.Contains(snapshot.Body.String(), `"event_cursors":[{"run_id":"`+runID+`","sequence":3}]`) {
+	if snapshot.Code != http.StatusOK || !strings.Contains(snapshot.Body.String(), `"pets":[{"pet_id":"pet-1","pet_name":"团子"`) || !strings.Contains(snapshot.Body.String(), `"turn_index":0`) || !strings.Contains(snapshot.Body.String(), `"row_version":3`) || !strings.Contains(snapshot.Body.String(), `"runs":[{"run":{"id":"`+runID+`"`) || !strings.Contains(snapshot.Body.String(), `"messages":[{"role":"user","content":"最近没精神"`) || !strings.Contains(snapshot.Body.String(), `"type":"run.progress"`) || !strings.Contains(snapshot.Body.String(), `"event_cursors":[{"run_id":"`+runID+`","sequence":8}]`) {
 		t.Fatalf("snapshot status = %d, body = %s", snapshot.Code, snapshot.Body.String())
 	}
 	stream := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events/stream?after=1", "")
@@ -125,14 +125,14 @@ func TestAskRoutesLifecycle(t *testing.T) {
 	}
 	replyBody := `{"input":"现在呼吸困难","expected_version":3}`
 	reply := askRouteRequest(t, router, token, http.MethodPost, replyPath, replyBody)
-	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), `"turn_count":1`) || !strings.Contains(reply.Body.String(), `"id":"`+runID+`"`) || !strings.Contains(reply.Body.String(), `"row_version":4`) || !strings.Contains(reply.Body.String(), `"clarification_count":1`) || !strings.Contains(reply.Body.String(), `"sequence":4`) || !strings.Contains(reply.Body.String(), `"status":"queued"`) {
+	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), `"turn_count":1`) || !strings.Contains(reply.Body.String(), `"id":"`+runID+`"`) || !strings.Contains(reply.Body.String(), `"row_version":4`) || !strings.Contains(reply.Body.String(), `"clarification_count":1`) || !strings.Contains(reply.Body.String(), `"sequence":9`) || !strings.Contains(reply.Body.String(), `"status":"queued"`) {
 		t.Fatalf("reply status = %d, body = %s", reply.Code, reply.Body.String())
 	}
 	if queued := runQueue.jobs[len(runQueue.jobs)-1]; queued.RunID != runID || queued.RowVersion != 4 {
 		t.Fatalf("replied run job = %+v", queued)
 	}
 	replayedReply := askRouteRequest(t, router, token, http.MethodPost, replyPath, replyBody)
-	if replayedReply.Code != http.StatusOK || !strings.Contains(replayedReply.Body.String(), `"row_version":4`) || !strings.Contains(replayedReply.Body.String(), `"sequence":4`) {
+	if replayedReply.Code != http.StatusOK || !strings.Contains(replayedReply.Body.String(), `"row_version":4`) || !strings.Contains(replayedReply.Body.String(), `"sequence":9`) {
 		t.Fatalf("replayed reply status = %d, body = %s", replayedReply.Code, replayedReply.Body.String())
 	}
 	conflictingReply := askRouteRequestWithKey(t, router, token, http.MethodPost, replyPath, `{"input":"其他回答","expected_version":3}`, askRouteIdempotencyKey(http.MethodPost, replyPath, replyBody))
@@ -140,7 +140,7 @@ func TestAskRoutesLifecycle(t *testing.T) {
 		t.Fatalf("conflicting reply status = %d, body = %s", conflictingReply.Code, conflictingReply.Body.String())
 	}
 	resumed := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/process", "")
-	if resumed.Code != http.StatusOK || !strings.Contains(resumed.Body.String(), `"status":"escalated"`) || !strings.Contains(resumed.Body.String(), `"risk_level":"red"`) || !strings.Contains(resumed.Body.String(), `"sequence":6`) {
+	if resumed.Code != http.StatusOK || !strings.Contains(resumed.Body.String(), `"status":"escalated"`) || !strings.Contains(resumed.Body.String(), `"risk_level":"red"`) || !strings.Contains(resumed.Body.String(), `"sequence":13`) {
 		t.Fatalf("resumed process status = %d, body = %s", resumed.Code, resumed.Body.String())
 	}
 	var messageCount int
@@ -151,7 +151,7 @@ func TestAskRoutesLifecycle(t *testing.T) {
 		t.Fatalf("message count = %d, want 3", messageCount)
 	}
 	events := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events?after=1", "")
-	if events.Code != http.StatusOK || strings.Contains(events.Body.String(), `"sequence":1`) || !strings.Contains(events.Body.String(), `"sequence":2`) {
+	if events.Code != http.StatusOK || strings.Contains(events.Body.String(), `"sequence":1,`) || !strings.Contains(events.Body.String(), `"sequence":2`) {
 		t.Fatalf("events status = %d, body = %s", events.Code, events.Body.String())
 	}
 	missing := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/missing", "")
@@ -235,6 +235,73 @@ func TestAskRoutesMultiPetFactContract(t *testing.T) {
 	events := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events?after=1", "")
 	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"type":"fact.completed"`) || !strings.Contains(events.Body.String(), `"fact_type":"bath"`) {
 		t.Fatalf("events status = %d, body = %s", events.Code, events.Body.String())
+	}
+}
+
+func TestAskRoutesFamilyPetQueryContract(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	setupAskRouteSchema(t, db)
+	if _, err := db.Exec("INSERT INTO users (id, openid, nickname, last_login_at, created_at, updated_at) VALUES ('user-1', 'openid-1', '用户', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO families (id, name, created_at, updated_at) VALUES ('family-1', '家庭', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO family_members (id, family_id, user_id, role, status, created_at, updated_at) VALUES ('member-1', 'family-1', 'user-1', 'owner', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO pets (id, family_id, name, created_by, updated_by, created_at, updated_at) VALUES ('pet-1', 'family-1', '旺仔', 'user-1', 'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), ('pet-2', 'family-1', '球球', 'user-1', 'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
+		t.Fatal(err)
+	}
+	familyRepository, err := familyapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	petRepository, err := petapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	askRepository, err := askapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	askService, err := askapp.NewService(askRepository, petRepository, askapp.DeterministicExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := jwtpkg.NewSigner("test-secret", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewWithDependencies(Dependencies{AskService: askService, AskRunQueue: &recordingRunQueue{service: askService}, FamilyRepository: familyRepository, TokenSigner: signer})
+	token, err := signer.Sign("user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	create := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions", `{"input":"你知道我家有哪些宠物吗"}`)
+	if create.Code != http.StatusOK {
+		t.Fatalf("create status = %d, body = %s", create.Code, create.Body.String())
+	}
+	sessionID := extractAskRouteID(create.Body.String(), "session")
+	runID := extractAskRouteID(create.Body.String(), "run")
+	if sessionID == "" || runID == "" {
+		t.Fatalf("missing IDs: %s", create.Body.String())
+	}
+	process := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/process", "")
+	body := process.Body.String()
+	if process.Code != http.StatusOK || !strings.Contains(body, `"status":"completed"`) || !strings.Contains(body, `"type":"family.pets.completed"`) || !strings.Contains(body, `"pet_id":"pet-1"`) || !strings.Contains(body, `"pet_name":"旺仔"`) || !strings.Contains(body, `"pet_id":"pet-2"`) || !strings.Contains(body, `"pet_name":"球球"`) {
+		t.Fatalf("process status = %d, body = %s", process.Code, body)
+	}
+	if strings.Contains(body, `"PetID"`) || strings.Contains(body, `"PetName"`) {
+		t.Fatalf("family pet fields are not snake_case: %s", body)
+	}
+	stream := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events/stream?after=1", "")
+	if stream.Code != http.StatusOK || !strings.Contains(stream.Body.String(), `"type":"family.pets.completed"`) {
+		t.Fatalf("stream status = %d, body = %s", stream.Code, stream.Body.String())
 	}
 }
 

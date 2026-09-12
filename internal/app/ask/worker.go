@@ -144,9 +144,10 @@ func (w *RunWorker) process(ctx context.Context, job RunJob) {
 	}
 	w.report(claimed, err)
 	retryNow := w.config.Now().UTC()
+	retryDelay := ExecutorRetryDelay(err, w.config.RetryDelay)
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cleanupCancel()
-	if _, retryErr := w.leases.RetryRunJob(cleanupCtx, claimed, w.config.WorkerID, retryNow, retryNow.Add(w.config.RetryDelay), w.config.MaxAttempts); retryErr != nil {
+	if _, retryErr := w.leases.RetryRunJob(cleanupCtx, claimed, w.config.WorkerID, retryNow, retryNow.Add(retryDelay), w.config.MaxAttempts); retryErr != nil {
 		w.report(claimed, retryErr)
 	}
 }

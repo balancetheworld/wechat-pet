@@ -17,7 +17,7 @@ import (
 )
 
 const (
-	DefaultPromptVersion      = "ask-prompt-v1"
+	DefaultPromptVersion      = "ask-prompt-v2"
 	DefaultRuleVersion        = "ask-rules-v1"
 	DefaultKnowledgeVersion   = "ask-knowledge-v1"
 	MaxInputLength            = 4000
@@ -268,6 +268,14 @@ func (s *Service) CreateSessionFromInput(ctx context.Context, familyID, userID, 
 	}
 	resolution := ResolvePets(input, pets)
 	if resolution.Status == PetResolveNone {
+		_, familyQuery := DetectFamilyQuery(input)
+		intent, simpleIntent := DetectSimpleIntent(input)
+		if len(pets) > 0 && (familyQuery || simpleIntent && intent.Intent == IntentCasualChat) {
+			return s.createSessionWithPets(ctx, familyID, userID, input, pets[:1], createSessionOperation, idempotencyKey, hash)
+		}
+		if familyQuery {
+			return ExecutionResult{}, resolution, appErrors.InvalidParam("当前家庭暂无宠物")
+		}
 		return ExecutionResult{}, resolution, appErrors.InvalidParam("请在问题中补充宠物名称")
 	}
 	if resolution.Status == PetResolveAmbiguous {
@@ -394,20 +402,6 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		}
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
-	pet, err := s.pets.Get(ctx, session.FamilyID, session.PetID)
-	if err != nil {
-		if errors.Is(err, petapp.ErrNotFound) {
-			return ExecutionResult{}, appErrors.NotFound("宠物不存在")
-		}
-		return ExecutionResult{}, appErrors.Internal(err)
-	}
-	var recentTurns []ContextTurn
-	if contextRepository, ok := s.repository.(contextTurnRepository); ok {
-		recentTurns, err = contextRepository.ListContextTurns(ctx, session.ID, ContextTurnLimit)
-		if err != nil {
-			return ExecutionResult{}, appErrors.Internal(err)
-		}
-	}
 	messages, err := s.repository.ListMessages(ctx, session.ID, run.ID)
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
@@ -416,38 +410,7 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	for _, message := range messages {
 		contextMessages = append(contextMessages, ContextMessage{Role: message.Role, Content: message.Content, CreatedAt: message.CreatedAt})
 	}
-	contextSnapshot := ContextSnapshot{Version: DefaultContextVersion, CapturedAt: s.now().UTC(), Pet: PetContext{ID: pet.ID, Name: pet.Name}, RecentTurns: recentTurns, Messages: contextMessages, Sources: []ContextSource{{Name: "pet_base", Version: "pet-base-v1", ItemCount: 1}, {Name: "ask_messages", Version: "ask-messages-v1", ItemCount: len(contextMessages)}}}
-	if profileRepository, ok := s.pets.(petProfileReader); ok {
-		if profile, profileErr := profileRepository.GetProfile(ctx, session.FamilyID, session.PetID); profileErr == nil {
-			contextSnapshot.Sources = append(contextSnapshot.Sources, ContextSource{Name: "pet_profile", Version: "pet-profile-v1", ItemCount: 1})
-			contextSnapshot.Pet.Breed = profile.Breed
-			contextSnapshot.Pet.Gender = profile.Gender
-			contextSnapshot.Pet.Sterilized = profile.Sterilized
-			if profile.Birthday != nil {
-				contextSnapshot.Pet.Birthday = *profile.Birthday
-			}
-		}
-	}
-	if healthRepository, ok := s.pets.(petHealthReader); ok {
-		if health, healthErr := healthRepository.GetHealth(ctx, session.FamilyID, session.PetID); healthErr == nil {
-			contextSnapshot.Sources = append(contextSnapshot.Sources, ContextSource{Name: "pet_health", Version: "pet-health-v1", ItemCount: 1})
-			contextSnapshot.Pet.HealthStatus = health.Status
-			contextSnapshot.Pet.Allergies = health.Allergies
-			contextSnapshot.Pet.LongTermMedication = health.LongTermMedication
-		}
-	}
-	if s.calendar != nil {
-		recentRecords, recordErr := s.calendar.ListRecentRecords(ctx, session.FamilyID, session.PetID, s.now().UTC().AddDate(0, 0, -90), ContextTurnLimit)
-		if recordErr == nil {
-			contextSnapshot.RecentRecords = recentRecords
-			contextSnapshot.Sources = append(contextSnapshot.Sources, ContextSource{Name: "calendar_records", Version: "calendar-records-v1", ItemCount: len(recentRecords), Truncated: len(recentRecords) >= ContextTurnLimit})
-		}
-	}
-	if _, ok := s.repository.(contextTurnRepository); ok {
-		contextSnapshot.Sources = append(contextSnapshot.Sources, ContextSource{Name: "ask_turns", Version: "ask-turns-v1", ItemCount: len(recentTurns), Truncated: len(recentTurns) >= ContextTurnLimit})
-	}
-	contextSnapshot.Events = normalizeContextEvents(recentTurns, contextSnapshot.RecentRecords)
-	contextSnapshot = compactContextSnapshot(contextSnapshot, ContextMaxChars)
+	contextSnapshot := compactContextSnapshot(ContextSnapshot{Version: DefaultContextVersion, CapturedAt: s.now().UTC(), Messages: contextMessages, Sources: []ContextSource{{Name: "ask_messages", Version: "ask-messages-v1", ItemCount: len(contextMessages)}}}, ContextMaxChars)
 	now := s.now().UTC()
 	startedEvent := Event{ID: startedEventID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Sequence: nextSequence(events), Type: "run.started", Data: contextAuditData(contextSnapshot), CreatedAt: now}
 	if err := s.repository.TransitionRun(ctx, run.ID, run.RowVersion, RunQueued, RunRunning, RiskUnknown, "", now, startedEvent, Message{}); err != nil {
@@ -461,6 +424,11 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	run.StartedAt = &now
 	turn.Status = RunRunning
 	events = append(events, startedEvent)
+	progressEvent, err := s.appendProgressEvent(ctx, session, run, "intent_routing", "正在理解你的问题")
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	events = append(events, progressEvent)
 	riskText := turn.Input
 	for _, message := range messages {
 		if message.Role == "user" && message.Content != turn.Input {
@@ -470,29 +438,115 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	risk := s.rules.Evaluate(RiskInput{Text: riskText})
 	var decision RunDecision
 	if risk.Level == RiskRed {
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "risk_checking", "正在进行风险初筛")
+		if err != nil {
+			return ExecutionResult{}, appErrors.Internal(err)
+		}
+		events = append(events, progressEvent)
 		decision = RunDecision{Status: RunEscalated, RiskLevel: RiskRed, EventType: "risk.escalated", Data: map[string]any{"trigger_code": risk.TriggerCode, "message": risk.Message, "action": risk.Action}}
 	} else {
-		factType := DetectFactType(turn.Input)
-		if factType != FactUnknown {
-			if reader, ok := s.calendar.(factReader); ok {
-				sessionPets := session.Pets
-				if len(sessionPets) == 0 {
-					sessionPets = []SessionPet{{PetID: pet.ID, PetName: pet.Name, Mention: pet.Name, SortOrder: 0}}
-				}
-				var data map[string]any
-				data, err = buildFactResult(ctx, reader, session.FamilyID, sessionPets, factType)
-				if err == nil {
-					decision = RunDecision{Status: RunCompleted, RiskLevel: RiskGreen, EventType: "fact.completed", Data: data}
-				}
+		intentDecision := IntentDecision{Intent: IntentPetHealth}
+		factType := DetectFactType(riskText)
+		if familyIntent, ok := DetectFamilyQuery(turn.Input); ok {
+			intentDecision = familyIntent
+		} else if factType != FactUnknown {
+			intentDecision.Intent = IntentPetFact
+		} else if run.ClarificationCount == 0 {
+			if simpleIntent, ok := DetectSimpleIntent(turn.Input); ok {
+				intentDecision = simpleIntent
+			} else if router, ok := s.executor.(IntentRouter); ok {
+				intentDecision, err = router.Route(ctx, IntentInput{Session: session, Turn: turn, Run: run, Messages: contextMessages})
 			}
 		}
-		if decision.Status == "" {
-			decision, err = s.executor.Execute(ctx, RunInput{Session: session, Turn: turn, Run: run, Context: contextSnapshot})
-		}
 		if err != nil {
-			decision = RunDecision{Status: RunFailed, ErrorCode: "executor_failed", EventType: "run.failed", Data: map[string]any{"message": "当前暂时无法完成分析"}}
-		} else if err := ValidateAnalysisOutput(decision); err != nil {
-			decision = RunDecision{Status: RunFailed, ErrorCode: "invalid_analysis_output", EventType: "run.failed", Data: map[string]any{"message": "当前暂时无法完成分析"}}
+			errorCode, retryable := ExecutorErrorDetails(err)
+			if retryable {
+				return ExecutionResult{Session: session, Run: run, Events: events}, err
+			}
+			decision = RunDecision{Status: RunFailed, ErrorCode: errorCode, EventType: "run.failed", Data: map[string]any{"message": providerFailureMessage(errorCode)}}
+		} else if err := ValidateIntentDecision(intentDecision); err != nil {
+			decision = RunDecision{Status: RunFailed, ErrorCode: "invalid_intent_output", EventType: "run.failed", Data: map[string]any{"message": "当前暂时无法理解这个问题"}}
+		} else {
+			switch intentDecision.Intent {
+			case IntentCasualChat, IntentUnsupported:
+				decision = RunDecision{Status: RunCompleted, RiskLevel: RiskUnknown, EventType: "assistant.completed", Data: map[string]any{"answer": intentDecision.Reply, "intent": intentDecision.Intent}}
+			case IntentAmbiguous:
+				decision = RunDecision{Status: RunWaitingInput, RiskLevel: RiskUnknown, EventType: "assistant.question", Data: map[string]any{"question": intentDecision.Question}}
+			case IntentFamilyQuery:
+				familyPets, listErr := s.pets.List(ctx, session.FamilyID)
+				if listErr != nil {
+					return ExecutionResult{}, appErrors.Internal(listErr)
+				}
+				decision = RunDecision{Status: RunCompleted, RiskLevel: RiskGreen, EventType: "family.pets.completed", Data: buildFamilyPetsResult(familyPets)}
+			case IntentPetFact:
+				if factType == FactUnknown {
+					decision = RunDecision{Status: RunWaitingInput, RiskLevel: RiskUnknown, EventType: "assistant.question", Data: map[string]any{"question": "你想查询哪类宠物记录，例如洗澡、疫苗、驱虫、体检、就医或用药？"}}
+					break
+				}
+				if reader, ok := s.calendar.(factReader); ok {
+					sessionPets := session.Pets
+					if len(sessionPets) == 0 {
+						pet, petErr := s.pets.Get(ctx, session.FamilyID, session.PetID)
+						if petErr != nil {
+							return ExecutionResult{}, appErrors.Internal(petErr)
+						}
+						sessionPets = []SessionPet{{PetID: pet.ID, PetName: pet.Name, Mention: pet.Name, SortOrder: 0}}
+					}
+					data, factErr := buildFactResult(ctx, reader, session.FamilyID, sessionPets, factType)
+					if factErr != nil {
+						return ExecutionResult{}, appErrors.Internal(factErr)
+					}
+					decision = RunDecision{Status: RunCompleted, RiskLevel: RiskGreen, EventType: "fact.completed", Data: data}
+				} else {
+					decision = RunDecision{Status: RunCompleted, RiskLevel: RiskUnknown, EventType: "assistant.completed", Data: map[string]any{"answer": "当前暂时无法读取宠物记录。", "intent": IntentPetFact}}
+				}
+			case IntentPetHealth:
+				progressEvent, err = s.appendProgressEvent(ctx, session, run, "input_reviewing", "正在整理宠物的症状描述")
+				if err != nil {
+					return ExecutionResult{}, appErrors.Internal(err)
+				}
+				events = append(events, progressEvent)
+				contextSnapshot, err = s.loadHealthContext(ctx, session, contextMessages)
+				if err != nil {
+					return ExecutionResult{}, err
+				}
+				progressEvent, err = s.appendProgressEvent(ctx, session, run, "context_ready", "已关联宠物资料和近期记录")
+				if err != nil {
+					return ExecutionResult{}, appErrors.Internal(err)
+				}
+				events = append(events, progressEvent)
+				progressEvent, err = s.appendProgressEvent(ctx, session, run, "risk_checking", "正在进行风险初筛")
+				if err != nil {
+					return ExecutionResult{}, appErrors.Internal(err)
+				}
+				events = append(events, progressEvent)
+				progressEvent, err = s.appendProgressEvent(ctx, session, run, "response_generating", "正在生成答复")
+				if err != nil {
+					return ExecutionResult{}, appErrors.Internal(err)
+				}
+				events = append(events, progressEvent)
+				runInput := RunInput{Session: session, Turn: turn, Run: run, Context: contextSnapshot}
+				if streamingExecutor, ok := s.executor.(StreamingExecutor); ok {
+					decision, err = streamingExecutor.ExecuteStream(ctx, runInput, func(delta string) error {
+						progress, appendErr := s.appendAssistantDelta(ctx, session, run, delta)
+						if appendErr == nil {
+							events = append(events, progress)
+						}
+						return appendErr
+					})
+				} else {
+					decision, err = s.executor.Execute(ctx, runInput)
+				}
+				if err != nil {
+					errorCode, retryable := ExecutorErrorDetails(err)
+					if retryable {
+						return ExecutionResult{Session: session, Run: run, Events: events}, err
+					}
+					decision = RunDecision{Status: RunFailed, ErrorCode: errorCode, EventType: "run.failed", Data: map[string]any{"message": providerFailureMessage(errorCode)}}
+				} else if err := ValidateAnalysisOutput(decision); err != nil {
+					decision = RunDecision{Status: RunFailed, ErrorCode: "invalid_analysis_output", EventType: "run.failed", Data: map[string]any{"message": "当前暂时无法完成分析"}}
+				}
+			}
 		}
 	}
 	if decision.Status == RunWaitingInput && run.ClarificationCount >= MaxClarifications {
@@ -544,6 +598,86 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	}
 	events = append(events, finishedEvent)
 	return ExecutionResult{Session: session, Run: run, Events: events}, nil
+}
+
+func (s *Service) loadHealthContext(ctx context.Context, session Session, messages []ContextMessage) (ContextSnapshot, error) {
+	pet, err := s.pets.Get(ctx, session.FamilyID, session.PetID)
+	if err != nil {
+		if errors.Is(err, petapp.ErrNotFound) {
+			return ContextSnapshot{}, appErrors.NotFound("宠物不存在")
+		}
+		return ContextSnapshot{}, appErrors.Internal(err)
+	}
+	var recentTurns []ContextTurn
+	if contextRepository, ok := s.repository.(contextTurnRepository); ok {
+		recentTurns, err = contextRepository.ListContextTurns(ctx, session.ID, ContextTurnLimit)
+		if err != nil {
+			return ContextSnapshot{}, appErrors.Internal(err)
+		}
+	}
+	value := ContextSnapshot{Version: DefaultContextVersion, CapturedAt: s.now().UTC(), Pet: PetContext{ID: pet.ID, Name: pet.Name}, RecentTurns: recentTurns, Messages: messages, Sources: []ContextSource{{Name: "pet_base", Version: "pet-base-v1", ItemCount: 1}, {Name: "ask_messages", Version: "ask-messages-v1", ItemCount: len(messages)}}}
+	if profileRepository, ok := s.pets.(petProfileReader); ok {
+		if profile, profileErr := profileRepository.GetProfile(ctx, session.FamilyID, session.PetID); profileErr == nil {
+			value.Sources = append(value.Sources, ContextSource{Name: "pet_profile", Version: "pet-profile-v1", ItemCount: 1})
+			value.Pet.Breed = profile.Breed
+			value.Pet.Gender = profile.Gender
+			value.Pet.Sterilized = profile.Sterilized
+			if profile.Birthday != nil {
+				value.Pet.Birthday = *profile.Birthday
+			}
+		}
+	}
+	if healthRepository, ok := s.pets.(petHealthReader); ok {
+		if health, healthErr := healthRepository.GetHealth(ctx, session.FamilyID, session.PetID); healthErr == nil {
+			value.Sources = append(value.Sources, ContextSource{Name: "pet_health", Version: "pet-health-v1", ItemCount: 1})
+			value.Pet.HealthStatus = health.Status
+			value.Pet.Allergies = health.Allergies
+			value.Pet.LongTermMedication = health.LongTermMedication
+		}
+	}
+	if s.calendar != nil {
+		recentRecords, recordErr := s.calendar.ListRecentRecords(ctx, session.FamilyID, session.PetID, s.now().UTC().AddDate(0, 0, -90), ContextTurnLimit)
+		if recordErr == nil {
+			value.RecentRecords = recentRecords
+			value.Sources = append(value.Sources, ContextSource{Name: "calendar_records", Version: "calendar-records-v1", ItemCount: len(recentRecords), Truncated: len(recentRecords) >= ContextTurnLimit})
+		}
+	}
+	if _, ok := s.repository.(contextTurnRepository); ok {
+		value.Sources = append(value.Sources, ContextSource{Name: "ask_turns", Version: "ask-turns-v1", ItemCount: len(recentTurns), Truncated: len(recentTurns) >= ContextTurnLimit})
+	}
+	value.Events = normalizeContextEvents(recentTurns, value.RecentRecords)
+	return compactContextSnapshot(value, ContextMaxChars), nil
+}
+
+func providerFailureMessage(errorCode string) string {
+	if errorCode == "provider_quota_exhausted" {
+		return "AI 服务额度暂时不可用，请检查额度后重试"
+	}
+	return "当前暂时无法完成分析"
+}
+
+func (s *Service) appendProgressEvent(ctx context.Context, session Session, run Run, stage, message string) (Event, error) {
+	id, err := newID()
+	if err != nil {
+		return Event{}, err
+	}
+	data, err := json.Marshal(map[string]string{"stage": stage, "message": message})
+	if err != nil {
+		return Event{}, err
+	}
+	return s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "run.progress", Data: string(data), CreatedAt: s.now().UTC()})
+}
+
+func (s *Service) appendAssistantDelta(ctx context.Context, session Session, run Run, delta string) (Event, error) {
+	id, err := newID()
+	if err != nil {
+		return Event{}, err
+	}
+	data, err := json.Marshal(map[string]string{"delta": delta})
+	if err != nil {
+		return Event{}, err
+	}
+	return s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "assistant.delta", Data: string(data), CreatedAt: s.now().UTC()})
 }
 
 func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID, input string, expectedVersion int, idempotencyKey string) (ExecutionResult, error) {
