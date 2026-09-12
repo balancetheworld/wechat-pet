@@ -6,6 +6,7 @@ import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import backgroundImage from '../../assets/background1.jpg'
 import bookPaperImage from '../../assets/book-page-bg.jpg'
+import catPhoto from '../../assets/cat2.png'
 import passportImage from '../../assets/passport.jpg'
 import { routes } from '../../constants/routes'
 import { createCalendarRecord } from '../../services/calendar'
@@ -171,7 +172,8 @@ interface BookPage {
 }
 
 function formatDate(value?: string) {
-  return value || '暂无记录'
+  /* 只保留 YYYY-MM-DD, 兼容后端可能返回的 2023-04-12T00:00:00Z 形式 */
+  return value ? value.slice(0, 10) : '暂无记录'
 }
 
 function formatGender(value: string) {
@@ -578,8 +580,30 @@ export default function Profile() {
     />
   )
 
-  /* ===== 章节: 身份名片 ===== */
-  const renderProfilePage = () => (
+  /* ===== 章节: 身份名片 (人设卡排版: 左上照片 + 右上简洁信息 + 下方详细介绍) ===== */
+  const renderProfilePage = () => {
+    const petName = profile?.name || selectedPet?.name || '宠'
+    /* 详细介绍: 由档案字段自动生成一句话简介 */
+    const bioParts: string[] = []
+    if (profile?.breed) {
+      bioParts.push(`是一只${profile.breed}`)
+    }
+    if (profile?.gender) {
+      bioParts.push(`性别${formatGender(profile.gender)}`)
+    }
+    if (profile?.birthday) {
+      bioParts.push(`${formatDate(profile.birthday)} 出生，现在 ${profile.age} 岁`)
+    }
+    if (profile?.home_date) {
+      bioParts.push(`${formatDate(profile.home_date)} 来到家里，已陪伴我们 ${profile.companion_days} 天`)
+    }
+    if (profile?.birthday && profile.next_birthday_days !== undefined) {
+      bioParts.push(`下一次生日还有 ${profile.next_birthday_days} 天`)
+    }
+    const bioText = bioParts.length > 0
+      ? `${petName} ${bioParts.join('，')}。`
+      : '资料还空空的，点击右上角「修改」补充它的品种、生日和到家日期，这里会自动生成它的专属简介。'
+    return (
     <View className="page content-page" style={PAGE_PAPER_STYLE}>
       <View className="page-body">
         <View className="page-head">
@@ -590,54 +614,62 @@ export default function Profile() {
           <View className="page-head-divider" />
         </View>
         <View className="identity-hero">
-          <Button className="identity-photo" onClick={() => openDetail('头像', '点击上传新头像', '在这里可以上传或更换宠物的头像照片，作为这本档案的封面留念。')}>
-            {profile?.name?.slice(0, 1) || '宠'}
-          </Button>
+          <View className="identity-photo" onClick={() => openDetail('头像', '点击上传新头像', '在这里可以上传或更换宠物的头像照片，作为这本档案的封面留念。')}>
+            <Text className="identity-photo-char">{petName.slice(0, 1)}</Text>
+          </View>
           <View className="identity-meta">
-            <Text className="identity-name">{profile?.name || selectedPet?.name || '宠'}</Text>
-            <Text className="identity-type">
-              {profile?.breed || '品种待补充'}
-              {' '}
-              ·
-              {' '}
-              {formatGender(profile?.gender || '')}
-            </Text>
+            <Text className="identity-about">About.</Text>
+            <View className="identity-meta-divider" />
+            <View className="identity-fact">
+              <Text className="identity-fact-key">年龄</Text>
+              <Text className="identity-fact-val">{profile?.birthday ? `${profile.age} 岁` : '待补充'}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">性别</Text>
+              <Text className="identity-fact-val">{formatGender(profile?.gender || '')}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">品种</Text>
+              <Text className="identity-fact-val">{profile?.breed || '待补充'}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">出生</Text>
+              <Text className="identity-fact-val">{formatDate(profile?.birthday)}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">到家</Text>
+              <Text className="identity-fact-val">{formatDate(profile?.home_date)}</Text>
+            </View>
+            <View className="identity-swatches">
+              <View className="identity-swatch" style={{ background: '#5B84BE' }} />
+              <View className="identity-swatch" style={{ background: '#7FA5D6' }} />
+              <View className="identity-swatch" style={{ background: '#A9C4E4' }} />
+              <View className="identity-swatch" style={{ background: '#CFDEF0' }} />
+              <View className="identity-swatch" style={{ background: '#EDE5D8' }} />
+            </View>
           </View>
         </View>
-        <View className="stat-row">
-          <View className="stat">
-            <Text className="strong">{profile?.birthday ? `${profile.age}` : '—'}</Text>
-            <Text className="span">当前年龄（岁）</Text>
+        <View className="identity-bio">
+          <View className="identity-bio-head">
+            <Text className="identity-bio-name">{petName}</Text>
+            <View className="identity-bio-title">
+              <Text className="identity-bio-zh">简介</Text>
+              <Text className="identity-bio-en">Info.</Text>
+            </View>
           </View>
-          <View className="stat">
-            <Text className="strong">{profile?.home_date ? `${profile.companion_days.toLocaleString()}` : '—'}</Text>
-            <Text className="span">陪伴天数</Text>
-          </View>
-          <View className="stat">
-            <Text className="strong">{profile?.next_birthday_days === undefined ? '—' : `${profile.next_birthday_days}`}</Text>
-            <Text className="span">下次生日（天）</Text>
-          </View>
+          <Text className="identity-bio-text">{bioText}</Text>
         </View>
-        <View className="info-list">
-          <View className="info-row info-static">
-            <Text className="span">出生信息</Text>
-            <Text className="strong">{formatDate(profile?.birthday)}</Text>
-          </View>
-          <View className="info-row info-static">
-            <Text className="span">到家日期</Text>
-            <Text className="strong">{formatDate(profile?.home_date)}</Text>
-          </View>
-          <Button className="info-row" onClick={() => openDetail('身份与证件', '已收纳 2 项', '在这里集中管理宠物的疫苗本、芯片号、繁育证明等证件信息，仅家庭成员可见。')}>
-            <Text className="span">身份与证件</Text>
-            <Text className="strong">已收纳 2 项</Text>
-          </Button>
-        </View>
+        <Button className="info-row" onClick={() => openDetail('身份与证件', '已收纳 2 项', '在这里集中管理宠物的疫苗本、芯片号、繁育证明等证件信息，仅家庭成员可见。')}>
+          <Text className="span">身份与证件</Text>
+          <Text className="strong">已收纳 2 项</Text>
+        </Button>
         {editingChapter === 'identity' && (
           <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '编辑身份信息: 后续版本支持', icon: 'none' })}>＋ 编辑身份信息</View>
         )}
       </View>
     </View>
-  )
+    )
+  }
 
   /* ===== 章节: 个性说明书（每页 3 条问答，超出自动开新页） ===== */
   const renderPersonalityPage = (part: number) => {
@@ -761,40 +793,40 @@ export default function Profile() {
             <Text className="span health-lead-tip">仅家庭可见</Text>
           </View>
           <View className="health-grid">
-            <Button
-              className="health-item detail-trigger"
+            <View
+              className="health-item health-tone-1 detail-trigger"
               onClick={() => openDetail('过敏信息', profile?.breed ? `${profile.breed} 品种` : '暂无记录', '过敏信息由家庭成员补充。常见包括食物、环境与药物，记录后会显示在这里。')}
             >
               <Text className="health-label">过敏信息</Text>
               <Text className="health-value">{profile ? '待补充' : '—'}</Text>
-              <Text className="health-note">点击查看详情</Text>
-            </Button>
-            <Button
-              className="health-item detail-trigger"
+
+            </View>
+            <View
+              className="health-item health-tone-2 detail-trigger"
               onClick={() => openDetail('既往疾病', '暂无记录', '在这里汇总既往病史、检查报告与治疗过程，方便家庭医生快速了解情况。')}
             >
               <Text className="health-label">既往疾病</Text>
               <Text className="health-value">暂无</Text>
-              <Text className="health-note">点击查看详情</Text>
-            </Button>
-            <Button
-              className="health-item detail-trigger"
+
+            </View>
+            <View
+              className="health-item health-tone-3 detail-trigger"
               onClick={() => openDetail('长期用药', '目前无用药', '本模块只保存档案，不提供药物剂量建议；具体用药请遵医嘱。')}
             >
               <Text className="health-label">长期用药</Text>
               <Text className="health-value">无</Text>
-              <Text className="health-note">点击查看详情</Text>
-            </Button>
-            <Button
-              className="health-item detail-trigger"
+
+            </View>
+            <View
+              className="health-item health-tone-4 detail-trigger"
               onClick={() => openDetail('最近疫苗', '待补充', '记录最近一次疫苗的种类、接种时间与医院，凭证仅家庭成员可见。')}
             >
               <Text className="health-label">最近疫苗</Text>
               <Text className="health-value">—</Text>
-              <Text className="health-note">点击查看详情</Text>
-            </Button>
+
+            </View>
           </View>
-          <Text className="updated">档案由家庭成员维护</Text>
+          <Text className="updated">点击查看详情</Text>
           {editingChapter === 'health' && (
             <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '添加健康记录: 后续版本支持', icon: 'none' })}>＋ 添加健康记录</View>
           )}
@@ -833,6 +865,7 @@ export default function Profile() {
                 <View className="birthday-feature" key={r.id} onClick={open}>
                   <View className="media-placeholder">📷</View>
                   <View className="birthday-copy">
+                    <Image className="birthday-copy-bg" src={catPhoto} mode="aspectFill" />
                     <Text className="span">
 {r.year}
 {' '}
