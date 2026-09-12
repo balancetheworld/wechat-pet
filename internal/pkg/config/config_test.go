@@ -91,9 +91,25 @@ func TestProductionLocalStorageRequiresPublicBaseURL(t *testing.T) {
 }
 
 func TestStringRedactsSecrets(t *testing.T) {
-	cfg := Config{JWTSecret: "jwt", WeChatAppSecret: "wechat", COSSecretKey: "cos"}
+	cfg := Config{JWTSecret: "jwt", WeChatAppSecret: "wechat", COSSecretKey: "cos", AIAPIKey: "ai"}
 	value := cfg.String()
-	if strings.Contains(value, "\"JWTSecret\":\"jwt\"") || strings.Contains(value, "\"WeChatAppSecret\":\"wechat\"") || strings.Contains(value, "\"COSSecretKey\":\"cos\"") {
+	if strings.Contains(value, "\"JWTSecret\":\"jwt\"") || strings.Contains(value, "\"WeChatAppSecret\":\"wechat\"") || strings.Contains(value, "\"COSSecretKey\":\"cos\"") || strings.Contains(value, "\"AIAPIKey\":\"ai\"") {
 		t.Fatalf("config string contains secret: %s", value)
+	}
+}
+
+func TestAIConfigRequiresCredentialsModelAndTimeout(t *testing.T) {
+	cfg := Config{AppEnv: "test", HTTPAddr: ":8080", DatabaseDriver: "sqlite", DatabaseDSN: ":memory:", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads", AIEnabled: true, AITimeoutSeconds: 30}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "AI_API_KEY") {
+		t.Fatalf("Validate() error = %v, want AI_API_KEY validation error", err)
+	}
+	cfg.AIAPIKey = "key"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "AI_MODEL") {
+		t.Fatalf("Validate() error = %v, want AI_MODEL validation error", err)
+	}
+	cfg.AIModel = "model"
+	cfg.AITimeoutSeconds = 0
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "AI_TIMEOUT_SECONDS") {
+		t.Fatalf("Validate() error = %v, want AI_TIMEOUT_SECONDS validation error", err)
 	}
 }

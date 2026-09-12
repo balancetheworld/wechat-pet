@@ -15,6 +15,29 @@
   box-shadow: var(--shadow-sm);
 }
 
+.ask-progress {
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  align-self: flex-start;
+  color: var(--primary-deep);
+  font-size: 24rpx;
+  line-height: 1.5;
+}
+
+.ask-progress-dot {
+  width: 10rpx;
+  height: 10rpx;
+  border-radius: 50%;
+  background: var(--primary-dark);
+}
+
+.ask-delta {
+  color: var(--ink);
+  font-size: 27rpx;
+  line-height: 1.55;
+}
+
 .ask-result {
   width: 100%;
   box-sizing: border-box;

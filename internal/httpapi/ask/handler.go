@@ -259,7 +259,7 @@ func (h *Handler) StreamEvents(c *gin.Context) {
 
 func isTerminalAskEvent(eventType string) bool {
 	switch eventType {
-	case "assistant.question", "fact.completed", "run.completed", "risk.escalated", "run.failed":
+	case "assistant.completed", "assistant.question", "fact.completed", "family.pets.completed", "run.completed", "risk.escalated", "run.failed":
 		return true
 	default:
 		return false

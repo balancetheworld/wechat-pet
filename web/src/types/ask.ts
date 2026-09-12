@@ -55,8 +55,22 @@ export interface AskFactResult {
   items: AskFactItem[]
 }
 
+export interface AskFamilyPetItem {
+  pet_id: string
+  pet_name: string
+}
+
+export interface AskFamilyPetsResult {
+  pets: AskFamilyPetItem[]
+}
+
 export interface AskQuestionResult {
   question: string
+}
+
+export interface AskAssistantResult {
+  answer: string
+  intent: 'casual_chat' | 'pet_fact' | 'unsupported'
 }
 
 export interface AskRiskResult {
@@ -77,7 +91,16 @@ export interface AskFailedResult {
   message: string
 }
 
-export type AskEventData = AskFactResult | AskQuestionResult | AskRiskResult | AskAnalysisResult | AskFailedResult | Record<string, unknown>
+export interface AskProgressResult {
+  stage: 'intent_routing' | 'input_reviewing' | 'context_ready' | 'risk_checking' | 'response_generating'
+  message: string
+}
+
+export interface AskDeltaResult {
+  delta: string
+}
+
+export type AskEventData = AskFactResult | AskFamilyPetsResult | AskQuestionResult | AskAssistantResult | AskRiskResult | AskAnalysisResult | AskFailedResult | AskProgressResult | AskDeltaResult | Record<string, unknown>
 
 export interface AskEvent {
   run_id: string

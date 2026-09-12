@@ -1,6 +1,6 @@
 import type { AskEvent, AskExecution, AskSnapshot } from '../types/ask'
 import { expect, it } from 'vitest'
-import { askReducer, hasSequenceGap, initialAskRuntimeState } from './ask-reducer'
+import { askReducer, hasSequenceGap, initialAskRuntimeState, mergeAskDeltaEvents } from './ask-reducer'
 
 function event(sequence: number, type: string): AskEvent {
   return {
@@ -90,7 +90,9 @@ it('snapshot replaces optimistic run and ignores duplicate events', () => {
 it('terminal events select the expected runtime phase', () => {
   const cases = [
     ['assistant.question', 'waiting_input'],
+    ['assistant.completed', 'completed'],
     ['fact.completed', 'completed'],
+    ['family.pets.completed', 'completed'],
     ['run.completed', 'completed'],
     ['risk.escalated', 'escalated'],
     ['run.failed', 'failed'],
@@ -105,6 +107,12 @@ it('unknown events are retained without changing the phase', () => {
   const state = askReducer(initialAskRuntimeState, { type: 'events.received', events: [event(1, 'context.loaded')] })
   expect(state.phase).toBe('idle')
   expect(state.turns[0].events[0].type).toBe('context.loaded')
+})
+
+it('progress events are retained while the run remains in the thinking phase', () => {
+  const state = askReducer(initialAskRuntimeState, { type: 'events.received', events: [event(1, 'run.started'), event(2, 'run.progress')] })
+  expect(state.phase).toBe('thinking')
+  expect(state.turns[0].events.map(value => value.type)).toEqual(['run.started', 'run.progress'])
 })
 
 it('late events are retained without regressing a terminal phase', () => {
@@ -149,6 +157,24 @@ it('detects event sequence gaps before reducer consumption', () => {
   expect(hasSequenceGap([event(4, 'run.started')], 3)).toBe(false)
   expect(hasSequenceGap([event(5, 'run.started')], 3)).toBe(true)
   expect(hasSequenceGap([event(2, 'run.started'), event(4, 'run.completed')], 1)).toBe(true)
+})
+
+it('merges contiguous assistant deltas for preview without merging across other events', () => {
+  const first = { ...event(1, 'assistant.delta'), data: { delta: '你好' } }
+  const second = { ...event(2, 'assistant.delta'), data: { delta: '，旺仔' } }
+  const progress = event(3, 'run.progress')
+  const third = { ...event(4, 'assistant.delta'), data: { delta: '今天' } }
+  const merged = mergeAskDeltaEvents([first, second, progress, third])
+  expect(merged).toHaveLength(3)
+  expect(merged[0].data).toEqual({ delta: '你好，旺仔' })
+  expect(merged[1]).toBe(progress)
+  expect(merged[2].data).toEqual({ delta: '今天' })
+})
+
+it('allows a network error to return to reconnecting', () => {
+  const failed = askReducer(initialAskRuntimeState, { type: 'request.failed', phase: 'network_error', message: '连接中断' })
+  const reconnecting = askReducer(failed, { type: 'stream.reconnecting' })
+  expect(reconnecting.phase).toBe('reconnecting')
 })
 
 it('restores persisted same run replies as separate messages', () => {

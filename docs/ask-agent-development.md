@@ -2071,3 +2071,386 @@ git diff --check 通过
 ### 下一步计划
 
 第二十六步接入真实 AI Provider 边界：配置请求超时、结构化输出、错误分类和可重试策略，使 Provider 限流、超时和不可重试响应能够正确映射到现有 Worker 与 Run 状态机。
+
+## 第二十六步：真实 AI Provider 与可重试错误边界
+
+### 本步目标
+
+第 25 步已经建立数据库租约和可恢复 Worker，但 Executor 仍是本地确定性实现，也没有区分 Provider 的暂时故障和永久错误。本步接入 OpenAI Responses API，并让超时、限流和服务不可用进入 Worker 的持久化重试流程。
+
+### Provider 与结构化输出
+
+新增 `internal/platform/ai/openai.go`，使用官方 `openai-go` SDK 调用 Responses API。当前项目使用 Go 1.24，因此固定使用兼容该版本的 `github.com/openai/openai-go v1.12.0`，不升级要求 Go 1.25 的 v3。
+
+Provider 请求使用严格 JSON Schema，输出只允许两种状态：
+
+```text
+waiting_input
+completed
+```
+
+`waiting_input` 必须包含一个非空追问；`completed` 必须包含风险等级、当前判断、观察项、可能原因、家庭行动和升级就医条件。SDK 返回后仍调用应用层 `ValidateAnalysisOutput`，结构或安全表达不符合契约时按 `provider_output_invalid` 失败，不持久化原始模型文本。
+
+Prompt 只包含问题、宠物资料、近期 Turn、当前 Run 消息、近期记录和归一化事件，不发送家庭、用户、Session、Turn、Run、宠物等内部 ID。Prompt 版本升级为 `ask-prompt-v2`，便于后续审计区分占位执行器和真实 Provider。
+
+### 超时与错误分类
+
+Provider 使用独立请求超时，并关闭 SDK 内部重试，避免 SDK 重试与数据库 Worker 重试叠加。应用层新增 `ExecutorError`，统一携带稳定错误码、是否可重试和可选 `Retry-After`。
+
+当前分类规则：
+
+```text
+超时、请求取消                 provider_timeout / provider_canceled，可重试
+429                            provider_rate_limited，可重试
+配额耗尽（EXCEED_TOKEN_QUOTA_LIMIT、QUOTA_EXCEEDED）
+                               provider_quota_exhausted，不可重试
+409、5xx、网络错误             provider_unavailable，可重试
+401、403                       provider_auth_failed，不可重试
+400、404、422                  provider_request_invalid，不可重试
+非法结构化输出                 provider_output_invalid，不可重试
+其他明确的 Provider HTTP 错误  provider_failed，不可重试
+```
+
+可重试错误返回 Worker 时，Run 暂时保持 `running`。Worker 随后清理租约、将 Run 恢复为 `queued`、写入 `run.retry_scheduled`，并保存 `next_attempt_at`。429 返回有效 `Retry-After` 且大于默认间隔时优先使用 Provider 等待时间；达到最大尝试次数后仍按现有协议进入 `worker_attempts_exhausted`。
+
+不可重试错误由 Service 直接持久化为 `run.failed`。未使用 `ExecutorError` 的旧 Executor 错误继续映射为 `executor_failed`，避免改变已有应用层契约。
+
+### 配置与装配
+
+新增配置：
+
+```text
+AI_PROVIDER
+AI_API_KEY
+AI_BASE_URL
+AI_MODEL
+AI_TIMEOUT_SECONDS
+```
+
+`AI_ENABLED=false` 时继续装配 `DeterministicExecutor`，保持本地开发和未配置环境的原有行为。开启后必须提供 API Key、模型名和正数超时时间；API Key 会在配置日志中脱敏。默认 Provider 为 `openai`，默认 Base URL 为 `https://api.openai.com/v1`，默认超时为 30 秒。设置 `AI_PROVIDER=hunyuan` 后使用腾讯混元 OpenAI 兼容接口；若未显式设置 Base URL，则使用 `https://api.hunyuan.cloud.tencent.com/v1`，模型可配置为 `hunyuan-turbos-latest` 等混元模型名。
+
+### 修改文件
+
+- `internal/platform/ai/openai.go`、`internal/platform/ai/openai_test.go`：实现 Responses Provider、严格结构化输出、超时和错误分类。
+- `internal/app/ask/executor.go`：新增应用层 Executor 错误契约。
+- `internal/app/ask/service.go`、`internal/app/ask/service_test.go`：区分可重试与不可重试错误，并升级 Prompt 版本。
+- `internal/app/ask/worker.go`、`internal/app/ask/worker_test.go`：支持 Provider `Retry-After`。
+- `internal/pkg/config/config.go`、`internal/pkg/config/config_test.go`：增加 AI 配置、校验和密钥脱敏。
+- `cmd/api/main.go`：按 `AI_ENABLED` 装配真实 Provider 或确定性 Executor。
+- `.env.example`、`config.example.yaml`：补充 AI 配置示例。
+- `go.mod`、`go.sum`：增加兼容 Go 1.24 的 OpenAI 官方 SDK。
+- `docs/api/ask.md`：补充 Provider 配置和错误重试协议。
+
+### 验证结果
+
+```text
+OpenAI Provider 定向测试通过
+```
+
+### 当前边界
+
+- 当前只接入文本 Responses API，尚未处理问问图片输入和多模态内容。
+- 当前 Prompt 为代码内版本化常量，尚未接入外部模板管理或离线评测数据集。
+- Worker 仍使用固定默认退避；只有 Provider 明确返回更长的 `Retry-After` 时覆盖该间隔。
+- 本步测试使用本地模拟 HTTP Server，没有向真实 OpenAI 服务发送请求。
+
+### 下一步计划
+
+第二十七步补充 Provider 可观测性和质量评测：记录不含敏感正文的请求耗时、模型名、Token 用量和错误分类，并建立覆盖追问、普通建议、红色规则优先及危险表达拒绝的离线评测集。
+
+## 第二十七步：Provider 可观测性与离线质量评测
+
+### 本步目标
+
+第 26 步已经完成真实 Provider 的调用和错误分类。本步增加可运营的调用指标，并把关键安全边界固定为不访问外部模型即可执行的离线评测。
+
+### Provider 观测数据
+
+`OpenAIExecutor` 增加可注入的观测回调。每次调用结束后只报告结构化元数据：
+
+```text
+model
+duration
+input_tokens
+output_tokens
+total_tokens
+status
+error_code
+retryable
+```
+
+观测回调不接收 Prompt、模型输出、宠物名称、用户输入、Session ID 或 Run ID。主程序将这些字段写入现有 JSON `slog`，用于定位延迟、Token 消耗、Provider 限流和不可重试错误；请求失败也会执行回调，错误码使用应用层稳定分类。
+
+### 离线质量评测
+
+新增 Go 离线评测用例，不调用真实 AI 服务，覆盖：
+
+- 红色规则命中时必须优先升级。
+- 否定表达不能误触发红色风险。
+- 合法追问结构可以通过输出校验。
+- 合法普通分析结构可以通过输出校验。
+- 包含“确诊”等危险诊断表达的结果必须被拒绝。
+
+该评测不是模型能力评分，而是上线前的安全和协议回归门槛。后续接入真实模型评测时，应在同一组案例上增加模型响应适配层，并继续复用应用层输出校验。
+
+### 修改文件
+
+- `internal/platform/ai/openai.go`：增加 Provider 观测结构和回调。
+- `internal/platform/ai/openai_test.go`：覆盖成功调用 Token 观测和错误分类观测。
+- `internal/app/ask/eval_test.go`：增加红色优先、追问、普通分析和危险表达离线评测。
+- `cmd/api/main.go`：将观测元数据接入 JSON 日志。
+- `docs/ask-agent-development.md`：记录观测字段和评测边界。
+
+### 验证结果
+
+```text
+Provider、Ask 和 API 定向测试通过
+Go 全量测试、go vet 和相关 race 测试通过
+前端测试和 TypeScript 检查未受影响
+```
+
+### 当前边界
+
+- 当前观测数据写入结构化日志，尚未接入 Prometheus、OpenTelemetry 或集中式日志查询。
+- 当前 Token 成本没有按模型价格换算，也没有用户或家庭维度聚合。
+- 离线评测覆盖协议和安全规则，尚未覆盖真实模型的事实准确率、建议有用性和中文表达质量。
+
+### 下一步计划
+
+第 28 步开始前端收尾，优先完成真实设备验收和体验补齐：验证微信开发者工具/真机上的事件流、断线恢复、后台切换和错误重试，再处理图片问问入口。
+
+## 第二十八步：前端事件流生命周期恢复
+
+### 本步目标
+
+异步 Worker 已经成为正常执行路径，前端不能再把网络断开后的“重试”当作重新调用兼容 `/process` 接口。页面进入后台后也不应继续持有流连接；返回前台时需要先用 Snapshot 重新取得权威状态，再继续消费事件。
+
+### 实现内容
+
+`useAskSession` 增加页面展示状态和连接版本。页面隐藏时清理当前流连接；重新展示时通过既有 Snapshot 初始化流程恢复会话、游标和当前 Run，再建立新的事件流。
+
+网络错误提示中的操作改为“重新连接”。它只触发连接重建，不调用 `/process`，因此不会把用户网络问题误当成一次新的 Worker 投递。Reducer 允许 `network_error` 回到 `reconnecting`，页面会显示恢复中的状态。
+
+### 修改文件
+
+- `web/src/hooks/use-ask-session.ts`：接入页面显示/隐藏生命周期和显式连接重建。
+- `web/src/hooks/ask-reducer.ts`：允许网络错误进入重连态。
+- `web/src/hooks/ask-reducer.test.ts`：覆盖网络错误重连状态转换。
+- `web/src/pages/ask/index.tsx`：将网络错误操作改为重新连接。
+
+### 验证结果
+
+```text
+前端 2 个测试文件、13 个用例通过
+TypeScript 类型检查通过
+ESLint 0 个错误
+```
+
+### 当前边界
+
+- 微信开发者工具和真机上的真实事件流、断网、后台切换仍需在已登录的设备环境中人工验收。
+- 当前图片入口继续禁用；后端尚无问问媒体上传和多模态分析协议，不能提前开放。
+
+### 下一步计划
+
+在微信开发者工具和真机环境按创建、追问、Provider 暂时失败、断网重连、后台切换和重新进入页面的顺序验收文本闭环；通过后再单独设计图片问问接口和前端入口。
+
+## 第二十九步：可验证的分析过程展示
+
+### 本步目标
+
+前端展示分析阶段时，只呈现用户可以核验的处理进度，不展示原始思维链（Chain of Thought）或模型内部推理文本。
+
+### 实现内容
+
+后端在 Run 执行期间持久化 `run.progress` 事件，前端按事件流和 Snapshot 恢复并展示以下阶段：
+
+```text
+正在整理宠物的症状描述
+已关联宠物资料和近期记录
+正在进行风险初筛
+正在生成答复
+```
+
+每个事件只包含固定的 `stage` 和 `message` 字段，不包含用户输入、模型输出、宠物隐私上下文或内部标识。命中红色风险时，在风险初筛后直接展示升级提示，不产生生成答复阶段。
+
+### 修改文件
+
+- `internal/app/ask/repository.go`、`internal/app/ask/service.go`：持久化执行阶段事件。
+- `internal/app/ask/service_test.go`、`internal/httpapi/ask_routes_test.go`：覆盖阶段顺序和接口返回。
+- `web/src/types/ask.ts`、`web/src/components/ask/ask-event.tsx`、`web/src/components/ask/ask-event.scss`：增加阶段事件类型和展示样式。
+- `web/src/pages/ask/index.tsx`、`web/src/hooks/ask-reducer.test.ts`：接入事件列表并覆盖恢复场景。
+- `docs/api/ask.md`：补充 `run.progress` 事件协议。
+
+### 验证结果
+
+已通过：
+
+```text
+Ask 与 HTTP 路由 Go 测试
+前端测试、TypeScript 类型检查和 ESLint
+```
+
+### 当前限制
+
+- 当前仍使用确定性 Executor，阶段事件表示服务端工作流边界，不代表模型逐 token 输出。
+- 当前 HTTP 事件流仍是 NDJSON；Provider 流式输出接入后，需要在同一协议中增加安全过滤后的增量事件。
+- 阶段文案为固定版本，后续可根据真实 Provider 的执行状态补充更细粒度但仍可验证的进度。
+
+### 下一步计划
+
+第三十步接入 Provider 流式增量，在安全过滤后增加 `assistant.delta` 事件，并让前端按增量事件实现真实打字机效果。
+
+## 第三十步：Provider 流式增量与打字机预览
+
+### 本步目标
+
+在不暴露原始思维链和未校验模型文本的前提下，接入 Provider Responses 流式接口，并让前端在终态结果到达前显示增量预览。
+
+### 实现内容
+
+OpenAI Executor 使用 `Responses.NewStreaming` 接收流。流结束后先解析并通过结构化输出安全校验，再将追问文本或当前判断切分为 `assistant.delta` 事件持久化。前端收到增量时逐段渲染；收到 `assistant.question` 或 `run.completed` 等终态事件后隐藏增量，展示权威结构化结果。
+
+### 安全边界
+
+- 增量来源仅限已通过 `ValidateAnalysisOutput` 的 `question` 或 `current_assessment`。
+- 不转发 Provider 原始事件、JSON 片段、推理摘要或内部上下文。
+- 增量事件写入和终态事件使用同一 Run 事件序列，Snapshot 和断线恢复无需额外协议。
+
+### 修改文件
+
+- `internal/app/ask/executor.go`、`internal/app/ask/service.go`：增加流式 Executor 能力和 `assistant.delta` 事件持久化。
+- `internal/platform/ai/openai.go`：接入 Responses Streaming 并输出安全增量。
+- `web/src/types/ask.ts`、`web/src/components/ask/ask-event.tsx`、`web/src/components/ask/ask-event.scss`、`web/src/pages/ask/index.tsx`：增加增量事件渲染和终态替换。
+- `docs/api/ask.md`：补充增量事件协议。
+
+### 当前限制
+
+- 为保证安全，增量在完整结果校验后才发出；Provider 网络传输虽为流式，但不会展示未校验的半截 JSON。
+- 当前增量仅展示一个安全字段，结构化分析卡片仍以终态事件为准。
+
+### 下一步计划
+
+第三十一步完善前端真实设备验收和增量动画节奏，再评估是否需要将安全的字段级校验前移到流式解析阶段。
+
+## 第三十一步：终态 Snapshot 同步与事件流收敛
+
+### 本步目标
+
+Worker 在后台完成 Run 后，前端事件流收到的终态事件不会携带完整 Run 版本字段。页面需要在终态后重新读取 Snapshot，才能使用最新的 `row_version` 回复追问，并避免已完成会话继续重连。
+
+### 实现内容
+
+`useAskSession` 在收到 `assistant.question`、`run.completed`、`risk.escalated` 或 `run.failed` 后关闭当前流并恢复一次 Snapshot。恢复结果为终态 Run 时不再建立新的事件流；恢复期间忽略旧连接的 `onClose` 和 `onError`，避免重复排队重连。
+
+### 验证结果
+
+```text
+前端 2 个测试文件、15 个用例通过
+TypeScript 类型检查通过
+ESLint 0 个错误，保留 3 条既有警告
+```
+
+### 下一步计划
+
+在微信开发者工具和真机环境验证真实 Provider 的创建、追问、额度不足、断网重连、后台切换和重新进入页面；验证通过后再设计图片问问的媒体上传和多模态协议。
+
+## 第三十二步：意图路由与按需上下文
+
+### 本步目标
+
+健康分析流程之前缺少问题类型判断，导致“你好”等闲聊也会加载宠物上下文并调用健康分析 Prompt。失败时页面还会把普通闲聊展示为“分析未完成”。本步在高危规则和健康分析之间增加意图路由，让不同问题进入独立的受控分支。
+
+### 执行流程
+
+```text
+用户输入
+→ 高危规则
+→ Intent Router
+   ├─ casual_chat
+   ├─ pet_health
+   ├─ pet_fact
+   ├─ ambiguous
+   └─ unsupported
+→ 按意图加载上下文
+→ 分支终态事件
+```
+
+高置信短问候优先使用本地规则，Provider 不可用或额度不足时仍可回复。其他输入在启用 AI 时调用真实 Provider 分类。只有 `pet_health` 分支加载宠物档案、健康资料和近期记录；`pet_fact` 使用确定性记录查询；模糊问题进入追问；闲聊和能力外问题直接返回普通文本。
+
+当前会话表要求 `pet_id` 非空。自动定位接口收到本地规则可确定的简单闲聊时，会使用家庭中的一只宠物完成技术绑定，但执行过程不会读取其档案或健康记录。其他未包含宠物名称的自动定位请求仍保持原有校验，避免健康问题错误关联到默认宠物。
+
+### 事件协议
+
+所有 Run 在路由前写入：
+
+```text
+run.progress
+stage=intent_routing
+message=正在理解你的问题
+```
+
+闲聊和能力外问题以 `assistant.completed` 结束，健康分析继续使用 `assistant.question` 或 `run.completed`，事实查询使用 `fact.completed`。前端将 `assistant.completed` 作为流终态，并使用现有打字机组件展示回答。`run.failed` 优先展示服务端返回的稳定错误文案。
+
+### 架构边界
+
+当前实现是“模型路由 + 确定性规则 + 受控工作流”，不是完整 ReAct。模型只能输出受约束的意图和结构化分析结果，不能自行循环选择工具。这样可以先固定医疗风险规则、数据读取边界和事件审计协议，再根据后续工具数量决定是否引入 Planner 或有限状态的工具循环。
+
+### 修改文件
+
+- `internal/app/ask/intent.go`：定义意图、路由输入和本地短问候规则。
+- `internal/app/ask/service.go`：增加高危优先、意图分支和按需健康上下文。
+- `internal/platform/ai/openai.go`、`internal/platform/ai/hunyuan.go`：接入真实 Provider 意图分类并区分观测操作。
+- `internal/httpapi/ask/handler.go`：将 `assistant.completed` 识别为流终态。
+- `web/src/types/ask.ts`、`web/src/components/ask/ask-event.tsx`、`web/src/hooks/ask-reducer.ts`、`web/src/hooks/use-ask-session.ts`、`web/src/pages/ask/index.tsx`：接入路由阶段、普通文本终态和稳定失败文案。
+- `internal/app/ask/service_test.go`、`internal/platform/ai/hunyuan_test.go`、`internal/httpapi/ask_routes_test.go`、`web/src/hooks/ask-reducer.test.ts`：覆盖路由、上下文边界、终态和恢复行为。
+
+### 当前限制
+
+- 自动定位接口只对本地高置信闲聊放宽宠物名称要求；需要模型判断的无宠物输入仍需先选择宠物或包含宠物名称。
+- 意图分类依赖 Provider 时会额外消耗一次模型请求和 Token。
+- 当前未实现自主工具循环、长期记忆检索和多模态输入。
+
+### 下一步计划
+
+先在微信开发者工具中验证闲聊、健康问题、事实查询、模糊问题、高危问题和额度错误六条路径，再完善真实模型路由评测和 Provider 降级策略。
+
+## 第三十三步：家庭级查询 Tool
+
+### 本步目标
+
+自动定位接口此前要求问题中出现宠物名称，因此“你知道我家有哪些宠物吗”会在意图路由前返回 400。与此同时，Agent 没有家庭级查询意图和对应的数据读取边界。
+
+### 执行流程
+
+```text
+用户输入
+→ 高危规则
+→ Intent Router
+→ family_query
+→ list_family_pets
+→ family.pets.completed
+```
+
+本地高置信规则识别家庭宠物列表问题，使自动定位接口可以先创建会话。由于当前 Session 要求 `pet_id` 非空，会话技术性绑定家庭中的第一只宠物；执行时重新按 `session.family_id` 调用宠物 Repository 的 `List`，返回当前家庭完整宠物列表。
+
+### 架构边界
+
+`list_family_pets` 是受控只读 Tool。模型只能将问题路由到 `family_query`，不能指定任意家庭 ID，也不能直接调用 Repository。该分支不加载健康上下文，不调用健康 Executor，不支持创建、修改或删除宠物。写操作仍需后续增加用户确认、权限、幂等和审计协议。
+
+### 修改文件
+
+- `internal/app/ask/intent.go`、`internal/platform/ai/intent.go`：增加 `family_query` 意图、本地识别和 Provider 结构化枚举。
+- `internal/app/ask/family.go`、`internal/app/ask/service.go`：增加家庭宠物列表结果和受控执行分支。
+- `web/src/types/ask.ts`、`web/src/components/ask/ask-event.tsx`、`web/src/hooks/ask-reducer.ts`、`web/src/hooks/use-ask-session.ts`、`web/src/pages/ask/index.tsx`：展示列表并将事件识别为终态。
+- `internal/app/ask/service_test.go`、`internal/httpapi/ask_routes_test.go`、`internal/platform/ai/intent_test.go`、`web/src/hooks/ask-reducer.test.ts`：覆盖意图、服务、HTTP 契约和前端状态。
+
+### 当前限制
+
+- 当前只支持家庭宠物列表这一项家庭级只读 Tool。
+- 尚未实现模型自主工具选择循环，因此仍不是 ReAct。
+- 家庭中没有宠物时，自动创建会话会返回“当前家庭暂无宠物”。
+
+### 下一步计划
+
+继续补充按 `pet_id` 查询基础资料、健康资料和近期记录的显式只读 Tool 契约，再根据 Tool 数量决定引入固定 Planner 还是有限状态工具循环。

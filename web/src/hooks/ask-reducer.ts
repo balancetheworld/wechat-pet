@@ -1,4 +1,4 @@
-import type { AskEvent, AskExecution, AskRun, AskSession, AskSnapshot } from '../types/ask'
+import type { AskDeltaResult, AskEvent, AskExecution, AskRun, AskSession, AskSnapshot } from '../types/ask'
 
 export type AskRuntimePhase = 'idle' | 'creating' | 'thinking' | 'reconnecting' | 'waiting_input' | 'replying' | 'completed' | 'escalated' | 'failed' | 'input_error' | 'ambiguous' | 'network_error'
 
@@ -54,6 +54,26 @@ export function hasSequenceGap(events: AskEvent[], currentSequence: number) {
   return false
 }
 
+export function mergeAskDeltaEvents(events: AskEvent[]) {
+  const merged: AskEvent[] = []
+  for (const event of events) {
+    const previous = merged.at(-1)
+    if (previous?.type === 'assistant.delta' && event.type === 'assistant.delta' && previous.run_id === event.run_id) {
+      const previousData = previous.data as AskDeltaResult
+      const currentData = event.data as AskDeltaResult
+      if (typeof previousData.delta === 'string' && typeof currentData.delta === 'string') {
+        merged[merged.length - 1] = {
+          ...previous,
+          data: { ...previousData, delta: previousData.delta + currentData.delta },
+        }
+        continue
+      }
+    }
+    merged.push(event)
+  }
+  return merged
+}
+
 function phaseForEvent(state: AskRuntimeState, event: AskEvent): AskRuntimePhase {
   switch (event.type) {
     case 'run.queued':
@@ -61,7 +81,9 @@ function phaseForEvent(state: AskRuntimeState, event: AskEvent): AskRuntimePhase
       return 'thinking'
     case 'assistant.question':
       return 'waiting_input'
+    case 'assistant.completed':
     case 'fact.completed':
+    case 'family.pets.completed':
     case 'run.completed':
       return 'completed'
     case 'risk.escalated':
@@ -250,7 +272,7 @@ export function askReducer(state: AskRuntimeState, action: AskRuntimeAction): As
       return value
     }
     case 'stream.reconnecting':
-      if (state.phase === 'thinking' || state.phase === 'creating') {
+      if (state.phase === 'thinking' || state.phase === 'creating' || state.phase === 'network_error') {
         return { ...state, phase: 'reconnecting' }
       }
       return state

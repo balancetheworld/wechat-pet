@@ -29,13 +29,18 @@ type Config struct {
 	COSBucket        string `yaml:"cos_bucket"`
 	RedisAddr        string `yaml:"redis_addr"`
 	AIEnabled        bool   `yaml:"ai_enabled"`
+	AIProvider       string `yaml:"ai_provider"`
+	AIAPIKey         string `yaml:"ai_api_key"`
+	AIBaseURL        string `yaml:"ai_base_url"`
+	AIModel          string `yaml:"ai_model"`
+	AITimeoutSeconds int    `yaml:"ai_timeout_seconds"`
 }
 
 func Load(yamlPaths ...string) (Config, error) {
 	if err := loadDotEnv(); err != nil {
 		return Config{}, err
 	}
-	cfg := Config{AppEnv: "development", HTTPAddr: ":8080", DatabaseDriver: "postgres", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads"}
+	cfg := Config{AppEnv: "development", HTTPAddr: ":8080", DatabaseDriver: "postgres", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads", AIProvider: "openai", AIBaseURL: "https://api.openai.com/v1", AITimeoutSeconds: 30}
 	yamlPath := ""
 	if len(yamlPaths) > 0 {
 		yamlPath = yamlPaths[0]
@@ -100,6 +105,10 @@ func applyEnvironment(cfg *Config) error {
 	setString("COS_SECRET_KEY", &cfg.COSSecretKey)
 	setString("COS_BUCKET", &cfg.COSBucket)
 	setString("REDIS_ADDR", &cfg.RedisAddr)
+	setString("AI_API_KEY", &cfg.AIAPIKey)
+	setString("AI_PROVIDER", &cfg.AIProvider)
+	setString("AI_BASE_URL", &cfg.AIBaseURL)
+	setString("AI_MODEL", &cfg.AIModel)
 	if value, ok := os.LookupEnv("JWT_EXPIRE_MINUTES"); ok {
 		minutes, err := strconv.Atoi(value)
 		if err != nil {
@@ -113,6 +122,13 @@ func applyEnvironment(cfg *Config) error {
 			return fmt.Errorf("AI_ENABLED must be a boolean: %w", err)
 		}
 		cfg.AIEnabled = enabled
+	}
+	if value, ok := os.LookupEnv("AI_TIMEOUT_SECONDS"); ok {
+		seconds, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("AI_TIMEOUT_SECONDS must be an integer: %w", err)
+		}
+		cfg.AITimeoutSeconds = seconds
 	}
 	return nil
 }
@@ -148,6 +164,24 @@ func (c Config) Validate() error {
 	if c.StorageDriver != "local" && c.StorageDriver != "cos" {
 		return errors.New("STORAGE_DRIVER must be local or cos")
 	}
+	if c.AIEnabled {
+		provider := c.AIProvider
+		if provider == "" {
+			provider = "openai"
+		}
+		if provider != "openai" && provider != "hunyuan" {
+			return errors.New("AI_PROVIDER must be openai or hunyuan")
+		}
+		if strings.TrimSpace(c.AIAPIKey) == "" {
+			return errors.New("AI_API_KEY is required when AI is enabled")
+		}
+		if strings.TrimSpace(c.AIModel) == "" {
+			return errors.New("AI_MODEL is required when AI is enabled")
+		}
+		if c.AITimeoutSeconds <= 0 {
+			return errors.New("AI_TIMEOUT_SECONDS must be greater than zero")
+		}
+	}
 	if c.AppEnv == "production" {
 		if strings.TrimSpace(c.JWTSecret) == "" {
 			return errors.New("JWT_SECRET is required in production")
@@ -168,6 +202,7 @@ func (c Config) Redacted() Config {
 	c.WeChatAppSecret = mask(c.WeChatAppSecret)
 	c.COSSecretID = mask(c.COSSecretID)
 	c.COSSecretKey = mask(c.COSSecretKey)
+	c.AIAPIKey = mask(c.AIAPIKey)
 	return c
 }
 

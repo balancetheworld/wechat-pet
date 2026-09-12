@@ -1,10 +1,14 @@
 import type { AskEvent, AskExecution, AskSnapshot } from '../types/ask'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useReducer, useRef } from 'react'
-import { createAskSession, getAskSnapshot, processAskRun, replyAskRun } from '../services/ask'
+import Taro from '@tarojs/taro'
+import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
+import { createAskSession, createAskSessionForPet, getAskSnapshot, replyAskRun } from '../services/ask'
 import { openAskEventStream } from '../services/ask-stream'
+import { getPets } from '../services/pet'
 import { ApiError } from '../services/request'
 import { useAskStore } from '../stores/ask-store'
+import { useAuthStore } from '../stores/auth-store'
+import { usePetStore } from '../stores/pet-store'
 import { askReducer, hasSequenceGap, initialAskRuntimeState } from './ask-reducer'
 
 export const askQueryKeys = {
@@ -30,7 +34,11 @@ function mergeEvents(current: AskEvent[] | undefined, incoming: AskEvent[]) {
 }
 
 function isTerminalEvent(event: AskEvent) {
-  return event.type === 'assistant.question' || event.type === 'fact.completed' || event.type === 'run.completed' || event.type === 'risk.escalated' || event.type === 'run.failed'
+  return event.type === 'assistant.completed' || event.type === 'assistant.question' || event.type === 'fact.completed' || event.type === 'family.pets.completed' || event.type === 'run.completed' || event.type === 'risk.escalated' || event.type === 'run.failed'
+}
+
+function isTerminalRunStatus(status: AskExecution['run']['status']) {
+  return status === 'waiting_input' || status === 'completed' || status === 'escalated' || status === 'failed' || status === 'canceled' || status === 'interrupted'
 }
 
 function errorPhase(error: unknown) {
@@ -66,6 +74,7 @@ interface PendingRequest {
   kind: 'create' | 'reply'
   input: string
   idempotencyKey: string
+  petID?: string
   sessionID?: string
   runID?: string
   expectedVersion?: number
@@ -74,13 +83,50 @@ interface PendingRequest {
 export function useAskSession() {
   const queryClient = useQueryClient()
   const [runtime, dispatch] = useReducer(askReducer, initialAskRuntimeState)
+  const [pageVisible, setPageVisible] = useState(true)
+  const [connectionVersion, setConnectionVersion] = useState(0)
   const pendingRequest = useRef<PendingRequest | null>(null)
+  const petsLoad = useRef<Promise<void> | null>(null)
   const draft = useAskStore(state => state.draft)
   const activeSessionId = useAskStore(state => state.activeSessionId)
   const activeRunId = useAskStore(state => state.activeRunId)
   const activeRunVersion = useAskStore(state => state.activeRunVersion)
   const setDraft = useAskStore(state => state.setDraft)
   const resetStore = useAskStore(state => state.reset)
+  const token = useAuthStore(state => state.token)
+
+  Taro.useDidShow(() => {
+    setPageVisible(true)
+  })
+
+  Taro.useDidHide(() => {
+    setPageVisible(false)
+  })
+
+  useEffect(() => {
+    if (!pageVisible || !token) {
+      return
+    }
+    let disposed = false
+    const loading = getPets().then((value) => {
+      if (!disposed) {
+        const petState = usePetStore.getState()
+        petState.setPets(value)
+        if (value.length > 0 && !value.some(pet => pet.id === petState.currentPetId)) {
+          petState.setCurrentPetId(value[0].id)
+        }
+      }
+    }).catch(() => undefined)
+    petsLoad.current = loading
+    void loading.finally(() => {
+      if (petsLoad.current === loading) {
+        petsLoad.current = null
+      }
+    })
+    return () => {
+      disposed = true
+    }
+  }, [pageVisible, token])
 
   const syncEvents = useCallback((sessionID: string, runID: string, events: AskEvent[]) => {
     queryClient.setQueryData<AskEvent[]>(askQueryKeys.eventLog(sessionID, runID), current => mergeEvents(current, events))
@@ -119,18 +165,10 @@ export function useAskSession() {
   }, [queryClient])
 
   const createMutation = useMutation({
-    mutationFn: ({ input, key }: { input: string, key: string }) => createAskSession({ input }, key),
+    mutationFn: ({ input, key, petID }: { input: string, key: string, petID?: string }) => petID ? createAskSessionForPet(petID, { input }, key) : createAskSession({ input }, key),
     onSuccess: restoreSnapshot,
     onError(error) {
       dispatch({ type: 'request.failed', phase: error instanceof ApiError && error.statusCode === 409 ? 'ambiguous' : errorPhase(error), message: errorMessage(error) })
-    },
-  })
-
-  const processMutation = useMutation({
-    mutationFn: ({ sessionID, runID }: { sessionID: string, runID: string }) => processAskRun(sessionID, runID),
-    onSuccess: restoreSnapshot,
-    onError(error) {
-      dispatch({ type: 'request.failed', phase: errorPhase(error), message: errorMessage(error) })
     },
   })
 
@@ -143,7 +181,7 @@ export function useAskSession() {
   })
 
   useEffect(() => {
-    if (!activeSessionId || !activeRunId) {
+    if (!pageVisible || !activeSessionId || !activeRunId) {
       return
     }
     const sessionID = activeSessionId
@@ -180,12 +218,11 @@ export function useAskSession() {
           }
           syncEvents(sessionID, runID, events)
           if (events.some(isTerminalEvent)) {
-            disposed = true
-            stream?.close()
+            void recover()
           }
         },
         onError(error) {
-          if (disposed) {
+          if (disposed || recovering) {
             return
           }
           if (!error.retryable) {
@@ -196,7 +233,7 @@ export function useAskSession() {
           reconnect()
         },
         onClose() {
-          if (disposed) {
+          if (disposed || recovering) {
             return
           }
           reconnect()
@@ -217,7 +254,10 @@ export function useAskSession() {
         }
         restoreFullSnapshot(snapshot)
         recovering = false
-        connect()
+        const selected = snapshot.turns[snapshot.turns.length - 1]
+        if (!selected || !isTerminalRunStatus(selected.run.status)) {
+          connect()
+        }
       }
       catch (error) {
         recovering = false
@@ -234,7 +274,10 @@ export function useAskSession() {
           return
         }
         restoreFullSnapshot(snapshot)
-        connect()
+        const selected = snapshot.turns[snapshot.turns.length - 1]
+        if (!selected || !isTerminalRunStatus(selected.run.status)) {
+          connect()
+        }
       }
       catch {
         if (!disposed) {
@@ -250,19 +293,24 @@ export function useAskSession() {
         clearTimeout(reconnectTimer)
       }
     }
-  }, [activeRunId, activeRunVersion, activeSessionId, restoreFullSnapshot, syncEvents])
+  }, [activeRunId, activeRunVersion, activeSessionId, connectionVersion, pageVisible, restoreFullSnapshot, syncEvents])
 
   async function submit(input = draft) {
     const value = input.trim()
+    if (petsLoad.current) {
+      await petsLoad.current
+    }
+    const petState = usePetStore.getState()
+    const petID = petState.currentPetId && petState.pets.some(pet => pet.id === petState.currentPetId) ? petState.currentPetId : petState.pets.length === 1 ? petState.pets[0].id : undefined
     const current = pendingRequest.current
-    const pending = current?.kind === 'create' && current.input === value ? current : { kind: 'create' as const, input: value, idempotencyKey: idempotencyKey() }
+    const pending = current?.kind === 'create' && current.input === value && current.petID === petID ? current : { kind: 'create' as const, input: value, petID, idempotencyKey: idempotencyKey() }
     const reused = pending === current
     pendingRequest.current = pending
     if (!reused) {
       dispatch({ type: 'local.submitted', input: value, clientRunID: localRunID() })
     }
     try {
-      const created = await createMutation.mutateAsync({ input: value, key: pending.idempotencyKey })
+      const created = await createMutation.mutateAsync({ input: value, petID: pending.petID, key: pending.idempotencyKey })
       pendingRequest.current = null
       useAskStore.getState().setDraft('')
       return created
@@ -302,17 +350,17 @@ export function useAskSession() {
     }
   }
 
-  async function retryProcess() {
+  function retryConnection() {
     if (!activeSessionId || !activeRunId) {
       return
     }
-    return processMutation.mutateAsync({ sessionID: activeSessionId, runID: activeRunId })
+    dispatch({ type: 'stream.reconnecting' })
+    setConnectionVersion(value => value + 1)
   }
 
   function reset() {
     pendingRequest.current = null
     createMutation.reset()
-    processMutation.reset()
     replyMutation.reset()
     dispatch({ type: 'reset' })
     resetStore()
@@ -328,7 +376,7 @@ export function useAskSession() {
     setDraft,
     submit,
     reply,
-    retryProcess,
+    retryConnection,
     reset,
   }
 }
