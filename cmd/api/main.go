@@ -21,6 +21,7 @@ import (
 	"github.com/balancetheworld/wechat-pet/internal/pkg/config"
 	"github.com/balancetheworld/wechat-pet/internal/pkg/database"
 	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
+	aiplatform "github.com/balancetheworld/wechat-pet/internal/platform/ai"
 	"github.com/balancetheworld/wechat-pet/internal/platform/storage"
 	"github.com/balancetheworld/wechat-pet/internal/platform/wechat"
 	fileservice "github.com/balancetheworld/wechat-pet/internal/service/file"
@@ -129,7 +130,22 @@ func main() {
 		logger.Error("create ask repository", "error", err)
 		os.Exit(1)
 	}
-	askService, err := askapp.NewService(askRepository, petRepository, askapp.DeterministicExecutor{})
+	var askExecutor askapp.Executor = askapp.DeterministicExecutor{}
+	if cfg.AIEnabled {
+		providerConfig := aiplatform.OpenAIConfig{APIKey: cfg.AIAPIKey, BaseURL: cfg.AIBaseURL, Model: cfg.AIModel, Timeout: time.Duration(cfg.AITimeoutSeconds) * time.Second, Observer: func(observation aiplatform.OpenAIObservation) {
+			logger.Info("ask ai provider", "provider", cfg.AIProvider, "operation", observation.Operation, "model", observation.Model, "duration_ms", observation.Duration.Milliseconds(), "input_tokens", observation.InputTokens, "output_tokens", observation.OutputTokens, "total_tokens", observation.TotalTokens, "status", observation.Status, "error_code", observation.ErrorCode, "retryable", observation.Retryable)
+		}}
+		if cfg.AIProvider == "hunyuan" {
+			askExecutor, err = aiplatform.NewHunyuanExecutor(providerConfig)
+		} else {
+			askExecutor, err = aiplatform.NewOpenAIExecutor(providerConfig)
+		}
+		if err != nil {
+			logger.Error("create ask ai executor", "error", err)
+			os.Exit(1)
+		}
+	}
+	askService, err := askapp.NewService(askRepository, petRepository, askExecutor)
 	if err != nil {
 		logger.Error("create ask service", "error", err)
 		os.Exit(1)

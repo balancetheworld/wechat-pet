@@ -1,12 +1,30 @@
-import { Button, Image, Input, ScrollView, Text, View } from '@tarojs/components'
+import type { AskEvent } from '../../types/ask'
+import { Button, Image, Input, Picker, ScrollView, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import askBackground from '../../assets/ai-bg.jpg'
 import catImage from '../../assets/ai-cat.png'
 import AskEventView from '../../components/ask/ask-event'
+import { routes } from '../../constants/routes'
+import { mergeAskDeltaEvents } from '../../hooks/ask-reducer'
 import { useAskSession } from '../../hooks/use-ask-session'
+import { useAuthStore } from '../../stores/auth-store'
+import { usePetStore } from '../../stores/pet-store'
+import { reLaunch } from '../../utils/navigation'
 import './index.scss'
 
+const visibleEventTypes = new Set(['run.progress', 'assistant.delta', 'assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed'])
+
+function visibleTurnEvents(events: AskEvent[]) {
+  const hasTerminalEvent = events.some(event => event.type === 'assistant.completed' || event.type === 'assistant.question' || event.type === 'fact.completed' || event.type === 'family.pets.completed' || event.type === 'run.completed' || event.type === 'risk.escalated' || event.type === 'run.failed')
+  return mergeAskDeltaEvents(events.filter(event => visibleEventTypes.has(event.type) && !(event.type === 'assistant.delta' && hasTerminalEvent)))
+}
+
 export default function Ask() {
+  const token = useAuthStore(state => state.token)
+  const pets = usePetStore(state => state.pets)
+  const currentPetId = usePetStore(state => state.currentPetId)
+  const setCurrentPetId = usePetStore(state => state.setCurrentPetId)
+  const clearCurrentPet = usePetStore(state => state.clearCurrentPet)
   const {
     draft,
     phase,
@@ -17,7 +35,7 @@ export default function Ask() {
     setDraft,
     submit,
     reply,
-    retryProcess,
+    retryConnection,
     reset,
   } = useAskSession()
 
@@ -25,9 +43,14 @@ export default function Ask() {
   const hasError = Boolean(error) && (phase === 'input_error' || phase === 'ambiguous' || phase === 'network_error' || phase === 'failed')
   const hasConversation = conversation.length > 0 || hasError
   const terminal = phase === 'completed' || phase === 'escalated' || phase === 'failed'
-  const visibleEventTypes = new Set(['assistant.question', 'fact.completed', 'run.completed', 'risk.escalated', 'run.failed'])
-
+  const petOptions = ['按问题识别宠物', ...pets.map(pet => pet.name)]
+  const selectedPetIndex = Math.max(0, pets.findIndex(pet => pet.id === currentPetId) + 1)
   async function handleSend() {
+    if (!token) {
+      await Taro.showToast({ title: '请先登录后使用问问', icon: 'none' })
+      await reLaunch(routes.pages.profileOnboarding)
+      return
+    }
     const value = draft.trim()
     if (!value) {
       await Taro.showToast({ title: '请先输入问题', icon: 'none' })
@@ -54,7 +77,18 @@ export default function Ask() {
     setDraft(value)
   }
 
+  function handlePetChange(index: number) {
+    if (index === 0) {
+      clearCurrentPet()
+      return
+    }
+    setCurrentPetId(pets[index - 1].id)
+  }
+
   function errorText() {
+    if (error) {
+      return error
+    }
     if (phase === 'input_error') {
       return '请在问题中写出宠物名称后再试。'
     }
@@ -98,7 +132,7 @@ export default function Ask() {
                       <Text>{turn.input}</Text>
                     </View>
                   )}
-                  {turn.events.filter(event => visibleEventTypes.has(event.type)).map(event => (
+                  {visibleTurnEvents(turn.events).map(event => (
                     <AskEventView event={event} key={`${turn.runID}-${event.sequence}`} />
                   ))}
                 </View>
@@ -112,7 +146,7 @@ export default function Ask() {
                 <View className="ask-error-state">
                   <Text>{errorText()}</Text>
                   {phase === 'network_error' && (run?.status === 'queued' || run?.status === 'running') && (
-                    <Button className="ask-inline-button" onClick={() => void retryProcess()}>重试</Button>
+                    <Button className="ask-inline-button" onClick={retryConnection}>重新连接</Button>
                   )}
                 </View>
               )}
@@ -122,6 +156,19 @@ export default function Ask() {
         )}
       </View>
       <View className="ask-input-bar">
+        {!hasConversation && pets.length > 0 && (
+          <Picker
+            mode="selector"
+            range={petOptions}
+            value={selectedPetIndex}
+            onChange={event => handlePetChange(Number(event.detail.value))}
+          >
+            <View className="ask-pet-picker">
+              <Text>{`询问对象：${petOptions[selectedPetIndex]}`}</Text>
+              <Text aria-hidden>⌄</Text>
+            </View>
+          </Picker>
+        )}
         <View className="ask-bottom-row">
           <Button className="ask-add-img" disabled aria-label="添加图片，暂不可用">＋</Button>
           <Input

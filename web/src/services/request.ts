@@ -49,7 +49,7 @@ async function handleAuthFailure() {
     title: '登录已失效',
     icon: 'none',
   })
-  await Taro.reLaunch({ url: routes.pages.home })
+  await Taro.reLaunch({ url: routes.pages.profileOnboarding })
 }
 
 async function refreshSession() {
@@ -108,9 +108,10 @@ async function requestWithRetry<T>(options: RequestOptions, retried: boolean): P
   }
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw new ApiError(`请求失败，HTTP 状态码：${response.statusCode}`, {
+    throw new ApiError(response.data?.msg || `请求失败，HTTP 状态码：${response.statusCode}`, {
       kind: 'http',
       statusCode: response.statusCode,
+      code: response.data?.code,
       requestId: response.data?.request_id,
     })
   }

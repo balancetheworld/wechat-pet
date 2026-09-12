@@ -12,7 +12,7 @@ import { applyJoinFamily, createFamily } from '../../services/family'
 import { updateProfile, uploadAvatar } from '../../services/user'
 import { useAuthStore } from '../../stores/auth-store'
 import { useFamilyStore } from '../../stores/family-store'
-import { navigateTo, reLaunch } from '../../utils/navigation'
+import { navigateTo, reLaunch, switchTab } from '../../utils/navigation'
 import './profile.scss'
 
 type ChooseAvatarEvent = Parameters<NonNullable<ButtonProps['onChooseAvatar']>>[0]
@@ -238,7 +238,7 @@ export default function ProfileOnboarding() {
   }
 
   function handleSkip() {
-    void reLaunch(routes.pages.home)
+    void switchTab(routes.tabs.calendar)
   }
 
   async function handleJoinFamily() {

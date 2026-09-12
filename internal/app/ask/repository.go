@@ -41,6 +41,7 @@ type Repository interface {
 	CreateTurnRun(context.Context, Turn, Run, Event) error
 	CreateFollowUpTurnRun(context.Context, Session, Turn, Run, Event) error
 	TransitionRun(context.Context, string, int, RunStatus, RunStatus, RiskLevel, string, time.Time, Event, Message) error
+	AppendRunEvent(context.Context, Event) (Event, error)
 	ResumeRun(context.Context, Run, time.Time, Event, Message, IdempotencyRecord) error
 	ListEvents(context.Context, string, string, int) ([]Event, error)
 }
@@ -671,6 +672,24 @@ func (r *SQLRepository) TransitionRun(ctx context.Context, runID string, expecte
 		return err
 	}
 	return tx.Commit()
+}
+
+func (r *SQLRepository) AppendRunEvent(ctx context.Context, value Event) (Event, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Event{}, err
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRowContext(ctx, r.query("SELECT COALESCE(MAX(sequence), 0) + 1 FROM ask_events WHERE run_id = ?"), value.RunID).Scan(&value.Sequence); err != nil {
+		return Event{}, err
+	}
+	if err := r.appendEvent(ctx, tx, value); err != nil {
+		return Event{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Event{}, err
+	}
+	return value, nil
 }
 
 func (r *SQLRepository) ResumeRun(ctx context.Context, run Run, at time.Time, event Event, message Message, idempotency IdempotencyRecord) error {

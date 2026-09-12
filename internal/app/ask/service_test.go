@@ -66,6 +66,24 @@ func (e serviceExecutor) Execute(context.Context, RunInput) (RunDecision, error)
 	return e.decision, nil
 }
 
+type streamingServiceExecutor struct {
+	decision RunDecision
+	deltas   []string
+}
+
+func (e streamingServiceExecutor) Execute(context.Context, RunInput) (RunDecision, error) {
+	return e.decision, nil
+}
+
+func (e streamingServiceExecutor) ExecuteStream(_ context.Context, _ RunInput, emit func(string) error) (RunDecision, error) {
+	for _, delta := range e.deltas {
+		if err := emit(delta); err != nil {
+			return RunDecision{}, err
+		}
+	}
+	return e.decision, nil
+}
+
 type contextExecutor struct {
 	decision RunDecision
 	input    RunInput
@@ -104,6 +122,29 @@ func (e *countingExecutor) Execute(context.Context, RunInput) (RunDecision, erro
 	return RunDecision{Status: RunFailed, EventType: "run.failed", Data: map[string]any{"message": "should not execute"}}, nil
 }
 
+type routingServiceExecutor struct {
+	intent        IntentDecision
+	decision      RunDecision
+	routeCalled   bool
+	executeCalled bool
+}
+
+func (e *routingServiceExecutor) Route(context.Context, IntentInput) (IntentDecision, error) {
+	e.routeCalled = true
+	return e.intent, nil
+}
+
+func (e *routingServiceExecutor) Execute(context.Context, RunInput) (RunDecision, error) {
+	e.executeCalled = true
+	return e.decision, nil
+}
+
+type quotaExecutor struct{}
+
+func (quotaExecutor) Execute(context.Context, RunInput) (RunDecision, error) {
+	return RunDecision{}, NewExecutorError("provider_quota_exhausted", false, 0, errors.New("quota exhausted"))
+}
+
 func (e *contextExecutor) Execute(_ context.Context, input RunInput) (RunDecision, error) {
 	e.input = input
 	return e.decision, nil
@@ -135,18 +176,163 @@ func TestServiceCreateAndProcessRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if processed.Run.Status != RunWaitingInput || processed.Run.RowVersion != 3 || processed.Run.CompletedAt != nil || processed.Session.Status != SessionActive || len(processed.Events) != 3 {
+	if processed.Run.Status != RunWaitingInput || processed.Run.RowVersion != 3 || processed.Run.CompletedAt != nil || processed.Session.Status != SessionActive || len(processed.Events) != 8 {
 		t.Fatalf("processed result = %+v", processed)
 	}
-	if processed.Events[2].Type != "assistant.question" {
-		t.Fatalf("event type = %q", processed.Events[2].Type)
+	if processed.Events[2].Type != "run.progress" || !strings.Contains(processed.Events[2].Data, `"stage":"intent_routing"`) || processed.Events[3].Type != "run.progress" || !strings.Contains(processed.Events[3].Data, `"stage":"input_reviewing"`) || processed.Events[4].Type != "run.progress" || !strings.Contains(processed.Events[4].Data, `"stage":"context_ready"`) || processed.Events[5].Type != "run.progress" || !strings.Contains(processed.Events[5].Data, `"stage":"risk_checking"`) || processed.Events[6].Type != "run.progress" || !strings.Contains(processed.Events[6].Data, `"stage":"response_generating"`) || processed.Events[7].Type != "assistant.question" {
+		t.Fatalf("events = %+v", processed.Events)
 	}
 	repeated, err := service.ProcessRun(context.Background(), "family-1", result.Session.ID, result.Run.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(repeated.Events) != 3 || repeated.Run.Status != RunWaitingInput {
+	if len(repeated.Events) != 8 || repeated.Run.Status != RunWaitingInput {
 		t.Fatalf("repeated result = %+v", repeated)
+	}
+}
+
+func TestServicePersistsAssistantDeltasFromStreamingExecutor(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := streamingServiceExecutor{deltas: []string{"目前需要", "密切观察"}, decision: RunDecision{Status: RunWaitingInput, RiskLevel: RiskUnknown, EventType: "assistant.question", Data: map[string]any{"question": "什么时候开始？"}}}
+	service, err := NewService(repository, servicePetRepository{pet: petapp.Pet{ID: "pet-1", FamilyID: "family-1", Name: "团子"}}, executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "最近没精神", "create-stream")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(processed.Events) != 10 || processed.Events[7].Type != "assistant.delta" || processed.Events[8].Type != "assistant.delta" || processed.Events[9].Type != "assistant.question" {
+		t.Fatalf("events = %+v", processed.Events)
+	}
+}
+
+func TestServiceCompletesSimpleGreetingWithoutExecutor(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &countingExecutor{}
+	service, err := NewService(repository, servicePetRepository{pet: petapp.Pet{ID: "pet-1", FamilyID: "family-1", Name: "团子"}}, executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "你好", "create-greeting")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called || processed.Run.Status != RunCompleted || processed.Events[3].Type != "assistant.completed" || !strings.Contains(processed.Events[3].Data, `"intent":"casual_chat"`) {
+		t.Fatalf("processed = %+v, executor called = %t", processed, executor.called)
+	}
+}
+
+func TestServiceRoutesPetHealthToExecutor(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &routingServiceExecutor{intent: IntentDecision{Intent: IntentPetHealth}, decision: RunDecision{Status: RunWaitingInput, RiskLevel: RiskUnknown, EventType: "assistant.question", Data: map[string]any{"question": "症状从什么时候开始？"}}}
+	service, err := NewService(repository, servicePetRepository{pet: petapp.Pet{ID: "pet-1", FamilyID: "family-1", Name: "团子"}}, executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "团子的状态不太对", "create-health-route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !executor.routeCalled || !executor.executeCalled || processed.Run.Status != RunWaitingInput || processed.Events[7].Type != "assistant.question" {
+		t.Fatalf("processed = %+v, route called = %t, execute called = %t", processed, executor.routeCalled, executor.executeCalled)
+	}
+}
+
+func TestServiceRoutesAmbiguousInputToQuestion(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &routingServiceExecutor{intent: IntentDecision{Intent: IntentAmbiguous, Question: "你想查询宠物记录，还是咨询健康问题？"}}
+	service, err := NewService(repository, servicePetRepository{pet: petapp.Pet{ID: "pet-1", FamilyID: "family-1", Name: "团子"}}, executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "帮我看看", "create-ambiguous-route")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !executor.routeCalled || executor.executeCalled || processed.Run.Status != RunWaitingInput || processed.Events[3].Type != "assistant.question" {
+		t.Fatalf("processed = %+v, route called = %t, execute called = %t", processed, executor.routeCalled, executor.executeCalled)
+	}
+}
+
+func TestServicePersistsQuotaFailureMessage(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pet: petapp.Pet{ID: "pet-1", FamilyID: "family-1", Name: "团子"}}, quotaExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "最近总是没精神", "create-quota")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lastEvent := processed.Events[len(processed.Events)-1]
+	if processed.Run.Status != RunFailed || processed.Run.ErrorCode != "provider_quota_exhausted" || lastEvent.Type != "run.failed" || !strings.Contains(lastEvent.Data, "AI 服务额度暂时不可用") {
+		t.Fatalf("processed = %+v", processed)
 	}
 }
 
@@ -216,14 +402,14 @@ func TestServiceProcessRunCompletesMultiPetFactWithoutExecutor(t *testing.T) {
 	if executor.called {
 		t.Fatal("executor was called for deterministic fact query")
 	}
-	if processed.Run.Status != RunCompleted || processed.Run.RiskLevel != RiskGreen || processed.Events[2].Type != "fact.completed" {
+	if processed.Run.Status != RunCompleted || processed.Run.RiskLevel != RiskGreen || processed.Events[3].Type != "fact.completed" {
 		t.Fatalf("processed = %+v", processed)
 	}
-	if !strings.Contains(processed.Events[2].Data, `"fact_type":"bath"`) || !strings.Contains(processed.Events[2].Data, `"pet_id":"pet-1"`) || !strings.Contains(processed.Events[2].Data, `"pet_id":"pet-2"`) {
-		t.Fatalf("fact event data = %s", processed.Events[2].Data)
+	if !strings.Contains(processed.Events[3].Data, `"fact_type":"bath"`) || !strings.Contains(processed.Events[3].Data, `"pet_id":"pet-1"`) || !strings.Contains(processed.Events[3].Data, `"pet_id":"pet-2"`) {
+		t.Fatalf("fact event data = %s", processed.Events[3].Data)
 	}
-	if !strings.Contains(processed.Events[2].Data, `"found":false`) {
-		t.Fatalf("missing fact was not represented = %s", processed.Events[2].Data)
+	if !strings.Contains(processed.Events[3].Data, `"found":false`) {
+		t.Fatalf("missing fact was not represented = %s", processed.Events[3].Data)
 	}
 }
 
@@ -268,6 +454,80 @@ func TestServiceCreateSessionFromInputPersistsMultiplePets(t *testing.T) {
 	}
 	if strings.Join(values, ",") != "pet-1:旺仔:0,pet-2:球球:1" {
 		t.Fatalf("session pets = %v", values)
+	}
+}
+
+func TestServiceCreateSessionFromInputAllowsSimpleChatWithoutPetName(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &countingExecutor{}
+	service, err := NewService(repository, servicePetRepository{pets: []petapp.Pet{{ID: "pet-1", Name: "旺仔"}, {ID: "pet-2", Name: "球球"}}}, executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, resolution, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "你好", "create-chat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Status != PetResolveResolved || len(created.Session.Pets) != 1 || created.Session.Pets[0].PetID != "pet-1" {
+		t.Fatalf("resolution=%+v session=%+v", resolution, created.Session)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called {
+		t.Fatal("executor was called for simple chat")
+	}
+	if processed.Run.Status != RunCompleted || processed.Events[len(processed.Events)-1].Type != "assistant.completed" {
+		t.Fatalf("processed = %+v", processed)
+	}
+}
+
+func TestServiceListsFamilyPetsWithoutPetName(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	executor := &countingExecutor{}
+	service, err := NewService(repository, servicePetRepository{pets: []petapp.Pet{{ID: "pet-1", Name: "旺仔"}, {ID: "pet-2", Name: "球球"}}}, executor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, resolution, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "你知道我家有哪些宠物吗", "create-family-query")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Status != PetResolveResolved || len(created.Session.Pets) != 1 || created.Session.Pets[0].PetID != "pet-1" {
+		t.Fatalf("resolution=%+v session=%+v", resolution, created.Session)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executor.called {
+		t.Fatal("executor was called for family pet query")
+	}
+	completed := processed.Events[len(processed.Events)-1]
+	if processed.Run.Status != RunCompleted || completed.Type != "family.pets.completed" {
+		t.Fatalf("processed = %+v", processed)
+	}
+	if !strings.Contains(completed.Data, `"pet_id":"pet-1"`) || !strings.Contains(completed.Data, `"pet_name":"旺仔"`) || !strings.Contains(completed.Data, `"pet_id":"pet-2"`) || !strings.Contains(completed.Data, `"pet_name":"球球"`) {
+		t.Fatalf("family pets event data = %s", completed.Data)
 	}
 }
 
@@ -414,11 +674,11 @@ func TestServiceRuleEscalationSkipsExecutor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if processed.Run.Status != RunEscalated || processed.Run.RiskLevel != RiskRed || processed.Events[2].Type != "risk.escalated" {
+	if processed.Run.Status != RunEscalated || processed.Run.RiskLevel != RiskRed || processed.Events[4].Type != "risk.escalated" {
 		t.Fatalf("processed result = %+v", processed)
 	}
-	if strings.Contains(processed.Events[2].Data, "不应执行") {
-		t.Fatalf("executor result was used: %s", processed.Events[2].Data)
+	if strings.Contains(processed.Events[4].Data, "不应执行") {
+		t.Fatalf("executor result was used: %s", processed.Events[4].Data)
 	}
 }
 
@@ -473,6 +733,39 @@ func TestServiceExecutorFailureIsPersistedAsFailed(t *testing.T) {
 	}
 }
 
+func TestServiceRetryableExecutorFailureRemainsRunning(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pet: petapp.Pet{ID: "pet-1"}}, retryableExecutor{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "问题", "create-retryable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID)
+	code, retryable := ExecutorErrorDetails(err)
+	if code != "provider_unavailable" || !retryable {
+		t.Fatalf("error = %v, code = %s, retryable = %t", err, code, retryable)
+	}
+	run, err := repository.GetRun(context.Background(), created.Session.ID, created.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != RunRunning || run.ErrorCode != "" {
+		t.Fatalf("run = %+v", run)
+	}
+}
+
 func TestServiceReplyResumesSameRunAndPersistsMessages(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -500,7 +793,7 @@ func TestServiceReplyResumesSameRunAndPersistsMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replied.Session.TurnCount != 1 || replied.Run.ID != created.Run.ID || replied.Run.TurnID != created.Run.TurnID || replied.Run.Status != RunQueued || replied.Run.RowVersion != 4 || replied.Run.ClarificationCount != 1 || len(replied.Events) != 1 || replied.Events[0].Sequence != 4 {
+	if replied.Session.TurnCount != 1 || replied.Run.ID != created.Run.ID || replied.Run.TurnID != created.Run.TurnID || replied.Run.Status != RunQueued || replied.Run.RowVersion != 4 || replied.Run.ClarificationCount != 1 || len(replied.Events) != 1 || replied.Events[0].Sequence != 9 {
 		t.Fatalf("reply result = %+v", replied)
 	}
 	turn, err := repository.GetTurn(context.Background(), created.Session.ID, created.Run.TurnID)
@@ -538,7 +831,7 @@ func TestServiceReplyResumesSameRunAndPersistsMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if processed.Run.Status != RunEscalated || processed.Run.RiskLevel != RiskRed || processed.Events[5].Type != "risk.escalated" {
+	if processed.Run.Status != RunEscalated || processed.Run.RiskLevel != RiskRed || processed.Events[12].Type != "risk.escalated" {
 		t.Fatalf("resumed red result = %+v", processed)
 	}
 }
@@ -608,4 +901,10 @@ type failingExecutor struct{}
 
 func (failingExecutor) Execute(context.Context, RunInput) (RunDecision, error) {
 	return RunDecision{}, errors.New("provider unavailable")
+}
+
+type retryableExecutor struct{}
+
+func (retryableExecutor) Execute(context.Context, RunInput) (RunDecision, error) {
+	return RunDecision{}, NewExecutorError("provider_unavailable", true, 0, errors.New("unavailable"))
 }

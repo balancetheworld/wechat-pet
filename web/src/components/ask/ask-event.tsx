@@ -1,5 +1,6 @@
-import type { AskAnalysisResult, AskEvent, AskFactResult, AskQuestionResult, AskRiskResult } from '../../types/ask'
+import type { AskAnalysisResult, AskAssistantResult, AskDeltaResult, AskEvent, AskFactResult, AskFailedResult, AskFamilyPetsResult, AskProgressResult, AskQuestionResult, AskRiskResult } from '../../types/ask'
 import { Text, View } from '@tarojs/components'
+import { useEffect, useState } from 'react'
 import './ask-event.scss'
 
 const factLabels: Record<AskFactResult['fact_type'], string> = {
@@ -47,6 +48,21 @@ function FactResult({ data }: { data: AskFactResult }) {
   )
 }
 
+function FamilyPetsResult({ data }: { data: AskFamilyPetsResult }) {
+  return (
+    <View className="ask-result ask-result--family-pets">
+      <Text className="ask-result-title">家里的宠物</Text>
+      <View className="ask-fact-list">
+        {data.pets.map(pet => (
+          <View className="ask-fact-item" key={pet.pet_id}>
+            <Text className="ask-fact-pet">{pet.pet_name}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  )
+}
+
 function AnalysisSection({ title, values }: { title: string, values: string[] }) {
   return (
     <View className="ask-analysis-section">
@@ -69,15 +85,59 @@ function AnalysisResult({ data }: { data: AskAnalysisResult }) {
   )
 }
 
+function ProgressResult({ data }: { data: AskProgressResult }) {
+  return (
+    <View className="ask-progress">
+      <Text className="ask-progress-dot" />
+      <Text>{data.message}</Text>
+    </View>
+  )
+}
+
+function DeltaResult({ data }: { data: AskDeltaResult }) {
+  const characters = Array.from(data.delta)
+  const characterCount = characters.length
+  const [visibleCount, setVisibleCount] = useState(0)
+
+  useEffect(() => {
+    if (visibleCount >= characterCount) {
+      return undefined
+    }
+    const timer = setInterval(() => {
+      setVisibleCount(value => Math.min(value + 1, characterCount))
+    }, 45)
+    return () => clearInterval(timer)
+  }, [characterCount, visibleCount])
+
+  return <Text className="ask-delta">{characters.slice(0, visibleCount).join('')}</Text>
+}
+
 export default function AskEventView({ event }: { event: AskEvent }) {
+  if (event.type === 'run.progress') {
+    return <ProgressResult data={event.data as AskProgressResult} />
+  }
+  if (event.type === 'assistant.delta') {
+    return <DeltaResult data={event.data as AskDeltaResult} />
+  }
   if (event.type === 'fact.completed') {
     return <FactResult data={event.data as AskFactResult} />
+  }
+  if (event.type === 'family.pets.completed') {
+    return <FamilyPetsResult data={event.data as AskFamilyPetsResult} />
   }
   if (event.type === 'assistant.question') {
     const data = event.data as AskQuestionResult
     return (
       <View className="ask-message ask-message--assistant">
         <Text>{data.question}</Text>
+      </View>
+    )
+  }
+  if (event.type === 'assistant.completed') {
+    const data = event.data as AskAssistantResult
+    return (
+      <View className="ask-message ask-message--assistant">
+        <DeltaResult data={{ delta: data.answer }} />
       </View>
     )
   }
@@ -95,10 +155,11 @@ export default function AskEventView({ event }: { event: AskEvent }) {
     return <AnalysisResult data={event.data as AskAnalysisResult} />
   }
   if (event.type === 'run.failed') {
+    const data = event.data as AskFailedResult
     return (
       <View className="ask-result ask-result--failed">
         <Text className="ask-result-title">这次没有完成</Text>
-        <Text>当前暂时无法完成分析，请稍后重试。</Text>
+        <Text>{data.message || '当前暂时无法完成分析，请稍后重试。'}</Text>
       </View>
     )
   }
