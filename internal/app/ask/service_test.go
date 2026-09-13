@@ -50,7 +50,7 @@ func (servicePetRepository) Create(context.Context, string, string, string) (pet
 	return petapp.Pet{}, errors.New("not implemented")
 }
 
-func (servicePetRepository) Update(context.Context, string, string, string, string) (petapp.Pet, error) {
+func (servicePetRepository) Update(context.Context, string, string, string, petapp.UpdatePetRequest) (petapp.Pet, error) {
 	return petapp.Pet{}, errors.New("not implemented")
 }
 
