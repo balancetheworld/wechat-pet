@@ -18,8 +18,19 @@ export interface PetProfile extends Pet {
 
 export interface CreatePetRequest {
   name: string
+  avatar_asset_id?: string
+  breed?: string
+  gender?: string
+  sterilized?: boolean
+  birthday?: string
+  home_date?: string
 }
 
 export interface UpdatePetRequest {
   name: string
+  breed: string
+  gender: string
+  sterilized: boolean
+  birthday: string
+  home_date: string
 }

@@ -200,9 +200,10 @@ async function uploadFileWithRetry<T>(options: UploadOptions, retried: boolean):
   }
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    throw new ApiError(`上传失败，HTTP 状态码：${response.statusCode}`, {
+    throw new ApiError(parsed.msg || `上传失败，HTTP 状态码：${response.statusCode}`, {
       kind: 'http',
       statusCode: response.statusCode,
+      code: parsed.code,
       requestId: parsed.request_id,
     })
   }

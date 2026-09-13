@@ -1,7 +1,7 @@
 import type { ButtonProps } from '@tarojs/components'
 import { Button, Image, Input, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import bg1Image from '../../assets/bg1.jpg'
 import cat2Image from '../../assets/cat2.png'
 import catImage from '../../assets/cat.png'
@@ -55,6 +55,11 @@ export default function ProfileOnboarding() {
     setAuthDisabled(true)
     try {
       const session = await silentLogin()
+      /* 已有家庭的老用户直接进入主界面, 跳过头像和选家庭步骤 */
+      if (session.family && session.identity !== 'guest') {
+        await reLaunch(routes.tabs.calendar)
+        return
+      }
       setNickname(value => value || session.user.nickname)
       setLoginCompleted(true)
       void playLoginSuccessFlow()
@@ -120,6 +125,25 @@ export default function ProfileOnboarding() {
   useEffect(() => {
     void typeText('你好呀')
   }, [typeText])
+
+  /* 冷启动时若本地已有登录态, 静默续登并直接进入主界面 */
+  useEffect(() => {
+    async function resumeSession() {
+      if (!useAuthStore.getState().token) {
+        return
+      }
+      try {
+        const session = await silentLogin()
+        if (session.family && session.identity !== 'guest') {
+          await reLaunch(routes.tabs.calendar)
+        }
+      }
+      catch {
+        /* 静默续登失败(登录过期等), 留在本页走正常登录流程 */
+      }
+    }
+    void resumeSession()
+  }, [])
 
   useEffect(() => {
     if (!loginCompleted || !avatarPath || avatarAssetID || uploading) {

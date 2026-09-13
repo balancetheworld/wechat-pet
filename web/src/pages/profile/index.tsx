@@ -1,11 +1,12 @@
 import type { CommonEvent, ITouchEvent } from '@tarojs/components/types/common'
 import type { CSSProperties } from 'react'
 import type { Pet, PetProfile } from '../../types/pet'
-import { Button, Image, Picker, ScrollView, Slider, Text, Textarea, View } from '@tarojs/components'
-import Taro from '@tarojs/taro'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { Button, Image, Input, Picker, ScrollView, Slider, Text, Textarea, View } from '@tarojs/components'
+import Taro, { useDidShow } from '@tarojs/taro'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import backgroundImage from '../../assets/background1.jpg'
 import bookPaperImage from '../../assets/book-page-bg.jpg'
+import catPhoto from '../../assets/cat2.png'
 import passportImage from '../../assets/passport.jpg'
 import { routes } from '../../constants/routes'
 import { createCalendarRecord } from '../../services/calendar'
@@ -171,7 +172,8 @@ interface BookPage {
 }
 
 function formatDate(value?: string) {
-  return value || '暂无记录'
+  /* 只保留 YYYY-MM-DD, 兼容后端可能返回的 2023-04-12T00:00:00Z 形式 */
+  return value ? value.slice(0, 10) : '暂无记录'
 }
 
 function formatGender(value: string) {
@@ -206,13 +208,19 @@ export default function Profile() {
   /* 目录弹层 */
   const [tocOpen, setTocOpen] = useState(false)
   /* 详情弹层 */
-  const [detail, setDetail] = useState<{ title: string, subtitle: string, body: string, bodyKey?: string, onSave?: (newBody: string) => void } | null>(null)
+  /* 详情弹层 (editableTitle=true 时标题以输入框呈现, 可修改提问; subtitle 仅存不再展示) */
+  const [detail, setDetail] = useState<{ title: string, subtitle: string, body: string, bodyKey?: string, onSave?: (newBody: string, newTitle?: string) => void, editableTitle?: boolean } | null>(null)
   /* detail 弹层编辑缓冲 */
   const [detailDraft, setDetailDraft] = useState('')
+  const [detailTitleDraft, setDetailTitleDraft] = useState('')
   /* 宠物切换弹层 */
   const [switcherOpen, setSwitcherOpen] = useState(false)
   /* 档案页内联编辑状态：null=正常, 其它=对应章节进入"页面内可编辑"模式 */
   const [editingChapter, setEditingChapter] = useState<ChapterKey | null>(null)
+  /* 右上角"修改"按钮滑入/滑出动画: mounted 控制是否渲染(退场动画播完再卸载),
+     phase 驱动动画类: enter=右侧屏外待命 → in=纯滑动滑入; out=向右滑出 */
+  const [editBtnMounted, setEditBtnMounted] = useState(false)
+  const [editBtnPhase, setEditBtnPhase] = useState<'enter' | 'in' | 'out'>('enter')
   /* ===== 成长足迹添加事件 (沿用 calendar 的 cal-* 弹层 + createCalendarRecord; 仅日常) ===== */
   const [growthFormVisible, setGrowthFormVisible] = useState(false)
   const [growthFormContent, setGrowthFormContent] = useState('')
@@ -270,8 +278,11 @@ export default function Profile() {
     }
   }, [pageCount, currentPage])
 
-  const loadProfile = useCallback(async (pet: Pet) => {
-    setLoading(true)
+  const loadProfile = useCallback(async (pet: Pet, silent = false) => {
+    /* silent: 从表单返回等场景的无感刷新, 不闪 loading 遮罩 */
+    if (!silent) {
+      setLoading(true)
+    }
     try {
       const petProfile = await getPetProfile(pet.id)
       const [personalityItems, questionItems, records, weightItems, eventItems] = await Promise.all([
@@ -337,6 +348,21 @@ export default function Profile() {
 
     void load()
   }, [loadProfile, selectedPet, setPets])
+
+  /* 从宠物表单保存返回时刷新档案: useDidShow 在每次页面显示(含 navigateBack)时触发;
+     首次显示跳过, 由上方 useEffect 负责初始加载, 避免重复请求 */
+  const hasShownOnceRef = useRef(false)
+  useDidShow(() => {
+    if (!hasShownOnceRef.current) {
+      hasShownOnceRef.current = true
+      return
+    }
+    if (selectedPet) {
+      void loadProfile(selectedPet, true)
+      /* 宠物名/列表也可能被表单改过, 一并刷新(失败不影响档案) */
+      getPets().then(setPets).catch(() => {})
+    }
+  })
 
   const goToPage = useCallback((page: number) => {
     /* 翻页/跳页时若有章节处于编辑态, 自动结束编辑(按钮恢复"修改"), 避免编辑态串页 */
@@ -414,7 +440,7 @@ export default function Profile() {
     }, 400)
   }, [currentPage, goToPage, pageCount, touchStartX])
 
-  const openDetail = (title: string, subtitle: string, body: string, onSave?: (newBody: string) => void) => {
+  const openDetail = (title: string, subtitle: string, body: string, onSave?: (newBody: string, newTitle?: string) => void, editableTitle?: boolean) => {
     /* 编辑章节下若调用方未传 onSave, 自动提供一个本地保存提示 */
     let effectiveOnSave = onSave
     if (editingChapter && !onSave) {
@@ -422,8 +448,9 @@ export default function Profile() {
         Taro.showToast({ title: `已保存"${title}"的新内容到本地`, icon: 'success' })
       }
     }
-    setDetail({ title, subtitle, body, onSave: effectiveOnSave })
+    setDetail({ title, subtitle, body, onSave: effectiveOnSave, editableTitle })
     setDetailDraft(body)
+    setDetailTitleDraft(title)
   }
 
   /* 个性说明书: 添加标签 — 直接复用与"修改"标签相同的详情卡(填写→保存) */
@@ -578,8 +605,30 @@ export default function Profile() {
     />
   )
 
-  /* ===== 章节: 身份名片 ===== */
-  const renderProfilePage = () => (
+  /* ===== 章节: 身份名片 (人设卡排版: 左上照片 + 右上简洁信息 + 下方详细介绍) ===== */
+  const renderProfilePage = () => {
+    const petName = profile?.name || selectedPet?.name || '宠'
+    /* 详细介绍: 由档案字段自动生成一句话简介 */
+    const bioParts: string[] = []
+    if (profile?.breed) {
+      bioParts.push(`是一只${profile.breed}`)
+    }
+    if (profile?.gender) {
+      bioParts.push(`性别${formatGender(profile.gender)}`)
+    }
+    if (profile?.birthday) {
+      bioParts.push(`${formatDate(profile.birthday)} 出生，现在 ${profile.age} 岁`)
+    }
+    if (profile?.home_date) {
+      bioParts.push(`${formatDate(profile.home_date)} 来到家里，已陪伴我们 ${profile.companion_days} 天`)
+    }
+    if (profile?.birthday && profile.next_birthday_days !== undefined) {
+      bioParts.push(`下一次生日还有 ${profile.next_birthday_days} 天`)
+    }
+    const bioText = bioParts.length > 0
+      ? `${petName} ${bioParts.join('，')}。`
+      : '资料还空空的，点击右上角「修改」补充它的品种、生日和到家日期，这里会自动生成它的专属简介。'
+    return (
     <View className="page content-page" style={PAGE_PAPER_STYLE}>
       <View className="page-body">
         <View className="page-head">
@@ -590,54 +639,62 @@ export default function Profile() {
           <View className="page-head-divider" />
         </View>
         <View className="identity-hero">
-          <Button className="identity-photo" onClick={() => openDetail('头像', '点击上传新头像', '在这里可以上传或更换宠物的头像照片，作为这本档案的封面留念。')}>
-            {profile?.name?.slice(0, 1) || '宠'}
-          </Button>
+          <View className="identity-photo" onClick={() => openDetail('头像', '点击上传新头像', '在这里可以上传或更换宠物的头像照片，作为这本档案的封面留念。')}>
+            <Text className="identity-photo-char">{petName.slice(0, 1)}</Text>
+          </View>
           <View className="identity-meta">
-            <Text className="identity-name">{profile?.name || selectedPet?.name || '宠'}</Text>
-            <Text className="identity-type">
-              {profile?.breed || '品种待补充'}
-              {' '}
-              ·
-              {' '}
-              {formatGender(profile?.gender || '')}
-            </Text>
+            <Text className="identity-about">About.</Text>
+            <View className="identity-meta-divider" />
+            <View className="identity-fact">
+              <Text className="identity-fact-key">年龄</Text>
+              <Text className="identity-fact-val">{profile?.birthday ? `${profile.age} 岁` : '待补充'}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">性别</Text>
+              <Text className="identity-fact-val">{formatGender(profile?.gender || '')}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">品种</Text>
+              <Text className="identity-fact-val">{profile?.breed || '待补充'}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">出生</Text>
+              <Text className="identity-fact-val">{formatDate(profile?.birthday)}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">到家</Text>
+              <Text className="identity-fact-val">{formatDate(profile?.home_date)}</Text>
+            </View>
+            <View className="identity-swatches">
+              <View className="identity-swatch" style={{ background: '#5B84BE' }} />
+              <View className="identity-swatch" style={{ background: '#7FA5D6' }} />
+              <View className="identity-swatch" style={{ background: '#A9C4E4' }} />
+              <View className="identity-swatch" style={{ background: '#CFDEF0' }} />
+              <View className="identity-swatch" style={{ background: '#EDE5D8' }} />
+            </View>
           </View>
         </View>
-        <View className="stat-row">
-          <View className="stat">
-            <Text className="strong">{profile?.birthday ? `${profile.age}` : '—'}</Text>
-            <Text className="span">当前年龄（岁）</Text>
+        <View className="identity-bio">
+          <View className="identity-bio-head">
+            <Text className="identity-bio-name">{petName}</Text>
+            <View className="identity-bio-title">
+              <Text className="identity-bio-zh">简介</Text>
+              <Text className="identity-bio-en">Info.</Text>
+            </View>
           </View>
-          <View className="stat">
-            <Text className="strong">{profile?.home_date ? `${profile.companion_days.toLocaleString()}` : '—'}</Text>
-            <Text className="span">陪伴天数</Text>
-          </View>
-          <View className="stat">
-            <Text className="strong">{profile?.next_birthday_days === undefined ? '—' : `${profile.next_birthday_days}`}</Text>
-            <Text className="span">下次生日（天）</Text>
-          </View>
+          <Text className="identity-bio-text">{bioText}</Text>
         </View>
-        <View className="info-list">
-          <View className="info-row info-static">
-            <Text className="span">出生信息</Text>
-            <Text className="strong">{formatDate(profile?.birthday)}</Text>
-          </View>
-          <View className="info-row info-static">
-            <Text className="span">到家日期</Text>
-            <Text className="strong">{formatDate(profile?.home_date)}</Text>
-          </View>
-          <Button className="info-row" onClick={() => openDetail('身份与证件', '已收纳 2 项', '在这里集中管理宠物的疫苗本、芯片号、繁育证明等证件信息，仅家庭成员可见。')}>
-            <Text className="span">身份与证件</Text>
-            <Text className="strong">已收纳 2 项</Text>
-          </Button>
-        </View>
+        <Button className="info-row" onClick={() => openDetail('身份与证件', '已收纳 2 项', '在这里集中管理宠物的疫苗本、芯片号、繁育证明等证件信息，仅家庭成员可见。')}>
+          <Text className="span">身份与证件</Text>
+          <Text className="strong">已收纳 2 项</Text>
+        </Button>
         {editingChapter === 'identity' && (
           <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '编辑身份信息: 后续版本支持', icon: 'none' })}>＋ 编辑身份信息</View>
         )}
       </View>
     </View>
-  )
+    )
+  }
 
   /* ===== 章节: 个性说明书（每页 3 条问答，超出自动开新页） ===== */
   const renderPersonalityPage = (part: number) => {
@@ -722,7 +779,27 @@ export default function Profile() {
               <Button
                 key={q.id}
                 className="manual-item detail-trigger"
-                onClick={() => openDetail(q.question, q.answer || '暂无回答', q.answer || '可以点击编辑补充更多关于它的描述。')}
+                onClick={() => {
+                  if (editingChapter === 'personality') {
+                    /* 编辑态: 标题(提问)与内容(回答)均可修改, 标题为空时保留原提问 */
+                    openDetail(
+                      q.question,
+                      '',
+                      q.answer || '',
+                      (newBody: string, newTitle?: string) => {
+                        const nextTitle = (newTitle ?? '').trim() || q.question
+                        setQuestions(previous => previous.map(item => (
+                          item.id === q.id ? { ...item, question: nextTitle, answer: newBody.trim() } : item
+                        )))
+                        Taro.showToast({ title: '已保存修改', icon: 'success' })
+                      },
+                      true,
+                    )
+                  }
+                  else {
+                    openDetail(q.question, q.answer || '暂无回答', q.answer || '可以点击编辑补充更多关于它的描述。')
+                  }
+                }}
               >
                 <Text className="manual-index">{String(start + i + 1).padStart(2, '0')}</Text>
                 <View className="manual-item-body">
@@ -761,40 +838,40 @@ export default function Profile() {
             <Text className="span health-lead-tip">仅家庭可见</Text>
           </View>
           <View className="health-grid">
-            <Button
-              className="health-item detail-trigger"
+            <View
+              className="health-item health-tone-1 detail-trigger"
               onClick={() => openDetail('过敏信息', profile?.breed ? `${profile.breed} 品种` : '暂无记录', '过敏信息由家庭成员补充。常见包括食物、环境与药物，记录后会显示在这里。')}
             >
               <Text className="health-label">过敏信息</Text>
               <Text className="health-value">{profile ? '待补充' : '—'}</Text>
-              <Text className="health-note">点击查看详情</Text>
-            </Button>
-            <Button
-              className="health-item detail-trigger"
+
+            </View>
+            <View
+              className="health-item health-tone-2 detail-trigger"
               onClick={() => openDetail('既往疾病', '暂无记录', '在这里汇总既往病史、检查报告与治疗过程，方便家庭医生快速了解情况。')}
             >
               <Text className="health-label">既往疾病</Text>
               <Text className="health-value">暂无</Text>
-              <Text className="health-note">点击查看详情</Text>
-            </Button>
-            <Button
-              className="health-item detail-trigger"
+
+            </View>
+            <View
+              className="health-item health-tone-3 detail-trigger"
               onClick={() => openDetail('长期用药', '目前无用药', '本模块只保存档案，不提供药物剂量建议；具体用药请遵医嘱。')}
             >
               <Text className="health-label">长期用药</Text>
               <Text className="health-value">无</Text>
-              <Text className="health-note">点击查看详情</Text>
-            </Button>
-            <Button
-              className="health-item detail-trigger"
+
+            </View>
+            <View
+              className="health-item health-tone-4 detail-trigger"
               onClick={() => openDetail('最近疫苗', '待补充', '记录最近一次疫苗的种类、接种时间与医院，凭证仅家庭成员可见。')}
             >
               <Text className="health-label">最近疫苗</Text>
               <Text className="health-value">—</Text>
-              <Text className="health-note">点击查看详情</Text>
-            </Button>
+
+            </View>
           </View>
-          <Text className="updated">档案由家庭成员维护</Text>
+          <Text className="updated">点击查看详情</Text>
           {editingChapter === 'health' && (
             <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '添加健康记录: 后续版本支持', icon: 'none' })}>＋ 添加健康记录</View>
           )}
@@ -833,6 +910,7 @@ export default function Profile() {
                 <View className="birthday-feature" key={r.id} onClick={open}>
                   <View className="media-placeholder">📷</View>
                   <View className="birthday-copy">
+                    <Image className="birthday-copy-bg" src={catPhoto} mode="aspectFill" />
                     <Text className="span">
 {r.year}
 {' '}
@@ -1024,6 +1102,22 @@ kg
   const chapterStartPage = (key: ChapterKey) => pages.findIndex(p => p.chapter === key)
   const currentPageInfo = pages[currentPage] || pages[0]
 
+  /* 右上角"修改"按钮: 出现时从屏幕右侧滑入, 消失时向右滑出(封面/封底不显示)。
+     章节在非封面/封底页之间切换时 active 保持 true, 按钮不重复播动画 */
+  const editBtnActive = Boolean(currentPageInfo) && currentPageInfo.chapter !== 'cover' && currentPageInfo.chapter !== 'back'
+  useEffect(() => {
+    if (editBtnActive) {
+      setEditBtnMounted(true)
+      setEditBtnPhase('enter')
+      /* 下一拍再切入 in, 确保初始 enter 态(屏外)先完成样式提交, 动画才能从右侧起跑 */
+      const timer = setTimeout(() => setEditBtnPhase('in'), 30)
+      return () => clearTimeout(timer)
+    }
+    setEditBtnPhase('out')
+    const timer = setTimeout(() => setEditBtnMounted(false), 320)
+    return () => clearTimeout(timer)
+  }, [editBtnActive])
+
   return (
     <View className="archive-page">
       <Image className="archive-background" src={backgroundImage} mode="aspectFill" />
@@ -1040,10 +1134,10 @@ kg
         <Text className="pet-switcher-caret">▾</Text>
       </Button>
 
-      {/* 右上角档案外编辑入口：作用于当前所在章节（封面/封底不显示） */}
-      {currentPageInfo && currentPageInfo.chapter !== 'cover' && currentPageInfo.chapter !== 'back' && (
+      {/* 右上角档案外编辑入口：作用于当前所在章节（封面/封底不显示; 带右侧滑入/滑出动画） */}
+      {editBtnMounted && currentPageInfo && (
         <View
-          className={`page-edit-button${editingChapter === currentPageInfo.chapter ? ' editing' : ''}`}
+          className={`page-edit-button edit-btn-${editBtnPhase}${editingChapter === currentPageInfo.chapter ? ' editing' : ''}`}
           onClick={() => handleEditPage(currentPageInfo.chapter)}
         >
           <Text className="page-edit-icon">{editingChapter === currentPageInfo.chapter ? '√' : '✎'}</Text>
@@ -1051,7 +1145,7 @@ kg
         </View>
       )}
 
-      <View className="book-container" style={{ aspectRatio: BOOK_RATIO }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
+      <View className={`book-container${currentPage === 0 ? ' is-cover' : ''}`} style={{ aspectRatio: BOOK_RATIO }} onTouchStart={handleTouchStart} onTouchMove={handleTouchMove} onTouchEnd={handleTouchEnd}>
         {adjacentPage !== null && (
           <View
             className={`book-card book-card-adjacent${flippingPrevious ? ' is-flipping' : ''}${isDragging ? ' dragging' : ''}`}
@@ -1156,25 +1250,36 @@ kg
         </View>
       </View>
 
-      {/* 详情弹层 (支持编辑模式: 当 openDetail 传入 onSave 时, 自动切换为可编辑 Textarea) */}
+      {/* 详情弹层 (支持编辑模式: 当 openDetail 传入 onSave 时, 自动切换为可编辑 Textarea;
+          editableTitle=true 时标题变为可编辑输入框, subtitle 灰色小字已按需求移除) */}
       <View
         className={`overlay${detail ? ' open' : ''}`}
         onClick={() => {
           setDetail(null)
           setDetailDraft('')
+          setDetailTitleDraft('')
         }}
       >
         <View className="detail-card" onClick={event => event.stopPropagation()}>
           <View className="detail-card-head">
             <View className="detail-card-head-main">
-              <Text className="h2">{detail?.title || '详情'}</Text>
-              {!!detail?.subtitle && <Text className="p">{detail.subtitle}</Text>}
+              {detail?.editableTitle && detail?.onSave
+                ? (
+                  <Input
+                    className="detail-title-input"
+                    value={detailTitleDraft}
+                    maxlength={30}
+                    onInput={event => setDetailTitleDraft(event.detail.value)}
+                  />
+                )
+                : <Text className="h2">{detail?.title || '详情'}</Text>}
             </View>
             <Button
               className="close-button"
               onClick={() => {
                 setDetail(null)
                 setDetailDraft('')
+                setDetailTitleDraft('')
               }}
             >
               ×
@@ -1207,9 +1312,10 @@ kg
               <Button
                 className="primary-button"
                 onClick={() => {
-                  detail.onSave?.(detailDraft)
+                  detail.onSave?.(detailDraft, detailTitleDraft)
                   setDetail(null)
                   setDetailDraft('')
+                  setDetailTitleDraft('')
                 }}
               >
                 保存

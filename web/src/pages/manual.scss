@@ -6,7 +6,8 @@
 .page-progress {
   position: fixed;
   z-index: 10;
-  bottom: 220rpx;
+  /* 150 → 195rpx: 用户反馈离底部导航栏太近, 上移一点点 */
+  bottom: 195rpx;
   left: 50%;
   display: flex;
   align-items: center;

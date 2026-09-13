@@ -87,6 +87,18 @@ func (s *Service) Resource(ctx context.Context, familyID, userID, petID, resourc
 	return v, nil
 }
 
+/* normalizeDate 把数据库 date 列可能带出的时刻部分 (如 2023-04-12T00:00:00Z) 统一为 YYYY-MM-DD */
+func normalizeDate(value string) *string {
+	layouts := []string{"2006-01-02", time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05"}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			normalized := t.Format("2006-01-02")
+			return &normalized
+		}
+	}
+	return &value
+}
+
 func (r *SQLRepository) GetProfile(ctx context.Context, familyID, petID string) (PetProfile, error) {
 	var p PetProfile
 	var birthday, home sql.NullString
@@ -95,10 +107,10 @@ func (r *SQLRepository) GetProfile(ctx context.Context, familyID, petID string) 
 		return p, err
 	}
 	if birthday.Valid {
-		p.Birthday = &birthday.String
+		p.Birthday = normalizeDate(birthday.String)
 	}
 	if home.Valid {
-		p.HomeDate = &home.String
+		p.HomeDate = normalizeDate(home.String)
 	}
 	now := time.Now()
 	if p.Birthday != nil {
