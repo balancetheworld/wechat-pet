@@ -66,6 +66,21 @@ func (s *Service) Create(ctx context.Context, familyID string, userID string, re
 	if err != nil {
 		return PetDTO{}, appErrors.Internal(err)
 	}
+	/* 创建时若带档案字段, 立即补一次全量更新 (与 Update 共用 SQL 路径) */
+	if request.Breed != "" || request.Gender != "" || request.Birthday != "" || request.HomeDate != "" {
+		full := UpdatePetRequest{
+			Name:       name,
+			Breed:      request.Breed,
+			Gender:     request.Gender,
+			Sterilized: request.Sterilized,
+			Birthday:   request.Birthday,
+			HomeDate:   request.HomeDate,
+		}
+		full.Gender = normalizeGender(full.Gender)
+		if _, err := s.repository.Update(ctx, familyID, value.ID, userID, full); err != nil {
+			return PetDTO{}, appErrors.Internal(err)
+		}
+	}
 	if request.AvatarAssetID != "" {
 		if creator, ok := s.repository.(interface {
 			SetAvatar(context.Context, string, string, string) error
@@ -82,15 +97,26 @@ func (s *Service) Update(ctx context.Context, familyID string, petID string, use
 	if strings.TrimSpace(petID) == "" {
 		return PetDTO{}, appErrors.InvalidParam("宠物 ID 不能为空")
 	}
-	name, err := validateName(request.Name)
-	if err != nil {
+	if _, err := validateName(request.Name); err != nil {
 		return PetDTO{}, err
 	}
-	value, err := s.repository.Update(ctx, familyID, petID, userID, name)
+	/* gender 归一: 空值视为 unknown, 仅接受三个合法值 */
+	request.Gender = normalizeGender(request.Gender)
+	request.Breed = strings.TrimSpace(request.Breed)
+	value, err := s.repository.Update(ctx, familyID, petID, userID, request)
 	if err != nil {
 		return PetDTO{}, mapError(err)
 	}
 	return toDTO(value), nil
+}
+
+func normalizeGender(value string) string {
+	switch strings.TrimSpace(value) {
+	case "male", "female":
+		return strings.TrimSpace(value)
+	default:
+		return "unknown"
+	}
 }
 
 func (s *Service) authorizeAsset(ctx context.Context, assetID, familyID string) error {

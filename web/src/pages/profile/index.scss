@@ -60,6 +60,11 @@
   pointer-events: none;
 }
 
+/* 封面页: 左侧书签条不显示 (封面自身有完整封面图, 不需要书脊条) */
+.book-container.is-cover::before {
+  display: none;
+}
+
 .book-card {
   position: absolute;
   top: 0;
@@ -115,6 +120,33 @@
 
 .page-edit-button:active {
   background: rgba(127, 165, 214, 0.78);
+}
+
+/* --- 右上角"修改"按钮滑入/滑出动画 --- */
+/* enter: 屏外右侧待命(等待下一拍切入 in, 保证动画从右侧起跑) */
+.page-edit-button.edit-btn-enter {
+  opacity: 0;
+  transform: translateX(180rpx);
+}
+
+/* in: 从右匀减速滑入落位 (纯滑动, 无回弹) */
+.page-edit-button.edit-btn-in {
+  animation: page-edit-slide-in 0.4s cubic-bezier(0.25, 0.6, 0.3, 1) both;
+}
+
+/* out: 原位向右滑出屏外, 320ms 后由 JS 卸载节点 */
+.page-edit-button.edit-btn-out {
+  animation: page-edit-slide-out 0.3s cubic-bezier(0.55, 0, 0.85, 0.5) both;
+}
+
+@keyframes page-edit-slide-in {
+  0% { opacity: 0; transform: translateX(180rpx); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes page-edit-slide-out {
+  0% { opacity: 1; transform: translateX(0); }
+  100% { opacity: 0; transform: translateX(180rpx); }
 }
 
 .page-edit-icon {
@@ -649,6 +681,22 @@
   background: rgba(255, 255, 255, 0.85);
 }
 
+/* 详情卡标题输入框: 编辑提问时呈现 (参考弹窗卡片: 白底 + 下划线) */
+.detail-title-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10rpx 4rpx;
+  min-height: 56rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  line-height: 1.5;
+  color: #2A2520;
+  background: rgba(255, 255, 255, 0.92);
+  border: none;
+  border-bottom: 2rpx solid #7FA5D6;
+  border-radius: 0;
+}
+
 .detail-card-actions {
   display: flex;
   gap: 16rpx;
@@ -760,9 +808,10 @@
 .health-lead .strong { color: #2A2520; font-size: 28rpx; font-weight: 600; }
 .health-lead-tip { color: #8A8278; font-size: 20rpx; }
 
+/* 两列网格: 用 CSS Grid 等分, 不依赖 calc/flex-wrap, 基础库兼容性最好 */
 .health-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
   gap: 18rpx;
   margin-bottom: 18rpx;
 }
@@ -774,7 +823,7 @@
   justify-content: center;
   gap: 10rpx;
   box-sizing: border-box;
-  width: calc(50% - 9rpx);
+  min-width: 0;
   min-height: 280rpx;
   padding: 24rpx;
   border: 1rpx solid rgba(255, 255, 255, 0.55);

@@ -29,7 +29,7 @@ type Repository interface {
 	List(ctx context.Context, familyID string) ([]Pet, error)
 	Get(ctx context.Context, familyID string, petID string) (Pet, error)
 	Create(ctx context.Context, familyID string, userID string, name string) (Pet, error)
-	Update(ctx context.Context, familyID string, petID string, userID string, name string) (Pet, error)
+	Update(ctx context.Context, familyID string, petID string, userID string, request UpdatePetRequest) (Pet, error)
 	Delete(ctx context.Context, familyID string, petID string, userID string) error
 }
 
@@ -78,8 +78,11 @@ func (r *SQLRepository) Create(ctx context.Context, familyID string, userID stri
 	return r.Get(ctx, familyID, id)
 }
 
-func (r *SQLRepository) Update(ctx context.Context, familyID string, petID string, userID string, name string) (Pet, error) {
-	result, err := r.db.ExecContext(ctx, r.query("UPDATE pets SET name = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), name, userID, petID, familyID)
+func (r *SQLRepository) Update(ctx context.Context, familyID string, petID string, userID string, request UpdatePetRequest) (Pet, error) {
+	/* 日期为空字符串时写 NULL (数据库列为可空 DATE), 否则原样传入由 PG 解析 YYYY-MM-DD */
+	birthday := nullableDate(request.Birthday)
+	homeDate := nullableDate(request.HomeDate)
+	result, err := r.db.ExecContext(ctx, r.query("UPDATE pets SET name = ?, breed = ?, gender = ?, sterilized = ?, birthday = ?, home_date = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), request.Name, request.Breed, request.Gender, request.Sterilized, birthday, homeDate, userID, petID, familyID)
 	if err != nil {
 		return Pet{}, err
 	}
@@ -91,6 +94,15 @@ func (r *SQLRepository) Update(ctx context.Context, familyID string, petID strin
 		return Pet{}, ErrNotFound
 	}
 	return r.Get(ctx, familyID, petID)
+}
+
+/* nullableDate: 空串/空白 → nil (SQL NULL), 否则返回去除空白后的字符串 */
+func nullableDate(value string) any {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return nil
+	}
+	return trimmed
 }
 
 func (r *SQLRepository) Delete(ctx context.Context, familyID string, petID string, userID string) error {

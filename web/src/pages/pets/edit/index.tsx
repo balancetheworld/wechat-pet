@@ -195,10 +195,26 @@ export default function PetEdit() {
       }
 
       if (petID) {
-        await updatePet(petID, { name: value })
+        /* 全量字段提交: 后端 UPDATE 已支持 breed/gender/sterilized/birthday/home_date
+           (日期空字符串由后端转 NULL); 本地缓存仅作为头像/健康状态等未持久化字段的兜底 */
+        await updatePet(petID, {
+          name: value,
+          breed: breedValue,
+          gender: formGender,
+          sterilized: formNeutered === 'yes',
+          birthday: formBirth,
+          home_date: formArrival,
+        })
       }
       else {
-        await createPet({ name: value })
+        await createPet({
+          name: value,
+          breed: breedValue,
+          gender: formGender,
+          sterilized: formNeutered === 'yes',
+          birthday: formBirth,
+          home_date: formArrival,
+        })
       }
       await Taro.showToast({ title: isEdit ? '已保存' : '已添加到家庭', icon: 'success' })
       await navigateBack()
