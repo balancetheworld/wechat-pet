@@ -61,6 +61,7 @@ export interface AskFamilyPetItem {
 }
 
 export interface AskFamilyPetsResult {
+  count: number
   pets: AskFamilyPetItem[]
 }
 
@@ -88,11 +89,12 @@ export interface AskAnalysisResult {
 }
 
 export interface AskFailedResult {
+  error_code: string
   message: string
 }
 
 export interface AskProgressResult {
-  stage: 'intent_routing' | 'input_reviewing' | 'context_ready' | 'risk_checking' | 'response_generating'
+  stage: 'intent_routing' | 'intent_completed' | 'input_reviewing' | 'context_ready' | 'risk_checking' | 'response_generating'
   message: string
 }
 

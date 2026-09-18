@@ -22,18 +22,14 @@ const (
 	DefaultKnowledgeVersion   = "ask-knowledge-v1"
 	MaxInputLength            = 4000
 	MaxIdempotencyKeyLength   = 128
-	MaxClarifications         = 3
 	ContextTurnLimit          = 5
 	ContextMaxChars           = 6000
 	DefaultContextVersion     = "ask-context-v5"
 	createSessionOperation    = "ask.session.create"
 	createPetSessionOperation = "ask.pet_session.create"
+	continueSessionOperation  = "ask.session.continue"
 	replyRunOperation         = "ask.run.reply"
 )
-
-type Executor interface {
-	Execute(context.Context, RunInput) (RunDecision, error)
-}
 
 type contextTurnRepository interface {
 	ListContextTurns(context.Context, string, int) ([]ContextTurn, error)
@@ -49,13 +45,6 @@ type petHealthReader interface {
 
 type calendarRecordReader interface {
 	ListRecentRecords(context.Context, string, string, time.Time, int) ([]calendarapp.ContextRecord, error)
-}
-
-type RunInput struct {
-	Session Session
-	Turn    Turn
-	Run     Run
-	Context ContextSnapshot
 }
 
 type RunDecision struct {
@@ -84,10 +73,7 @@ func (s *Service) GetSnapshot(ctx context.Context, familyID, sessionID string) (
 	return Snapshot{Session: session, Turns: turns}, nil
 }
 
-var (
-	ErrRunNotWaitingInput  = errors.New("ask run is not waiting for input")
-	ErrAskTurnLimitReached = errors.New("ask turn limit reached")
-)
+var ErrRunNotWaitingInput = errors.New("ask run is not waiting for input")
 
 func (s *Service) GetSession(ctx context.Context, familyID, sessionID string) (Session, error) {
 	value, err := s.repository.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID))
@@ -161,11 +147,15 @@ func (s *Service) GetExecution(ctx context.Context, familyID, sessionID, runID s
 type Service struct {
 	repository Repository
 	pets       petapp.Repository
-	executor   Executor
 	rules      RuleEngine
 	now        func() time.Time
 	versions   Versions
 	calendar   calendarRecordReader
+	// v2 决策循环依赖（文档 4、6、7）：由 main 装配注入，供 processRun 走
+	// RunDecisionLoop 使用。尚未注入时 processRun 降级为 provider_unavailable。
+	agentModel   AgentModel
+	catalog      *Catalog
+	businessRead BusinessReadRepository
 }
 
 type Versions struct {
@@ -174,15 +164,12 @@ type Versions struct {
 	KnowledgeVersion string
 }
 
-func NewService(repository Repository, pets petapp.Repository, executor Executor, versions ...Versions) (*Service, error) {
+func NewService(repository Repository, pets petapp.Repository, versions ...Versions) (*Service, error) {
 	if repository == nil {
 		return nil, errors.New("ask service repository is required")
 	}
 	if pets == nil {
 		return nil, errors.New("ask service pet repository is required")
-	}
-	if executor == nil {
-		return nil, errors.New("ask service executor is required")
 	}
 	value := Versions{PromptVersion: DefaultPromptVersion, RuleVersion: DefaultRuleVersion, KnowledgeVersion: DefaultKnowledgeVersion}
 	if len(versions) > 0 {
@@ -196,13 +183,28 @@ func NewService(repository Repository, pets petapp.Repository, executor Executor
 			value.KnowledgeVersion = versions[0].KnowledgeVersion
 		}
 	}
-	return &Service{repository: repository, pets: pets, executor: executor, rules: DeterministicRuleEngine{}, now: time.Now, versions: value}, nil
+	return &Service{repository: repository, pets: pets, rules: DeterministicRuleEngine{}, now: time.Now, versions: value}, nil
 }
 
 func (s *Service) SetCalendarRepository(repository any) {
 	if value, ok := repository.(calendarRecordReader); ok {
 		s.calendar = value
 	}
+}
+
+// SetAgentModel 注入决策循环模型端口（v2，文档 4）。nil 表示未启用 v2 决策循环。
+func (s *Service) SetAgentModel(model AgentModel) {
+	s.agentModel = model
+}
+
+// SetToolCatalog 注入工具目录（v2，文档 6）。用于候选召回与工具执行。
+func (s *Service) SetToolCatalog(catalog *Catalog) {
+	s.catalog = catalog
+}
+
+// SetBusinessReadRepository 注入业务读取端口（v2 工具执行依赖，文档 7.2）。
+func (s *Service) SetBusinessReadRepository(repository BusinessReadRepository) {
+	s.businessRead = repository
 }
 
 func (s *Service) CreateSession(ctx context.Context, familyID, userID, petID, input, idempotencyKey string) (ExecutionResult, error) {
@@ -268,9 +270,8 @@ func (s *Service) CreateSessionFromInput(ctx context.Context, familyID, userID, 
 	}
 	resolution := ResolvePets(input, pets)
 	if resolution.Status == PetResolveNone {
-		_, familyQuery := DetectFamilyQuery(input)
-		intent, simpleIntent := DetectSimpleIntent(input)
-		if len(pets) > 0 && (familyQuery || simpleIntent && intent.Intent == IntentCasualChat) {
+		familyQuery := DetectFamilyQuery(input)
+		if len(pets) > 0 {
 			return s.createSessionWithPets(ctx, familyID, userID, input, pets[:1], createSessionOperation, idempotencyKey, hash)
 		}
 		if familyQuery {
@@ -282,6 +283,101 @@ func (s *Service) CreateSessionFromInput(ctx context.Context, familyID, userID, 
 		return ExecutionResult{}, resolution, appErrors.Conflict("宠物名称存在歧义，请补充更多信息")
 	}
 	return s.createSessionWithPets(ctx, familyID, userID, input, resolution.Resolved, createSessionOperation, idempotencyKey, hash)
+}
+
+func (s *Service) ContinueSession(ctx context.Context, familyID, userID, sessionID, input, idempotencyKey string) (ExecutionResult, error) {
+	familyID = strings.TrimSpace(familyID)
+	userID = strings.TrimSpace(userID)
+	sessionID = strings.TrimSpace(sessionID)
+	input = strings.TrimSpace(input)
+	idempotencyKey = strings.TrimSpace(idempotencyKey)
+	if familyID == "" || userID == "" {
+		return ExecutionResult{}, appErrors.Unauthorized()
+	}
+	if sessionID == "" {
+		return ExecutionResult{}, appErrors.InvalidParam("问问会话参数无效")
+	}
+	if input == "" {
+		return ExecutionResult{}, appErrors.InvalidParam("问题内容不能为空")
+	}
+	if len([]rune(input)) > MaxInputLength {
+		return ExecutionResult{}, appErrors.InvalidParam("问题内容不能超过 4000 个字符")
+	}
+	if err := validateIdempotencyKey(idempotencyKey); err != nil {
+		return ExecutionResult{}, err
+	}
+	hash := idempotencyHash(familyID, sessionID, input)
+	if result, found, err := s.replayExecution(ctx, userID, continueSessionOperation, idempotencyKey, hash); err != nil || found {
+		return result, err
+	}
+	session, err := s.GetSession(ctx, familyID, sessionID)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
+	if session.Status == SessionClosed {
+		return ExecutionResult{}, appErrors.Conflict("问问会话已结束")
+	}
+	turns, err := s.repository.GetSnapshotTurns(ctx, session.ID)
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	if len(turns) == 0 {
+		return ExecutionResult{}, appErrors.Conflict("问问会话暂无可继续的轮次")
+	}
+	current := turns[len(turns)-1]
+	if current.Turn.TurnIndex != session.TurnCount-1 || current.Turn.SelectedRunID != current.Run.ID {
+		return ExecutionResult{}, appErrors.Conflict("问问会话状态已改变")
+	}
+	if current.Run.Status == RunQueued || current.Run.Status == RunRunning || current.Run.Status == RunWaitingInput {
+		return ExecutionResult{}, appErrors.Conflict("当前问问还未完成")
+	}
+	now := s.now().UTC()
+	turnID, err := newID()
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	runID, err := newID()
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	eventID, err := newID()
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	messageID, err := newID()
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	idempotencyID, err := newID()
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	turn := Turn{ID: turnID, SessionID: session.ID, TurnIndex: session.TurnCount, Status: TurnReceived, Input: input, SelectedRunID: runID, CreatedAt: now}
+	run := Run{ID: runID, SessionID: session.ID, TurnID: turnID, RunIndex: 0, RowVersion: 1, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: session.RuleVersion, PromptVersion: session.PromptVersion, CreatedAt: now}
+	event := Event{ID: eventID, SessionID: session.ID, TurnID: turnID, RunID: runID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
+	message := Message{ID: messageID, SessionID: session.ID, TurnID: turnID, RunID: runID, Role: "user", Content: input, CreatedAt: now}
+	previousSession := session
+	session.Status = SessionActive
+	session.RiskLevel = RiskUnknown
+	session.TurnCount++
+	session.UpdatedAt = now
+	session.CompletedAt = nil
+	result := ExecutionResult{Session: session, Run: run, Events: []Event{event}}
+	responseData, err := json.Marshal(result)
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	idempotency := IdempotencyRecord{ID: idempotencyID, FamilyID: familyID, UserID: userID, Operation: continueSessionOperation, IdempotencyKey: idempotencyKey, RequestHash: hash, ResponseData: string(responseData), SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, CreatedAt: now}
+	if err := s.repository.CreateFollowUpTurnRunWithMessageIdempotent(ctx, previousSession, turn, run, event, message, idempotency); err != nil {
+		if errors.Is(err, ErrSessionStateConflict) || errors.Is(err, ErrIdempotencyConflict) {
+			if replay, found, replayErr := s.replayExecution(ctx, userID, continueSessionOperation, idempotencyKey, hash); replayErr != nil || found {
+				return replay, replayErr
+			}
+			return ExecutionResult{}, appErrors.Conflict("问问会话状态已改变")
+		}
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	return result, nil
 }
 
 func (s *Service) createSessionWithPets(ctx context.Context, familyID, userID, input string, pets []petapp.Pet, operation, idempotencyKey, hash string) (ExecutionResult, PetResolution, error) {
@@ -320,7 +416,7 @@ func (s *Service) createSession(ctx context.Context, familyID, userID, input str
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
 	session := Session{ID: sessionID, FamilyID: familyID, CreatedBy: userID, PetID: pets[0].ID, Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: s.versions.PromptVersion, RuleVersion: s.versions.RuleVersion, KnowledgeVersion: s.versions.KnowledgeVersion, CreatedAt: now, UpdatedAt: now}
-	turn := Turn{ID: turnID, SessionID: sessionID, TurnIndex: 0, Status: RunQueued, Input: input, SelectedRunID: runID, CreatedAt: now}
+	turn := Turn{ID: turnID, SessionID: sessionID, TurnIndex: 0, Status: TurnReceived, Input: input, SelectedRunID: runID, CreatedAt: now}
 	run := Run{ID: runID, SessionID: sessionID, TurnID: turnID, RunIndex: 0, RowVersion: 1, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: s.versions.RuleVersion, PromptVersion: s.versions.PromptVersion, CreatedAt: now}
 	event := Event{ID: eventID, SessionID: sessionID, TurnID: turnID, RunID: runID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	message := Message{ID: messageID, SessionID: sessionID, TurnID: turnID, RunID: runID, Role: "user", Content: input, CreatedAt: now}
@@ -347,14 +443,14 @@ func (s *Service) createSession(ctx context.Context, familyID, userID, input str
 }
 
 func (s *Service) ProcessRun(ctx context.Context, familyID, sessionID, runID string) (ExecutionResult, error) {
-	return s.processRun(ctx, familyID, sessionID, runID, 0)
+	return s.processRun(ctx, familyID, sessionID, runID, 0, 0)
 }
 
-func (s *Service) ProcessRunVersion(ctx context.Context, familyID, sessionID, runID string, expectedVersion int) (ExecutionResult, error) {
-	return s.processRun(ctx, familyID, sessionID, runID, expectedVersion)
+func (s *Service) ProcessRunVersion(ctx context.Context, familyID, sessionID, runID string, expectedVersion, expectedEpoch int) (ExecutionResult, error) {
+	return s.processRun(ctx, familyID, sessionID, runID, expectedVersion, expectedEpoch)
 }
 
-func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID string, expectedVersion int) (ExecutionResult, error) {
+func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID string, expectedVersion, expectedEpoch int) (ExecutionResult, error) {
 	session, err := s.repository.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID))
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
@@ -380,6 +476,9 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	if expectedVersion > 0 && run.RowVersion != expectedVersion {
 		return ExecutionResult{Session: session, Run: run, Events: events}, nil
 	}
+	if expectedEpoch > 0 && run.ExecutionEpoch != expectedEpoch {
+		return ExecutionResult{Session: session, Run: run, Events: events}, nil
+	}
 	if run.Status != RunQueued {
 		return ExecutionResult{Session: session, Run: run, Events: events}, nil
 	}
@@ -402,16 +501,24 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		}
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
-	messages, err := s.repository.ListMessages(ctx, session.ID, run.ID)
+	messages, err := s.repository.ListSessionMessages(ctx, session.ID)
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	currentInput := turn.Input
+	for index := len(messages) - 1; index >= 0; index-- {
+		if messages[index].Role == "user" && strings.TrimSpace(messages[index].Content) != "" {
+			currentInput = messages[index].Content
+			break
+		}
 	}
 	contextMessages := make([]ContextMessage, 0, len(messages))
 	for _, message := range messages {
 		contextMessages = append(contextMessages, ContextMessage{Role: message.Role, Content: message.Content, CreatedAt: message.CreatedAt})
 	}
-	contextSnapshot := compactContextSnapshot(ContextSnapshot{Version: DefaultContextVersion, CapturedAt: s.now().UTC(), Messages: contextMessages, Sources: []ContextSource{{Name: "ask_messages", Version: "ask-messages-v1", ItemCount: len(contextMessages)}}}, ContextMaxChars)
-	now := s.now().UTC()
+	currentTime := s.now()
+	contextSnapshot := compactContextSnapshot(ContextSnapshot{Version: DefaultContextVersion, CapturedAt: currentTime.UTC(), Messages: contextMessages, Sources: []ContextSource{{Name: "ask_messages", Version: "ask-messages-v1", ItemCount: len(contextMessages)}}}, ContextMaxChars)
+	now := currentTime.UTC()
 	startedEvent := Event{ID: startedEventID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Sequence: nextSequence(events), Type: "run.started", Data: contextAuditData(contextSnapshot), CreatedAt: now}
 	if err := s.repository.TransitionRun(ctx, run.ID, run.RowVersion, RunQueued, RunRunning, RiskUnknown, "", now, startedEvent, Message{}); err != nil {
 		if errors.Is(err, ErrRunStateConflict) {
@@ -422,7 +529,7 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	run.Status = RunRunning
 	run.RowVersion++
 	run.StartedAt = &now
-	turn.Status = RunRunning
+	turn.Status = TurnAttached
 	events = append(events, startedEvent)
 	progressEvent, err := s.appendProgressEvent(ctx, session, run, "intent_routing", "正在理解你的问题")
 	if err != nil {
@@ -438,125 +545,62 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	risk := s.rules.Evaluate(RiskInput{Text: riskText})
 	var decision RunDecision
 	if risk.Level == RiskRed {
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "已理解你的问题")
+		if err != nil {
+			return ExecutionResult{}, appErrors.Internal(err)
+		}
+		events = append(events, progressEvent)
 		progressEvent, err = s.appendProgressEvent(ctx, session, run, "risk_checking", "正在进行风险初筛")
 		if err != nil {
 			return ExecutionResult{}, appErrors.Internal(err)
 		}
 		events = append(events, progressEvent)
-		decision = RunDecision{Status: RunEscalated, RiskLevel: RiskRed, EventType: "risk.escalated", Data: map[string]any{"trigger_code": risk.TriggerCode, "message": risk.Message, "action": risk.Action}}
-	} else {
-		intentDecision := IntentDecision{Intent: IntentPetHealth}
-		factType := DetectFactType(riskText)
-		if familyIntent, ok := DetectFamilyQuery(turn.Input); ok {
-			intentDecision = familyIntent
-		} else if factType != FactUnknown {
-			intentDecision.Intent = IntentPetFact
-		} else if run.ClarificationCount == 0 {
-			if simpleIntent, ok := DetectSimpleIntent(turn.Input); ok {
-				intentDecision = simpleIntent
-			} else if router, ok := s.executor.(IntentRouter); ok {
-				intentDecision, err = router.Route(ctx, IntentInput{Session: session, Turn: turn, Run: run, Messages: contextMessages})
-			}
+		decision = RunDecision{Status: RunCompleted, RiskLevel: RiskRed, EventType: "risk.escalated", Data: map[string]any{"trigger_code": risk.TriggerCode, "message": risk.Message, "action": risk.Action}}
+	} else if s.agentModel != nil && s.catalog != nil && s.businessRead != nil {
+		// v2 决策循环：组装上下文 -> 决策 -> 工具 -> 降级映射（文档 2、7、8）。
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "已理解你的问题")
+		if err != nil {
+			return ExecutionResult{}, appErrors.Internal(err)
 		}
+		events = append(events, progressEvent)
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "context_ready", "已关联宠物资料和近期记录")
+		if err != nil {
+			return ExecutionResult{}, appErrors.Internal(err)
+		}
+		events = append(events, progressEvent)
+		contextSnapshot, err = s.loadHealthContext(ctx, session, contextMessages)
+		if err != nil {
+			return ExecutionResult{}, err
+		}
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "response_generating", "正在生成答复")
+		if err != nil {
+			return ExecutionResult{}, appErrors.Internal(err)
+		}
+		events = append(events, progressEvent)
+		decision, err = s.runV2DecisionLoop(ctx, session, contextMessages, currentInput, contextSnapshot, risk.Level)
 		if err != nil {
 			errorCode, retryable := ExecutorErrorDetails(err)
 			if retryable {
 				return ExecutionResult{Session: session, Run: run, Events: events}, err
 			}
-			decision = RunDecision{Status: RunFailed, ErrorCode: errorCode, EventType: "run.failed", Data: map[string]any{"message": providerFailureMessage(errorCode)}}
-		} else if err := ValidateIntentDecision(intentDecision); err != nil {
-			decision = RunDecision{Status: RunFailed, ErrorCode: "invalid_intent_output", EventType: "run.failed", Data: map[string]any{"message": "当前暂时无法理解这个问题"}}
-		} else {
-			switch intentDecision.Intent {
-			case IntentCasualChat, IntentUnsupported:
-				decision = RunDecision{Status: RunCompleted, RiskLevel: RiskUnknown, EventType: "assistant.completed", Data: map[string]any{"answer": intentDecision.Reply, "intent": intentDecision.Intent}}
-			case IntentAmbiguous:
-				decision = RunDecision{Status: RunWaitingInput, RiskLevel: RiskUnknown, EventType: "assistant.question", Data: map[string]any{"question": intentDecision.Question}}
-			case IntentFamilyQuery:
-				familyPets, listErr := s.pets.List(ctx, session.FamilyID)
-				if listErr != nil {
-					return ExecutionResult{}, appErrors.Internal(listErr)
-				}
-				decision = RunDecision{Status: RunCompleted, RiskLevel: RiskGreen, EventType: "family.pets.completed", Data: buildFamilyPetsResult(familyPets)}
-			case IntentPetFact:
-				if factType == FactUnknown {
-					decision = RunDecision{Status: RunWaitingInput, RiskLevel: RiskUnknown, EventType: "assistant.question", Data: map[string]any{"question": "你想查询哪类宠物记录，例如洗澡、疫苗、驱虫、体检、就医或用药？"}}
-					break
-				}
-				if reader, ok := s.calendar.(factReader); ok {
-					sessionPets := session.Pets
-					if len(sessionPets) == 0 {
-						pet, petErr := s.pets.Get(ctx, session.FamilyID, session.PetID)
-						if petErr != nil {
-							return ExecutionResult{}, appErrors.Internal(petErr)
-						}
-						sessionPets = []SessionPet{{PetID: pet.ID, PetName: pet.Name, Mention: pet.Name, SortOrder: 0}}
-					}
-					data, factErr := buildFactResult(ctx, reader, session.FamilyID, sessionPets, factType)
-					if factErr != nil {
-						return ExecutionResult{}, appErrors.Internal(factErr)
-					}
-					decision = RunDecision{Status: RunCompleted, RiskLevel: RiskGreen, EventType: "fact.completed", Data: data}
-				} else {
-					decision = RunDecision{Status: RunCompleted, RiskLevel: RiskUnknown, EventType: "assistant.completed", Data: map[string]any{"answer": "当前暂时无法读取宠物记录。", "intent": IntentPetFact}}
-				}
-			case IntentPetHealth:
-				progressEvent, err = s.appendProgressEvent(ctx, session, run, "input_reviewing", "正在整理宠物的症状描述")
-				if err != nil {
-					return ExecutionResult{}, appErrors.Internal(err)
-				}
-				events = append(events, progressEvent)
-				contextSnapshot, err = s.loadHealthContext(ctx, session, contextMessages)
-				if err != nil {
-					return ExecutionResult{}, err
-				}
-				progressEvent, err = s.appendProgressEvent(ctx, session, run, "context_ready", "已关联宠物资料和近期记录")
-				if err != nil {
-					return ExecutionResult{}, appErrors.Internal(err)
-				}
-				events = append(events, progressEvent)
-				progressEvent, err = s.appendProgressEvent(ctx, session, run, "risk_checking", "正在进行风险初筛")
-				if err != nil {
-					return ExecutionResult{}, appErrors.Internal(err)
-				}
-				events = append(events, progressEvent)
-				progressEvent, err = s.appendProgressEvent(ctx, session, run, "response_generating", "正在生成答复")
-				if err != nil {
-					return ExecutionResult{}, appErrors.Internal(err)
-				}
-				events = append(events, progressEvent)
-				runInput := RunInput{Session: session, Turn: turn, Run: run, Context: contextSnapshot}
-				if streamingExecutor, ok := s.executor.(StreamingExecutor); ok {
-					decision, err = streamingExecutor.ExecuteStream(ctx, runInput, func(delta string) error {
-						progress, appendErr := s.appendAssistantDelta(ctx, session, run, delta)
-						if appendErr == nil {
-							events = append(events, progress)
-						}
-						return appendErr
-					})
-				} else {
-					decision, err = s.executor.Execute(ctx, runInput)
-				}
-				if err != nil {
-					errorCode, retryable := ExecutorErrorDetails(err)
-					if retryable {
-						return ExecutionResult{Session: session, Run: run, Events: events}, err
-					}
-					decision = RunDecision{Status: RunFailed, ErrorCode: errorCode, EventType: "run.failed", Data: map[string]any{"message": providerFailureMessage(errorCode)}}
-				} else if err := ValidateAnalysisOutput(decision); err != nil {
-					decision = RunDecision{Status: RunFailed, ErrorCode: "invalid_analysis_output", EventType: "run.failed", Data: map[string]any{"message": "当前暂时无法完成分析"}}
-				}
-			}
+			decision = providerFailureDecision(errorCode)
 		}
+	} else {
+		// v2 决策循环依赖未注入：降级为 provider_unavailable。生产环境 main.go
+		// 已注入完整 v2 依赖（agentModel/catalog/businessRead），此处仅作为未配置
+		// AI 能力时的兜底，保证 Run 不会永久停留在 running 状态。
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "已理解你的问题")
+		if err != nil {
+			return ExecutionResult{}, appErrors.Internal(err)
+		}
+		events = append(events, progressEvent)
+		decision = providerFailureDecision("provider_unavailable")
 	}
-	if decision.Status == RunWaitingInput && run.ClarificationCount >= MaxClarifications {
-		decision = RunDecision{Status: RunFailed, RiskLevel: decision.RiskLevel, ErrorCode: "clarification_limit_reached", EventType: "run.failed", Data: map[string]any{"message": "补充信息次数已达上限，请重新描述问题"}}
-	}
-	if decision.Status != RunWaitingInput && decision.Status != RunCompleted && decision.Status != RunEscalated && decision.Status != RunFailed {
+	if decision.Status != RunWaitingInput && decision.Status != RunCompleted && decision.Status != RunFailed {
 		decision.Status = RunFailed
 		decision.ErrorCode = "invalid_executor_status"
 		decision.EventType = "run.failed"
-		decision.Data = map[string]any{"message": "当前暂时无法完成分析"}
+		decision.Data = providerFailureDecision(decision.ErrorCode).Data
 	}
 	if decision.EventType == "" {
 		decision.EventType = "run.completed"
@@ -566,7 +610,11 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	}
 	data, marshalErr := json.Marshal(decision.Data)
 	if marshalErr != nil {
-		data = []byte(`{"message":"当前暂时无法完成分析"}`)
+		decision.Status = RunFailed
+		decision.ErrorCode = "invalid_event_data"
+		decision.EventType = "run.failed"
+		decision.Data = providerFailureDecision(decision.ErrorCode).Data
+		data, _ = json.Marshal(decision.Data)
 	}
 	finishedAt := s.now().UTC()
 	finishedEvent := Event{ID: finishedEventID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Sequence: nextSequence(events), Type: decision.EventType, Data: string(data), CreatedAt: finishedAt}
@@ -587,15 +635,11 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	run.LeaseOwner = ""
 	run.LeaseExpiresAt = nil
 	run.NextAttemptAt = nil
-	if decision.Status == RunCompleted || decision.Status == RunEscalated || decision.Status == RunFailed || decision.Status == RunCanceled || decision.Status == RunInterrupted {
+	if decision.Status == RunCompleted || decision.Status == RunFailed || decision.Status == RunCanceled || decision.Status == RunInterrupted {
 		run.CompletedAt = &finishedAt
 	}
-	session.Status = sessionStatusForRun(decision.Status)
 	session.RiskLevel = decision.RiskLevel
 	session.UpdatedAt = finishedAt
-	if decision.Status == RunCompleted || decision.Status == RunEscalated {
-		session.CompletedAt = &finishedAt
-	}
 	events = append(events, finishedEvent)
 	return ExecutionResult{Session: session, Run: run, Events: events}, nil
 }
@@ -649,11 +693,43 @@ func (s *Service) loadHealthContext(ctx context.Context, session Session, messag
 	return compactContextSnapshot(value, ContextMaxChars), nil
 }
 
+func providerFailureDecision(errorCode string) RunDecision {
+	return RunDecision{Status: RunFailed, RiskLevel: RiskUnknown, ErrorCode: errorCode, EventType: "run.failed", Data: map[string]any{"error_code": errorCode, "message": providerFailureMessage(errorCode)}}
+}
+
 func providerFailureMessage(errorCode string) string {
-	if errorCode == "provider_quota_exhausted" {
-		return "AI 服务额度暂时不可用，请检查额度后重试"
+	switch errorCode {
+	case "provider_timeout":
+		return "AI 服务响应超时，请稍后重试。"
+	case "provider_canceled":
+		return "AI 请求被中断，请重新发送问题。"
+	case "provider_unavailable":
+		return "AI 服务暂时不可用，请稍后重试。"
+	case "provider_rate_limited":
+		return "AI 服务请求过于频繁，请稍后重试。"
+	case "provider_quota_exhausted":
+		return "AI 服务额度暂时不可用，请检查额度后重试。"
+	case "provider_auth_failed":
+		return "AI 服务拒绝访问，请检查 API Key、模型 ID 和模型权限。"
+	case "provider_request_invalid":
+		return "AI 服务请求配置不兼容，请检查模型与接口配置。"
+	case "provider_output_invalid":
+		return "AI 返回内容格式异常，未能解析健康建议。"
+	case "invalid_analysis_output":
+		return "AI 返回的健康建议未通过完整性或安全检查。"
+	case "invalid_executor_status":
+		return "AI 返回了不支持的执行状态。"
+	case "invalid_event_data":
+		return "AI 返回内容无法保存，请稍后重试。"
+	case "provider_failed":
+		return "AI 服务返回了无法识别的错误，请检查服务端日志。"
+	case "executor_failed":
+		return "问问执行器运行失败，请检查服务端日志。"
+	case "worker_attempts_exhausted":
+		return "多次调用 AI 服务仍未成功，请稍后重试。"
+	default:
+		return "问问执行失败，错误代码：" + errorCode
 	}
-	return "当前暂时无法完成分析"
 }
 
 func (s *Service) appendProgressEvent(ctx context.Context, session Session, run Run, stage, message string) (Event, error) {
@@ -733,9 +809,6 @@ func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID,
 	if run.RowVersion != expectedVersion {
 		return ExecutionResult{}, appErrors.Conflict("问问执行版本已改变")
 	}
-	if run.ClarificationCount >= MaxClarifications {
-		return ExecutionResult{}, appErrors.Conflict("问问追问次数已达上限")
-	}
 	currentTurn, err := s.repository.GetTurn(ctx, session.ID, run.TurnID)
 	if err != nil {
 		if errors.Is(err, ErrTurnNotFound) {
@@ -801,19 +874,6 @@ func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID,
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
 	return result, nil
-}
-
-func sessionStatusForRun(status RunStatus) SessionStatus {
-	switch status {
-	case RunCompleted:
-		return SessionCompleted
-	case RunEscalated:
-		return SessionEscalated
-	case RunCanceled:
-		return SessionCanceled
-	default:
-		return SessionActive
-	}
 }
 
 func nextSequence(events []Event) int {

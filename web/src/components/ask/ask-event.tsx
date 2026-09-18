@@ -1,6 +1,7 @@
 import type { AskAnalysisResult, AskAssistantResult, AskDeltaResult, AskEvent, AskFactResult, AskFailedResult, AskFamilyPetsResult, AskProgressResult, AskQuestionResult, AskRiskResult } from '../../types/ask'
 import { Text, View } from '@tarojs/components'
 import { useEffect, useState } from 'react'
+import { askFailureTitle } from './ask-failure'
 import './ask-event.scss'
 
 const factLabels: Record<AskFactResult['fact_type'], string> = {
@@ -51,7 +52,11 @@ function FactResult({ data }: { data: AskFactResult }) {
 function FamilyPetsResult({ data }: { data: AskFamilyPetsResult }) {
   return (
     <View className="ask-result ask-result--family-pets">
-      <Text className="ask-result-title">家里的宠物</Text>
+      <Text className="ask-result-title">
+        家里的宠物（
+        {data.count}
+        只）
+      </Text>
       <View className="ask-fact-list">
         {data.pets.map(pet => (
           <View className="ask-fact-item" key={pet.pet_id}>
@@ -86,8 +91,9 @@ function AnalysisResult({ data }: { data: AskAnalysisResult }) {
 }
 
 function ProgressResult({ data }: { data: AskProgressResult }) {
+  const completed = data.stage === 'intent_completed'
   return (
-    <View className="ask-progress">
+    <View className={`ask-progress${completed ? ' ask-progress--completed' : ''}`}>
       <Text className="ask-progress-dot" />
       <Text>{data.message}</Text>
     </View>
@@ -158,8 +164,8 @@ export default function AskEventView({ event }: { event: AskEvent }) {
     const data = event.data as AskFailedResult
     return (
       <View className="ask-result ask-result--failed">
-        <Text className="ask-result-title">这次没有完成</Text>
-        <Text>{data.message || '当前暂时无法完成分析，请稍后重试。'}</Text>
+        <Text className="ask-result-title">{askFailureTitle(data.error_code)}</Text>
+        <Text>{data.message || `错误代码：${data.error_code || 'unknown'}，服务端未返回错误详情。`}</Text>
       </View>
     )
   }

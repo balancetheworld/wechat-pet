@@ -32,6 +32,14 @@
   background: var(--primary-dark);
 }
 
+.ask-progress--completed {
+  color: var(--green);
+}
+
+.ask-progress--completed .ask-progress-dot {
+  background: var(--green);
+}
+
 .ask-delta {
   color: var(--ink);
   font-size: 27rpx;

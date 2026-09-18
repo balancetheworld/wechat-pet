@@ -113,3 +113,10 @@ func TestAIConfigRequiresCredentialsModelAndTimeout(t *testing.T) {
 		t.Fatalf("Validate() error = %v, want AI_TIMEOUT_SECONDS validation error", err)
 	}
 }
+
+func TestAIConfigAcceptsChatCompletionProvider(t *testing.T) {
+	cfg := Config{AppEnv: "test", HTTPAddr: ":8080", DatabaseDriver: "sqlite", DatabaseDSN: ":memory:", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads", AIEnabled: true, AIProvider: "chat_completion", AIAPIKey: "key", AIModel: "deepseek-chat", AITimeoutSeconds: 30}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}

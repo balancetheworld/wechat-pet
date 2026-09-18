@@ -42,13 +42,14 @@ type RunDTO struct {
 }
 
 type TurnDTO struct {
-	ID            string    `json:"id"`
-	SessionID     string    `json:"session_id"`
-	TurnIndex     int       `json:"turn_index"`
-	Status        RunStatus `json:"status"`
-	Input         string    `json:"input"`
-	SelectedRunID string    `json:"selected_run_id"`
-	CreatedAt     time.Time `json:"created_at"`
+	ID            string     `json:"id"`
+	SessionID     string     `json:"session_id"`
+	TurnIndex     int        `json:"turn_index"`
+	InputSequence int        `json:"input_sequence"`
+	Status        TurnStatus `json:"status"`
+	Input         string     `json:"input"`
+	SelectedRunID string     `json:"selected_run_id"`
+	CreatedAt     time.Time  `json:"created_at"`
 }
 
 type EventDTO struct {
@@ -110,7 +111,7 @@ func NewRunDTO(value Run) RunDTO {
 }
 
 func NewTurnDTO(value Turn) TurnDTO {
-	return TurnDTO{ID: value.ID, SessionID: value.SessionID, TurnIndex: value.TurnIndex, Status: value.Status, Input: value.Input, SelectedRunID: value.SelectedRunID, CreatedAt: value.CreatedAt}
+	return TurnDTO{ID: value.ID, SessionID: value.SessionID, TurnIndex: value.TurnIndex, InputSequence: value.InputSequence, Status: value.Status, Input: value.Input, SelectedRunID: value.SelectedRunID, CreatedAt: value.CreatedAt}
 }
 
 func NewEventDTO(value Event) EventDTO {

@@ -1,7 +1,7 @@
 import type { ButtonProps } from '@tarojs/components'
 import { Button, Image, Input, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import bg1Image from '../../assets/bg1.jpg'
 import cat2Image from '../../assets/cat2.png'
 import catImage from '../../assets/cat.png'

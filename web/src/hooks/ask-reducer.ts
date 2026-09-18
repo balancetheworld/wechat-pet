@@ -22,9 +22,11 @@ export interface AskRuntimeState {
 
 export type AskRuntimeAction
   = { type: 'local.submitted', input: string, clientRunID: string }
+    | { type: 'local.followed_up', input: string, clientRunID: string }
     | { type: 'local.replied', input: string, clientRunID: string, runID: string }
     | { type: 'snapshot.restored', execution: AskExecution }
     | { type: 'snapshot.loaded', snapshot: AskSnapshot }
+    | { type: 'snapshot.loading' }
     | { type: 'events.received', events: AskEvent[] }
     | { type: 'stream.reconnecting' }
     | { type: 'request.failed', phase: 'failed' | 'input_error' | 'ambiguous' | 'network_error', message: string }
@@ -257,11 +259,20 @@ export function askReducer(state: AskRuntimeState, action: AskRuntimeAction): As
       return restoreSnapshot(state, action.execution)
     case 'snapshot.loaded':
       return restoreFullSnapshot(state, action.snapshot)
+    case 'snapshot.loading':
+      return { ...state, phase: 'reconnecting', error: '' }
     case 'local.replied':
       return {
         ...state,
         phase: 'replying',
         turns: [...state.turns, { id: action.clientRunID, runID: action.runID, input: action.input, optimistic: true, events: [] }],
+        error: '',
+      }
+    case 'local.followed_up':
+      return {
+        ...state,
+        phase: 'creating',
+        turns: [...state.turns, { id: action.clientRunID, runID: action.clientRunID, input: action.input, optimistic: true, events: [] }],
         error: '',
       }
     case 'events.received': {

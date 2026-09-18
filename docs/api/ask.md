@@ -28,7 +28,7 @@ Idempotency-Key: ask-client-generated-key
 
 当前版本先在事务中创建排队中的 Run，再投递到进程内 Worker 异步执行。接口响应仍返回事务提交时的 `queued` 快照，后续状态通过 Snapshot 或事件流获取。
 
-自动定位接口通常要求问题中包含宠物名称。对于“你好”等本地规则可确定的简单闲聊，以及“我家有哪些宠物”等家庭宠物列表查询，服务端会使用家庭中的一只宠物完成现有会话数据约束；该绑定不表示回答只与该宠物有关。家庭宠物列表查询会按当前登录用户的 `family_id` 读取完整列表，不读取其他家庭数据。
+自动定位接口会优先解析问题中的宠物名称；未解析到名称时，只要当前家庭存在宠物，服务端会暂时绑定第一只宠物完成会话创建，再由意图路由决定是否需要读取宠物上下文。该绑定不表示回答只与该宠物有关。家庭宠物列表查询会按当前登录用户的 `family_id` 读取完整列表，不读取其他家庭数据。
 
 响应中的关键字段：
 
@@ -84,7 +84,7 @@ failed
 
 Worker 每次执行前会领取数据库租约。基础设施错误会写入 `run.retry_scheduled` 并在 `next_attempt_at` 后重试；进程中断留下的过期 `running` Run 会写入 `run.recovered` 后重新执行。超过最大尝试次数会写入 `run.failed`，`error_code` 为 `worker_attempts_exhausted`。
 
-`AI_ENABLED=false` 时使用本地确定性 Executor；`AI_ENABLED=true` 时根据 `AI_PROVIDER` 选择 OpenAI Responses API 或腾讯混元 OpenAI 兼容的 Chat Completions API，并要求配置 `AI_API_KEY`、`AI_MODEL` 和正数 `AI_TIMEOUT_SECONDS`。`AI_BASE_URL` 可选；`AI_PROVIDER=hunyuan` 时留空会使用 `https://api.hunyuan.cloud.tencent.com/v1`，OpenAI 留空会使用 `https://api.openai.com/v1`。Provider SDK 内部重试关闭，由 Worker 统一控制持久化重试。
+`AI_ENABLED=false` 时使用本地确定性 Executor；`AI_ENABLED=true` 时根据 `AI_PROVIDER` 选择 OpenAI Responses API 或兼容的 Chat Completions API，并要求配置 `AI_API_KEY`、`AI_MODEL` 和正数 `AI_TIMEOUT_SECONDS`。OpenAI Responses API 使用 `AI_PROVIDER=openai`；DeepSeek、混元或其他兼容 `/chat/completions` 的服务统一使用 `AI_PROVIDER=chat_completion`，并通过 `AI_BASE_URL` 和 `AI_MODEL` 指定服务与模型。DeepSeek 可配置为 `https://api.deepseek.com` 和 `deepseek-chat`。Provider SDK 内部重试关闭，由 Worker 统一控制持久化重试。
 
 Provider 错误按以下规则处理：
 
@@ -117,7 +117,23 @@ waiting_input(row_version=N)
 → queued(row_version=N+1, clarification_count+1)
 ```
 
-同一事务还会写入用户回答、追加新的 `run.queued` 事件和幂等结果，提交后将新版本 Run 投递到 Worker。回答内容不能为空，长度不能超过 4000 个字符。最多允许三次追问补充；达到上限后若 Agent 仍要求追问，Run 会收敛为 `failed`。
+同一事务还会写入用户回答、追加新的 `run.queued` 事件和幂等结果，提交后将新版本 Run 投递到 Worker。回答内容不能为空，长度不能超过 4000 个字符。只要会话仍处于可用状态，就可以持续提交追问补充；`clarification_count` 仅用于记录补充次数，不作为会话结束条件。
+
+## 继续问问新问题
+
+`POST /api/v1/ask/sessions/:session_id/turns`
+
+当前会话的上一轮进入 `completed`、`escalated`、`failed`、`canceled` 或 `interrupted` 后，客户端发送新问题时会自动调用该接口。接口在同一 Session 中创建新的 Turn 和 Run，`session.turn_count` 加一，并保留整个会话的用户消息作为下一轮上下文。请求必须携带新的 `Idempotency-Key`。
+
+请求体：
+
+```json
+{
+  "input": "现在好多了，还需要继续观察吗？"
+}
+```
+
+等待 `waiting_input` 的 Run 仍使用上面的 Reply 接口回答澄清问题，不会额外创建 Turn。
 
 ## 查询问问会话
 
@@ -168,6 +184,7 @@ waiting_input(row_version=N)
 
 ```text
 intent_routing      正在理解你的问题
+intent_completed    已理解你的问题
 input_reviewing     正在整理宠物的症状描述
 context_ready       已关联宠物资料和近期记录
 risk_checking       正在进行风险初筛
@@ -199,6 +216,7 @@ response_generating 正在生成答复
   "sequence": 4,
   "type": "family.pets.completed",
   "data": {
+    "count": 2,
     "pets": [
       {"pet_id": "pet-1", "pet_name": "旺仔"},
       {"pet_id": "pet-2", "pet_name": "球球"}

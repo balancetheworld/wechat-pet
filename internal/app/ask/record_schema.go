@@ -1,0 +1,263 @@
+package ask
+
+// 本文件固定 record_array_v1 的机读 JSON Schema（文档 8.4）。
+// 顶层是有序数组，首个元素为 header、末尾为 coverage + end，中间记录与动作匹配。
+// Schema 严格对齐 response_protocol.go 的类型与 JSON tag；optional（omitempty）字段
+// 不在 required 内，模型可省略。顶层为数组，属「待真实验证」的 Provider 组合能力边界。
+
+// RecordArraySchema 返回 record_array_v1 的 JSON Schema（文档 8.4）。
+func RecordArraySchema() map[string]any {
+	return map[string]any{
+		"type":  "array",
+		"title": "record_array_v1",
+		"items": map[string]any{
+			"oneOf": []any{
+				headerRecordSchema(),
+				groupRecordSchema(),
+				segmentRecordSchema(),
+				riskRecordSchema(),
+				questionRecordSchema(),
+				callRecordSchema(),
+				coverageRecordSchema(),
+				endRecordSchema(),
+			},
+		},
+	}
+}
+
+// IsRecordArraySchema 报告一个 Schema 是否为 record_array_v1（顶层数组）。
+// Provider 据此选择 strict 与否：数组顶层 + oneOf 与 strict 不兼容，需非 strict。
+func IsRecordArraySchema(schema map[string]any) bool {
+	t, _ := schema["type"].(string)
+	return t == "array"
+}
+
+func headerRecordSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"type", "schema_version", "action", "task_updates"},
+		"properties": map[string]any{
+			"type":           strEnum("header"),
+			"schema_version": strEnum(RecordArrayV1),
+			"action":         strEnum(string(ActionCallTools), string(ActionRequestInput), string(ActionFinalAnswer)),
+			"task_updates": map[string]any{
+				"type":  "array",
+				"items": taskUpdateSchema(),
+			},
+		},
+	}
+}
+
+func taskUpdateSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"task_key", "goal"},
+		"properties": map[string]any{
+			"task_key":        map[string]any{"type": "string"},
+			"goal":            map[string]any{"type": "string"},
+			"source_turn_ids": stringArraySchema(),
+			"subject_keys":    stringArraySchema(),
+		},
+	}
+}
+
+func groupRecordSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"type", "group_key", "task_keys", "answer_kind", "subjects", "scope"},
+		"properties": map[string]any{
+			"type":        strEnum("group"),
+			"group_key":   map[string]any{"type": "string"},
+			"task_keys":   stringArraySchema(),
+			"answer_kind": strEnum(string(AnswerCasual), string(AnswerFact), string(AnswerHealth)),
+			"subjects": map[string]any{
+				"type":  "array",
+				"items": answerSubjectSchema(),
+			},
+			"scope": strEnum(string(ScopeFull), string(ScopeLimited), string(ScopeDeclined), string(ScopeUnavailable)),
+		},
+	}
+}
+
+func answerSubjectSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"subject_key", "kind"},
+		"properties": map[string]any{
+			"subject_key":     map[string]any{"type": "string"},
+			"kind":            strEnum(string(SubjectPet), string(SubjectUnresolved)),
+			"pet_id":          map[string]any{"type": "string"},
+			"description":     map[string]any{"type": "string"},
+			"source_turn_ids": stringArraySchema(),
+		},
+	}
+}
+
+func segmentRecordSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"type", "segment_key", "group_key", "subject_keys", "field", "text", "basis_kind"},
+		"properties": map[string]any{
+			"type":        strEnum("segment"),
+			"segment_key": map[string]any{"type": "string"},
+			"group_key":   map[string]any{"type": "string"},
+			"subject_keys": stringArraySchema(),
+			"field":        map[string]any{"type": "string"},
+			"text":         map[string]any{"type": "string"},
+			"basis_kind": strEnum(string(BasisUserStatement), string(BasisImageObservation), string(BasisBusinessFact), string(BasisGeneralKnowledge), string(BasisSpeculation)),
+			"evidence_refs": map[string]any{
+				"type":  "array",
+				"items": evidenceRefSchema(),
+			},
+		},
+	}
+}
+
+func evidenceRefSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"source_type", "source_id"},
+		"properties": map[string]any{
+			"source_type": map[string]any{"type": "string"},
+			"source_id":   map[string]any{"type": "string"},
+			"version":     map[string]any{"type": "string"},
+			"position":    map[string]any{"type": "string"},
+		},
+	}
+}
+
+func riskRecordSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"type", "group_key", "subject_key", "level"},
+		"properties": map[string]any{
+			"type":        strEnum("risk"),
+			"group_key":   map[string]any{"type": "string"},
+			"subject_key": map[string]any{"type": "string"},
+			"level":       strEnum(string(RiskUnknown), string(RiskGreen), string(RiskYellow), string(RiskRed)),
+			"evidence": map[string]any{
+				"type":  "array",
+				"items": evidenceRefSchema(),
+			},
+			"uncertainty": map[string]any{"type": "string"},
+		},
+	}
+}
+
+func questionRecordSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"type", "question_key", "task_keys", "text", "missing_fields"},
+		"properties": map[string]any{
+			"type":         strEnum("question"),
+			"question_key": map[string]any{"type": "string"},
+			"task_keys":    stringArraySchema(),
+			"subject_keys": stringArraySchema(),
+			"text":         map[string]any{"type": "string"},
+			"missing_fields": map[string]any{
+				"type":  "array",
+				"items": missingFieldSchema(),
+			},
+			"purpose": map[string]any{"type": "string"},
+		},
+	}
+}
+
+func missingFieldSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"task_key", "field", "necessity"},
+		"properties": map[string]any{
+			"task_key":    map[string]any{"type": "string"},
+			"subject_key": map[string]any{"type": "string"},
+			"field":       map[string]any{"type": "string"},
+			"necessity":   strEnum(string(NecessityBlocking), string(NecessitySupport)),
+			"known_value": map[string]any{"type": "string"},
+		},
+	}
+}
+
+func callRecordSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"type", "call_key", "task_keys", "tool_name", "catalog_version", "arguments"},
+		"properties": map[string]any{
+			"type":            strEnum("call"),
+			"call_key":        map[string]any{"type": "string"},
+			"task_keys":       stringArraySchema(),
+			"tool_name":       map[string]any{"type": "string"},
+			"catalog_version": map[string]any{"type": "string"},
+			"arguments": map[string]any{
+				"type":                 "object",
+				"additionalProperties": true,
+			},
+		},
+	}
+}
+
+func coverageRecordSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"type", "tasks"},
+		"properties": map[string]any{
+			"type": strEnum("coverage"),
+			"tasks": map[string]any{
+				"type":  "array",
+				"items": taskCoverageSchema(),
+			},
+		},
+	}
+}
+
+func taskCoverageSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"task_key"},
+		"properties": map[string]any{
+			"task_key":            map[string]any{"type": "string"},
+			"answer_group_keys":   stringArraySchema(),
+			"question_keys":       stringArraySchema(),
+			"call_keys":           stringArraySchema(),
+			"operation_ids":       stringArraySchema(),
+			"incomplete_reason":   map[string]any{"type": "string"},
+		},
+	}
+}
+
+func endRecordSchema() map[string]any {
+	return map[string]any{
+		"type":                 "object",
+		"additionalProperties": false,
+		"required":             []string{"type"},
+		"properties": map[string]any{
+			"type": strEnum("end"),
+		},
+	}
+}
+
+func strEnum(values ...string) map[string]any {
+	items := make([]any, 0, len(values))
+	for _, v := range values {
+		items = append(items, v)
+	}
+	return map[string]any{"type": "string", "enum": items}
+}
+
+func stringArraySchema() map[string]any {
+	return map[string]any{
+		"type":  "array",
+		"items": map[string]any{"type": "string"},
+	}
+}

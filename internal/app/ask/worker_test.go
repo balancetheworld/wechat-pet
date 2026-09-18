@@ -234,12 +234,12 @@ type workerTestProcessor struct {
 
 type workerContextProcessor struct{}
 
-func (workerContextProcessor) ProcessRunVersion(ctx context.Context, _, _, _ string, _ int) (ExecutionResult, error) {
+func (workerContextProcessor) ProcessRunVersion(ctx context.Context, _, _, _ string, _, _ int) (ExecutionResult, error) {
 	<-ctx.Done()
 	return ExecutionResult{}, ctx.Err()
 }
 
-func (p *workerTestProcessor) ProcessRunVersion(_ context.Context, _, _, runID string, _ int) (ExecutionResult, error) {
+func (p *workerTestProcessor) ProcessRunVersion(_ context.Context, _, _, runID string, _, _ int) (ExecutionResult, error) {
 	p.mu.Lock()
 	p.calls++
 	call := p.calls
@@ -283,6 +283,7 @@ func (r *workerTestLeaseRepository) ListRunnableRunJobs(context.Context, time.Ti
 
 func (r *workerTestLeaseRepository) ClaimRunJob(_ context.Context, job RunJob, _ string, _ time.Time, _ time.Duration, _ int) (RunJob, bool, error) {
 	job.AttemptCount++
+	job.ExecutionEpoch++
 	return job, true, nil
 }
 

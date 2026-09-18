@@ -4,11 +4,13 @@ go 1.24.3
 
 require (
 	github.com/gin-gonic/gin v1.11.0
+	github.com/go-ego/gse v0.80.0
 	github.com/golang-jwt/jwt v3.2.2+incompatible
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/joho/godotenv v1.5.1
 	github.com/openai/openai-go v1.12.0
 	github.com/tencentyun/cos-go-sdk-v5 v0.7.50
+	golang.org/x/image v0.24.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -22,6 +24,7 @@ require (
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.1 // indirect
 	github.com/tidwall/sjson v1.2.5 // indirect
+	github.com/vcaesar/cedar v0.20.1 // indirect
 )
 
 require (

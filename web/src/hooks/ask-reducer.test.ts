@@ -141,6 +141,23 @@ it('same run reply keeps a separate user message and appends new events after it
   expect(queued.turns[1].events.map(value => value.sequence)).toEqual([4])
 })
 
+it('follow-up restores a new server turn without dropping the previous turn', () => {
+  const completedExecution = execution([event(1, 'run.queued'), event(2, 'run.completed')])
+  completedExecution.run.status = 'completed'
+  const completed = askReducer(initialAskRuntimeState, { type: 'snapshot.restored', execution: completedExecution })
+  const followedUp = askReducer(completed, { type: 'local.followed_up', input: '现在好多了', clientRunID: 'local-2' })
+  const nextExecution = execution([event(1, 'run.queued')])
+  nextExecution.session.turn_count = 2
+  nextExecution.run.id = 'run-2'
+  nextExecution.run.turn_id = 'turn-2'
+  const restored = askReducer(followedUp, { type: 'snapshot.restored', execution: nextExecution })
+  expect(restored.turns).toHaveLength(2)
+  expect(restored.turns[0].runID).toBe('run-1')
+  expect(restored.turns[1].runID).toBe('run-2')
+  expect(restored.turns[1].input).toBe('现在好多了')
+  expect(restored.turns[1].optimistic).toBe(false)
+})
+
 it('full snapshot restores server turns and keeps only unmatched optimistic messages', () => {
   const local = askReducer(initialAskRuntimeState, { type: 'local.submitted', input: '旺仔怎么了', clientRunID: 'local-1' })
   const restored = askReducer(local, { type: 'snapshot.loaded', snapshot: snapshot([event(1, 'run.queued')]) })
@@ -175,6 +192,17 @@ it('allows a network error to return to reconnecting', () => {
   const failed = askReducer(initialAskRuntimeState, { type: 'request.failed', phase: 'network_error', message: '连接中断' })
   const reconnecting = askReducer(failed, { type: 'stream.reconnecting' })
   expect(reconnecting.phase).toBe('reconnecting')
+})
+
+it('enters reconnecting while restoring an existing session without dropping its conversation', () => {
+  const completedExecution = execution([event(1, 'run.queued'), event(2, 'run.completed')])
+  completedExecution.run.status = 'completed'
+  const completed = askReducer(initialAskRuntimeState, { type: 'snapshot.restored', execution: completedExecution })
+  const reconnecting = askReducer(completed, { type: 'snapshot.loading' })
+  expect(reconnecting.phase).toBe('reconnecting')
+  expect(reconnecting.session?.id).toBe('session-1')
+  expect(reconnecting.run?.id).toBe('run-1')
+  expect(reconnecting.turns).toEqual(completed.turns)
 })
 
 it('restores persisted same run replies as separate messages', () => {

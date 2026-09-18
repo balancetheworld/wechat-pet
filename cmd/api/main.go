@@ -130,27 +130,49 @@ func main() {
 		logger.Error("create ask repository", "error", err)
 		os.Exit(1)
 	}
-	var askExecutor askapp.Executor = askapp.DeterministicExecutor{}
-	if cfg.AIEnabled {
-		providerConfig := aiplatform.OpenAIConfig{APIKey: cfg.AIAPIKey, BaseURL: cfg.AIBaseURL, Model: cfg.AIModel, Timeout: time.Duration(cfg.AITimeoutSeconds) * time.Second, Observer: func(observation aiplatform.OpenAIObservation) {
-			logger.Info("ask ai provider", "provider", cfg.AIProvider, "operation", observation.Operation, "model", observation.Model, "duration_ms", observation.Duration.Milliseconds(), "input_tokens", observation.InputTokens, "output_tokens", observation.OutputTokens, "total_tokens", observation.TotalTokens, "status", observation.Status, "error_code", observation.ErrorCode, "retryable", observation.Retryable)
-		}}
-		if cfg.AIProvider == "hunyuan" {
-			askExecutor, err = aiplatform.NewHunyuanExecutor(providerConfig)
-		} else {
-			askExecutor, err = aiplatform.NewOpenAIExecutor(providerConfig)
-		}
-		if err != nil {
-			logger.Error("create ask ai executor", "error", err)
-			os.Exit(1)
-		}
-	}
-	askService, err := askapp.NewService(askRepository, petRepository, askExecutor)
+	providerConfig := aiplatform.OpenAIConfig{APIKey: cfg.AIAPIKey, BaseURL: cfg.AIBaseURL, Model: cfg.AIModel, Timeout: time.Duration(cfg.AITimeoutSeconds) * time.Second, Observer: func(observation aiplatform.OpenAIObservation) {
+		logger.Info("ask ai provider", "provider", cfg.AIProvider, "operation", observation.Operation, "model", observation.Model, "duration_ms", observation.Duration.Milliseconds(), "input_tokens", observation.InputTokens, "output_tokens", observation.OutputTokens, "total_tokens", observation.TotalTokens, "status", observation.Status, "error_code", observation.ErrorCode, "retryable", observation.Retryable)
+	}}
+	askService, err := askapp.NewService(askRepository, petRepository)
 	if err != nil {
 		logger.Error("create ask service", "error", err)
 		os.Exit(1)
 	}
 	askService.SetCalendarRepository(calendarRepository)
+	// v2 工具目录与业务读取端口（不依赖 AI 启用，供决策循环工具执行使用）。
+	askCatalog, err := askapp.DefaultCatalog(askapp.DefaultToolVersion)
+	if err != nil {
+		logger.Error("create ask tool catalog", "error", err)
+		os.Exit(1)
+	}
+	askService.SetToolCatalog(askCatalog)
+	askService.SetBusinessReadRepository(askapp.NewBusinessReadRepository(petRepository, calendarRepository, askRepository))
+	// v2 决策循环模型端口（依赖 AI 启用）。
+	if cfg.AIEnabled {
+		askProvider, providerErr := aiplatform.NewOpenAIProvider(providerConfig)
+		if providerErr != nil {
+			logger.Error("create ask v2 provider", "error", providerErr)
+			os.Exit(1)
+		}
+		askProfile := aiplatform.Profile{
+			ProviderID:     "openai",
+			Model:          cfg.AIModel,
+			Version:        "ask-profile-v1",
+			AdapterVersion: "openai-responses-v1",
+			Capabilities: aiplatform.Capabilities{
+				TextInput:          aiplatform.CapabilitySupported,
+				ImageInput:         aiplatform.CapabilitySupported,
+				ToolCalling:        aiplatform.CapabilitySupported,
+				StreamingText:      aiplatform.CapabilitySupported,
+				StreamingToolCall:  aiplatform.CapabilitySupported,
+				StructuredOutput:   aiplatform.CapabilitySupported,
+				Cancellation:       aiplatform.CapabilitySupported,
+				UsageNormalization: aiplatform.CapabilitySupported,
+			},
+			Parameters: []aiplatform.Parameter{{Name: "max_output_tokens", Value: 4096, Required: true}},
+		}
+		askService.SetAgentModel(aiplatform.NewAgentModelAdapter(askProvider, askProfile))
+	}
 	askWorker, err := askapp.NewRunWorker(askService, askRepository, askapp.RunWorkerConfig{
 		QueueSize:        100,
 		MaxAttempts:      3,
