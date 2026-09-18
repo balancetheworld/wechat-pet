@@ -8,9 +8,11 @@ import backgroundImage from '../../assets/background1.jpg'
 import bookPaperImage from '../../assets/book-page-bg.jpg'
 import catPhoto from '../../assets/cat2.png'
 import passportImage from '../../assets/passport.jpg'
+import { FloatingGuide } from '../../components/floating-guide'
 import { routes } from '../../constants/routes'
-import { createCalendarRecord } from '../../services/calendar'
-import { getPetProfile, getPetResource, getPets } from '../../services/pet'
+import { createCalendarRecord, updateCalendarRecord, uploadCalendarImage } from '../../services/calendar'
+import { createPetResource, getPetProfile, getPetResource, getPets, updatePetResource } from '../../services/pet'
+import { assetURL } from '../../services/request'
 import { useAppStore } from '../../stores/app-store'
 import { usePetStore } from '../../stores/pet-store'
 import { navigateTo, openPetEdit } from '../../utils/navigation'
@@ -36,6 +38,13 @@ interface BirthdayRecord {
   summary: string
 }
 
+interface BirthdayMediaItem {
+  id: string
+  record_id: string
+  type: string
+  asset_id: string
+}
+
 interface WeightRecord {
   id: string
   measured_at: string
@@ -48,14 +57,16 @@ interface GrowthEvent {
   occurred_at: string
   recorder: string
   content: string
+  /* 本地补充记录对应的日历记录 ID: 表单添加时由 createCalendarRecord 返回, 用于后续同步编辑到日历 */
+  calendar_record_id?: string
 }
 
 /* 章节（书固定 7 个章节；内容多的章节自动拆成多页） */
 const CHAPTERS = [
   { key: 'cover', name: '封面' },
   { key: 'identity', name: '身份名片' },
-  { key: 'personality', name: '个性说明书' },
   { key: 'health', name: '健康资料' },
+  { key: 'personality', name: '个性说明书' },
   { key: 'birthday', name: '生日纪念册' },
   { key: 'growth', name: '成长足迹' },
   { key: 'back', name: '封底' },
@@ -76,7 +87,7 @@ const CHAPTER_EN: Record<ChapterKey, string> = {
 
 /* 每页可容纳的条数（超出自动开新页） */
 const PERSONALITY_PER_PAGE = 5
-const BIRTHDAY_PER_PAGE = 3
+const BIRTHDAY_PER_PAGE = 7
 const GROWTH_FIRST_PAGE_EVENTS = 2
 const GROWTH_PER_PAGE = 3
 
@@ -157,6 +168,34 @@ function writeLocalGrowthEvents(petID: string, events: GrowthEvent[]) {
   }
 }
 
+/* 预置问答(preset-q-*)编辑后的本地覆盖缓存: 预置项不是服务端记录无法 PATCH,
+   编辑结果存本地, 加载档案时覆盖默认内容, 保证修改不因重新拉取而回退 */
+interface QuestionOverride { question: string, answer: string }
+
+const questionOverridesStorageKey = (petID: string) => `pet-question-overrides-${petID}`
+
+function readQuestionOverrides(petID: string): Record<string, QuestionOverride> {
+  try {
+    const stored = Taro.getStorageSync<unknown>(questionOverridesStorageKey(petID))
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+      return stored as Record<string, QuestionOverride>
+    }
+    return {}
+  }
+  catch {
+    return {}
+  }
+}
+
+function writeQuestionOverrides(petID: string, overrides: Record<string, QuestionOverride>) {
+  try {
+    Taro.setStorageSync(questionOverridesStorageKey(petID), overrides)
+  }
+  catch {
+    /* 存储失败静默忽略 */
+  }
+}
+
 /* 服务端列表 + 本地补充记录 合并, 并顺手清理已被服务端"认领"的本地缓存 */
 function syncGrowthEventsWithLocal(fresh: GrowthEvent[], stored: GrowthEvent[]): GrowthEvent[] {
   const freshKeys = new Set(fresh.map(growthEventKey))
@@ -195,6 +234,7 @@ export default function Profile() {
   const [personality, setPersonality] = useState<PersonalityItem[]>([])
   const [questions, setQuestions] = useState<QuestionItem[]>([])
   const [birthdayRecords, setBirthdayRecords] = useState<BirthdayRecord[]>([])
+  const [birthdayMedia, setBirthdayMedia] = useState<BirthdayMediaItem[]>([])
   const [weights, setWeights] = useState<WeightRecord[]>([])
   const [growthEvents, setGrowthEvents] = useState<GrowthEvent[]>([])
   const [loading, setLoading] = useState(true)
@@ -209,10 +249,11 @@ export default function Profile() {
   const [tocOpen, setTocOpen] = useState(false)
   /* 详情弹层 */
   /* 详情弹层 (editableTitle=true 时标题以输入框呈现, 可修改提问; subtitle 仅存不再展示) */
-  const [detail, setDetail] = useState<{ title: string, subtitle: string, body: string, bodyKey?: string, onSave?: (newBody: string, newTitle?: string) => void, editableTitle?: boolean } | null>(null)
+  const [detail, setDetail] = useState<{ title: string, subtitle: string, body: string, bodyKey?: string, onSave?: (newBody: string, newTitle?: string, newDate?: string) => void, editableTitle?: boolean, meta?: string, editableDate?: boolean, image?: string } | null>(null)
   /* detail 弹层编辑缓冲 */
   const [detailDraft, setDetailDraft] = useState('')
   const [detailTitleDraft, setDetailTitleDraft] = useState('')
+  const [detailDateDraft, setDetailDateDraft] = useState('')
   /* 宠物切换弹层 */
   const [switcherOpen, setSwitcherOpen] = useState(false)
   /* 档案页内联编辑状态：null=正常, 其它=对应章节进入"页面内可编辑"模式 */
@@ -230,20 +271,36 @@ export default function Profile() {
   })
   const [growthFormPetID, setGrowthFormPetID] = useState('')
   const [growthSubmitting, setGrowthSubmitting] = useState(false)
+  /* 图片上传 (与日历添加记录表单一致): 上传后拿 asset_id, 提交时随记录写入 */
+  const [growthFormMediaAssetIDs, setGrowthFormMediaAssetIDs] = useState<string[]>([])
+  const [growthFormLocalImagePaths, setGrowthFormLocalImagePaths] = useState<string[]>([])
+  const [growthFormUploading, setGrowthFormUploading] = useState(false)
+
+  /* ===== 生日纪念册添加记录 (通用档案资源 POST birthday-records + birthday-media) ===== */
+  const [birthdayFormVisible, setBirthdayFormVisible] = useState(false)
+  const [birthdayFormPetID, setBirthdayFormPetID] = useState('')
+  const [birthdayFormYear, setBirthdayFormYear] = useState(String(new Date().getFullYear()))
+  const [birthdayFormAge, setBirthdayFormAge] = useState('')
+  const [birthdayFormSummary, setBirthdayFormSummary] = useState('')
+  const [birthdaySubmitting, setBirthdaySubmitting] = useState(false)
+  const [birthdayFormMediaAssetIDs, setBirthdayFormMediaAssetIDs] = useState<string[]>([])
+  const [birthdayFormLocalImagePaths, setBirthdayFormLocalImagePaths] = useState<string[]>([])
+  const [birthdayFormUploading, setBirthdayFormUploading] = useState(false)
 
   const selectedPet = pets.find(item => item.id === currentPetId) || pets[0]
 
-  /* ===== 成长足迹添加记录表单打开时, 隐藏底部 tab-bar (与日历页同机制), 避免遮住表单 ===== */
+  /* ===== 成长足迹/生日纪念册添加表单打开时, 隐藏底部 tab-bar (与日历页同机制), 避免遮住表单 ===== */
   const setCalendarFormVisible = useAppStore(state => state.setCalendarFormVisible)
+  const anyFormVisible = growthFormVisible || birthdayFormVisible
 
   useEffect(() => {
-    setCalendarFormVisible(growthFormVisible)
-    Taro.eventCenter.trigger('calendar-form-visibility', growthFormVisible)
+    setCalendarFormVisible(anyFormVisible)
+    Taro.eventCenter.trigger('calendar-form-visibility', anyFormVisible)
     return () => {
       setCalendarFormVisible(false)
       Taro.eventCenter.trigger('calendar-form-visibility', false)
     }
-  }, [growthFormVisible, setCalendarFormVisible])
+  }, [anyFormVisible, setCalendarFormVisible])
 
   /* ===== 动态分页：按数据量把每个章节拆成若干页 ===== */
   const pages = useMemo<BookPage[]>(() => {
@@ -260,8 +317,8 @@ export default function Profile() {
 
     push('cover', '封面', 1, 1)
     push('identity', '身份名片', 1, 1)
-    for (let i = 1; i <= personalityParts; i++) push('personality', '个性说明书', i, personalityParts)
     push('health', '健康资料', 1, 1)
+    for (let i = 1; i <= personalityParts; i++) push('personality', '个性说明书', i, personalityParts)
     for (let i = 1; i <= birthdayParts; i++) push('birthday', '生日纪念册', i, birthdayParts)
     for (let i = 1; i <= growthParts; i++) push('growth', '成长足迹', i, growthParts)
     push('back', '封底', 1, 1)
@@ -285,26 +342,34 @@ export default function Profile() {
     }
     try {
       const petProfile = await getPetProfile(pet.id)
-      const [personalityItems, questionItems, records, weightItems, eventItems] = await Promise.all([
+      const [personalityItems, questionItems, records, weightItems, eventItems, birthdayMediaItems] = await Promise.all([
         getPetResource<PersonalityItem[]>(pet.id, 'personality'),
         getPetResource<QuestionItem[]>(pet.id, 'questions'),
         getPetResource<BirthdayRecord[]>(pet.id, 'birthday-records'),
         getPetResource<WeightRecord[]>(pet.id, 'weights'),
         getPetResource<GrowthEvent[]>(pet.id, 'growth-events'),
+        getPetResource<BirthdayMediaItem[]>(pet.id, 'birthday-media'),
       ])
       setProfile(petProfile)
       /* 个性页: 预置标签/问答固定展示在前, 后端已有且不重复的条目追加在后 */
       const presetTraits = new Set(DEFAULT_PERSONALITY.map(tag => tag.trait))
-      const presetQuestions = new Set(DEFAULT_QUESTIONS.map(q => q.question))
+      /* 预置问答应用本地编辑覆盖(用户改过的预置项以修改后的内容展示) */
+      const questionOverrides = readQuestionOverrides(pet.id)
+      const displayPresetQuestions = DEFAULT_QUESTIONS.map(q => (
+        questionOverrides[q.id] ? { ...q, ...questionOverrides[q.id] } : q
+      ))
+      const presetQuestions = new Set(displayPresetQuestions.map(q => q.question))
       setPersonality([
         ...DEFAULT_PERSONALITY,
         ...personalityItems.filter(item => !presetTraits.has(item.trait)),
       ])
       setQuestions([
-        ...DEFAULT_QUESTIONS,
+        ...displayPresetQuestions,
         ...questionItems.filter(item => !presetQuestions.has(item.question)),
       ])
-      setBirthdayRecords(records)
+      /* 生日记录按年份新→旧排序: 最新一年的记录做大图卡, 下方年份行新记录在上 */
+      setBirthdayRecords([...records].sort((a, b) => b.year - a.year))
+      setBirthdayMedia(Array.isArray(birthdayMediaItems) ? birthdayMediaItems : [])
       setWeights(weightItems)
       /* 服务端成长事件 + 本地补充记录 合并展示 */
       const stored = readLocalGrowthEvents(pet.id)
@@ -440,7 +505,7 @@ export default function Profile() {
     }, 400)
   }, [currentPage, goToPage, pageCount, touchStartX])
 
-  const openDetail = (title: string, subtitle: string, body: string, onSave?: (newBody: string, newTitle?: string) => void, editableTitle?: boolean) => {
+  const openDetail = (title: string, subtitle: string, body: string, onSave?: (newBody: string, newTitle?: string, newDate?: string) => void, editableTitle?: boolean, meta?: string, editableDate?: boolean, image?: string) => {
     /* 编辑章节下若调用方未传 onSave, 自动提供一个本地保存提示 */
     let effectiveOnSave = onSave
     if (editingChapter && !onSave) {
@@ -448,9 +513,11 @@ export default function Profile() {
         Taro.showToast({ title: `已保存"${title}"的新内容到本地`, icon: 'success' })
       }
     }
-    setDetail({ title, subtitle, body, onSave: effectiveOnSave, editableTitle })
+    setDetail({ title, subtitle, body, onSave: effectiveOnSave, editableTitle, meta, editableDate, image })
     setDetailDraft(body)
     setDetailTitleDraft(title)
+    /* 可编辑日期: 从 meta 中取出日期部分("YYYY-MM-DD · 记录者"的前段)作为草稿 */
+    setDetailDateDraft(editableDate ? (meta || '').split(' · ')[0] || '' : '')
   }
 
   /* 个性说明书: 添加标签 — 直接复用与"修改"标签相同的详情卡(填写→保存) */
@@ -492,11 +559,147 @@ export default function Profile() {
     setGrowthFormContent('')
     setGrowthFormDate(todayStr)
     setGrowthFormPetID(targetPetID)
+    setGrowthFormMediaAssetIDs([])
+    setGrowthFormLocalImagePaths([])
+    setGrowthFormUploading(false)
     setGrowthFormVisible(true)
+  }
+
+  /* 选图并上传到资产存储 (与日历页 handleChooseImage 同款) */
+  async function handleGrowthChooseImage() {
+    try {
+      const result = await Taro.chooseImage({
+        count: Math.min(9 - growthFormLocalImagePaths.length, 9),
+        sizeType: ['compressed'],
+        sourceType: ['album', 'camera'],
+      })
+      if (!result.tempFilePaths.length) {
+        return
+      }
+      setGrowthFormUploading(true)
+      const uploaded = await Promise.all(result.tempFilePaths.map(filePath => uploadCalendarImage(filePath)))
+      setGrowthFormMediaAssetIDs(previous => [...previous, ...uploaded.map(item => item.asset_id)])
+      setGrowthFormLocalImagePaths(previous => [...previous, ...result.tempFilePaths])
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '图片上传失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setGrowthFormUploading(false)
+    }
   }
 
   function closeGrowthForm() {
     setGrowthFormVisible(false)
+  }
+
+  /* ===== 生日纪念册添加记录 ===== */
+  function openBirthdayForm() {
+    const targetPetID = currentPetId || pets[0]?.id || ''
+    const now = new Date()
+    const year = now.getFullYear()
+    /* 默认几岁: 用宠物生日的年份推算, 推不出来留空让用户填 */
+    const birthYear = Number.parseInt((profile?.birthday || '').slice(0, 4), 10)
+    setBirthdayFormPetID(targetPetID)
+    setBirthdayFormYear(String(year))
+    setBirthdayFormAge(Number.isFinite(birthYear) && birthYear > 0 ? String(year - birthYear) : '')
+    setBirthdayFormSummary('')
+    setBirthdayFormMediaAssetIDs([])
+    setBirthdayFormLocalImagePaths([])
+    setBirthdayFormUploading(false)
+    setBirthdayFormVisible(true)
+  }
+
+  function closeBirthdayForm() {
+    setBirthdayFormVisible(false)
+  }
+
+  /* 选图并上传到资产存储 (与成长足迹表单同款) */
+  async function handleBirthdayChooseImage() {
+    try {
+      const result = await Taro.chooseImage({
+        count: Math.min(9 - birthdayFormLocalImagePaths.length, 9),
+        sizeType: ['compressed'],
+        sourceType: ['album', 'camera'],
+      })
+      if (!result.tempFilePaths.length) {
+        return
+      }
+      setBirthdayFormUploading(true)
+      const uploaded = await Promise.all(result.tempFilePaths.map(filePath => uploadCalendarImage(filePath)))
+      setBirthdayFormMediaAssetIDs(previous => [...previous, ...uploaded.map(item => item.asset_id)])
+      setBirthdayFormLocalImagePaths(previous => [...previous, ...result.tempFilePaths])
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '图片上传失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setBirthdayFormUploading(false)
+    }
+  }
+
+  async function handleCreateBirthdayRecord() {
+    if (birthdaySubmitting) {
+      return
+    }
+    const petID = birthdayFormPetID
+    if (!petID) {
+      await Taro.showToast({ title: '请选择宠物', icon: 'none' })
+      return
+    }
+    const year = Number.parseInt(birthdayFormYear, 10)
+    if (!Number.isFinite(year) || year < 1990 || year > 2100) {
+      await Taro.showToast({ title: '请输入正确的年份', icon: 'none' })
+      return
+    }
+    const age = Number.parseInt(birthdayFormAge, 10)
+    if (!Number.isFinite(age) || age < 0 || age > 50) {
+      await Taro.showToast({ title: '请输入正确的年龄', icon: 'none' })
+      return
+    }
+    if (birthdayFormUploading) {
+      return
+    }
+    setBirthdaySubmitting(true)
+    try {
+      /* 1) 写入生日记录(year/age/summary), 后端返回带 id 的完整 payload */
+      const created = await createPetResource(petID, 'birthday-records', {
+        year,
+        age,
+        summary: birthdayFormSummary.trim(),
+      })
+      const recordID = typeof created?.id === 'string' ? created.id : `local-${Date.now()}`
+      /* 2) 关联照片: 逐张写入 birthday-media */
+      if (birthdayFormMediaAssetIDs.length) {
+        await Promise.all(birthdayFormMediaAssetIDs.map(assetID => createPetResource(petID, 'birthday-media', {
+          record_id: recordID,
+          type: 'photo',
+          asset_id: assetID,
+        })))
+      }
+      /* 3) 本地追加, 与加载排序一致: 年份新→旧, 最新一年的记录展示在大图卡 */
+      setBirthdayRecords(previous => [...previous, { id: recordID, year, age, summary: birthdayFormSummary.trim() }].sort((a, b) => b.year - a.year))
+      /* 4) 照片同步进本地状态, 详情卡与首图立即可见 */
+      if (birthdayFormMediaAssetIDs.length) {
+        setBirthdayMedia(previous => [...previous, ...birthdayFormMediaAssetIDs.map((assetID, index) => ({
+          id: `${recordID}-media-${index}`,
+          record_id: recordID,
+          type: 'photo',
+          asset_id: assetID,
+        }))])
+      }
+      setBirthdayFormVisible(false)
+      await Taro.showToast({ title: '生日已记录', icon: 'success' })
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '保存生日记录失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setBirthdaySubmitting(false)
+    }
   }
 
   /* ===== 每页右下角"修改"按钮统一行为 =====
@@ -527,32 +730,39 @@ export default function Profile() {
       await Taro.showToast({ title: '请选择宠物', icon: 'none' })
       return
     }
-    if (!growthFormContent.trim()) {
-      await Taro.showToast({ title: '请写点内容', icon: 'none' })
+    if (!growthFormContent.trim() && !growthFormMediaAssetIDs.length) {
+      await Taro.showToast({ title: '写点内容或添加图片', icon: 'none' })
+      return
+    }
+    if (growthFormUploading) {
       return
     }
     setGrowthSubmitting(true)
     const occurredAt = `${growthFormDate}T12:00:00+09:00`
     try {
-      /* 1) 写入后端日历记录(同步到日历), 成长足迹仅支持日常类型 */
-      await createCalendarRecord({
+      /* 1) 写入后端日历记录(同步到日历), 成长足迹仅支持日常类型; 图片随记录一并写入 */
+      const createdRecord = await createCalendarRecord({
         category: 'daily',
         pet_id: petID,
-        content: growthFormContent.trim(),
+        content: growthFormContent.trim() || undefined,
+        media_asset_ids: growthFormMediaAssetIDs.length ? growthFormMediaAssetIDs : undefined,
         occurred_at: occurredAt,
       })
-      /* 2) 立即在档案页成长足迹中追加一条(乐观更新,无需等后端推送) */
+      /* 2) 立即在档案页成长足迹中追加一条(乐观更新,无需等后端推送); 记下日历记录 ID 备后续同步编辑 */
       const newEvent: GrowthEvent = {
         id: `local-${Date.now()}`,
         type: '日常',
         occurred_at: occurredAt,
         recorder: '我',
         content: growthFormContent.trim(),
+        calendar_record_id: createdRecord?.id,
       }
       /* 2) 写入本地补充缓存 + 乐观更新, 保证"事件记录"下立即出现 */
       writeLocalGrowthEvents(petID, [newEvent, ...readLocalGrowthEvents(petID)])
       setGrowthEvents(previous => [newEvent, ...previous])
       setGrowthFormVisible(false)
+      setGrowthFormMediaAssetIDs([])
+      setGrowthFormLocalImagePaths([])
       await Taro.showToast({ title: '已记一笔', icon: 'success' })
       /* 3) 后台静默重拉并与本地缓存合并: 服务端映射出的正式记录自然取代本地记录 */
       void getPetResource<GrowthEvent[]>(petID, 'growth-events')
@@ -787,11 +997,29 @@ export default function Profile() {
                       '',
                       q.answer || '',
                       (newBody: string, newTitle?: string) => {
+                        const petID = selectedPet?.id
+                        if (!petID) {
+                          return
+                        }
                         const nextTitle = (newTitle ?? '').trim() || q.question
+                        const nextAnswer = newBody.trim()
+                        /* 本地先更新, 弹窗关闭后立即可见 */
                         setQuestions(previous => previous.map(item => (
-                          item.id === q.id ? { ...item, question: nextTitle, answer: newBody.trim() } : item
+                          item.id === q.id ? { ...item, question: nextTitle, answer: nextAnswer } : item
                         )))
-                        Taro.showToast({ title: '已保存修改', icon: 'success' })
+                        if (q.id.startsWith('preset-')) {
+                          /* 预置问答不是服务端记录: 写入本地覆盖缓存, 重拉合并后不回退 */
+                          const overrides = readQuestionOverrides(petID)
+                          overrides[q.id] = { question: nextTitle, answer: nextAnswer }
+                          writeQuestionOverrides(petID, overrides)
+                          Taro.showToast({ title: '已保存修改', icon: 'success' })
+                        }
+                        else {
+                          /* 服务端问答: PATCH 持久化到后端 */
+                          void updatePetResource(petID, 'questions', q.id, { question: nextTitle, answer: nextAnswer })
+                            .then(() => Taro.showToast({ title: '已保存修改', icon: 'success' }))
+                            .catch(() => Taro.showToast({ title: '保存失败,请重试', icon: 'none' }))
+                        }
                       },
                       true,
                     )
@@ -881,6 +1109,12 @@ export default function Profile() {
   }
 
   /* ===== 章节: 生日纪念册（每页 3 条记录，超出自动开新页） ===== */
+  /* 生日记录关联的第一张照片 URL (无照片返回空串) */
+  const birthdayRecordImage = (recordID: string) => {
+    const media = birthdayMedia.find(item => item.record_id === recordID)
+    return media ? assetURL(media.asset_id) : ''
+  }
+
   const renderBirthdayPage = (part: number) => {
     const start = (part - 1) * BIRTHDAY_PER_PAGE
     const partRecords = birthdayRecords.slice(start, start + BIRTHDAY_PER_PAGE)
@@ -904,11 +1138,17 @@ export default function Profile() {
             </View>
           )}
           {partRecords.map((r, i) => {
-            const open = () => openDetail(`${r.age} 生日`, r.summary || '暂无简介', `出生于 ${r.year} 年。这一年的故事是：${r.summary || '正在补充中'}。`)
+            /* 详情卡附照片: 取该记录的第一张生日照片(有才显示, 只显示一张) */
+            const recordImage = birthdayRecordImage(r.id)
+            const open = () => openDetail(`${r.age} 生日`, r.summary || '暂无简介', `出生于 ${r.year} 年。这一年的故事是：${r.summary || '正在补充中'}。`, undefined, undefined, undefined, undefined, recordImage)
             if (start + i === 0) {
               return (
                 <View className="birthday-feature" key={r.id} onClick={open}>
-                  <View className="media-placeholder">📷</View>
+                  <View className="media-placeholder">
+                    {recordImage
+                      ? <Image className="media-placeholder-image" src={recordImage} mode="aspectFill" />
+                      : '📷'}
+                  </View>
                   <View className="birthday-copy">
                     <Image className="birthday-copy-bg" src={catPhoto} mode="aspectFill" />
                     <Text className="span">
@@ -944,7 +1184,7 @@ export default function Profile() {
             )
           })}
           {editingChapter === 'birthday' && part === 1 && (
-            <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '添加生日记录: 后续版本支持', icon: 'none' })}>＋ 添加生日记录</View>
+            <View className="inline-edit-add" onClick={openBirthdayForm}>＋ 添加生日记录</View>
           )}
         </View>
       </View>
@@ -1030,10 +1270,67 @@ kg
               <View
                 className="moment"
                 key={ev.id}
-                onClick={() => openDetail(ev.type, ev.content, `${ev.occurred_at} · ${ev.recorder || '我'}。${ev.content}`)}
+                onClick={() => {
+                  const meta = `${(ev.occurred_at || '').slice(0, 10)} · ${ev.recorder || '我'}`
+                  if (editingChapter === 'growth') {
+                    /* 编辑态: 标题与日期均为点击可修改(下划线输入框), 内容走"记录内容"; 日期仅替换前段 */
+                    openDetail(
+                      ev.type,
+                      '',
+                      ev.content,
+                      (newBody: string, newTitle?: string, newDate?: string) => {
+                        const petID = selectedPet?.id
+                        if (!petID) {
+                          return
+                        }
+                        const nextTitle = (newTitle ?? '').trim() || ev.type
+                        const nextDate = (newDate ?? '').trim() || ev.occurred_at.slice(0, 10)
+                        const nextContent = newBody.trim()
+                        const nextOccurredAt = (ev.occurred_at || `${nextDate}T00:00:00Z`).replace(/^\d{4}-\d{2}-\d{2}/, nextDate)
+                        /* 本地先更新, 保证弹窗关闭后立即可见 */
+                        setGrowthEvents(previous => previous.map(item => (
+                          item.id === ev.id
+                            ? { ...item, type: nextTitle, content: nextContent, occurred_at: nextOccurredAt }
+                            : item
+                        )))
+                        if (ev.id.startsWith('local-')) {
+                          /* 本地补充记录: 同步写入本地缓存, 否则重新进入页面 loadProfile 合并旧缓存后改动会被覆盖 */
+                          const stored = readLocalGrowthEvents(petID)
+                          writeLocalGrowthEvents(petID, stored.map(item => (
+                            item.id === ev.id
+                              ? { ...item, type: nextTitle, content: nextContent, occurred_at: nextOccurredAt }
+                              : item
+                          )))
+                          /* 同步更新对应的日历记录(表单添加的事件都写了一份到日历), 失败不影响档案侧 */
+                          if (ev.calendar_record_id) {
+                            void updateCalendarRecord(ev.calendar_record_id, { content: nextContent, occurred_at: nextOccurredAt }).catch(() => {})
+                          }
+                          Taro.showToast({ title: '已保存修改', icon: 'success' })
+                        }
+                        else {
+                          /* 服务端正式记录: PATCH 持久化到后端, 否则重新加载后会被服务端旧数据覆盖 */
+                          void updatePetResource(petID, 'growth-events', ev.id, {
+                            type: nextTitle,
+                            occurred_at: nextOccurredAt,
+                            content: nextContent,
+                          })
+                            .then(() => Taro.showToast({ title: '已保存修改', icon: 'success' }))
+                            .catch(() => Taro.showToast({ title: '保存失败,请重试', icon: 'none' }))
+                        }
+                      },
+                      true,
+                      meta,
+                      true,
+                    )
+                  }
+ else {
+                    /* 非编辑态: 只读查看 */
+                    openDetail(ev.type, ev.content, ev.content, undefined, undefined, meta)
+                  }
+                }}
               >
                 <Text className="time">
-{ev.occurred_at}
+{(ev.occurred_at || '').slice(0, 10)}
 {' '}
 ·
 {' '}
@@ -1258,6 +1555,7 @@ kg
           setDetail(null)
           setDetailDraft('')
           setDetailTitleDraft('')
+          setDetailDateDraft('')
         }}
       >
         <View className="detail-card" onClick={event => event.stopPropagation()}>
@@ -1273,6 +1571,21 @@ kg
                   />
                 )
                 : <Text className="h2">{detail?.title || '详情'}</Text>}
+              {!!detail?.meta && (
+                detail?.editableDate && detail?.onSave
+                  ? (
+                    <View className="detail-meta-row">
+                      <Input
+                        className="detail-date-input"
+                        value={detailDateDraft}
+                        maxlength={10}
+                        onInput={event => setDetailDateDraft(event.detail.value)}
+                      />
+                      <Text className="detail-meta">{(detail.meta || '').split(' · ').slice(1).join(' · ') ? ` · ${(detail.meta || '').split(' · ').slice(1).join(' · ')}` : ''}</Text>
+                    </View>
+                  )
+                  : <Text className="detail-meta">{detail.meta}</Text>
+              )}
             </View>
             <Button
               className="close-button"
@@ -1280,6 +1593,7 @@ kg
                 setDetail(null)
                 setDetailDraft('')
                 setDetailTitleDraft('')
+                setDetailDateDraft('')
               }}
             >
               ×
@@ -1298,6 +1612,17 @@ kg
               )
               : <Text className="p">{detail?.body || ''}</Text>}
           </View>
+          {!!detail?.image && (
+            <View className="detail-block detail-block--media">
+              <Text className="span">照片</Text>
+              <Image
+                className="detail-image"
+                src={detail.image}
+                mode="aspectFill"
+                onClick={() => Taro.previewImage({ urls: [detail.image as string] })}
+              />
+            </View>
+          )}
           {detail?.onSave && (
             <View className="detail-card-actions">
               <Button
@@ -1312,10 +1637,11 @@ kg
               <Button
                 className="primary-button"
                 onClick={() => {
-                  detail.onSave?.(detailDraft, detailTitleDraft)
+                  detail.onSave?.(detailDraft, detailTitleDraft, detailDateDraft)
                   setDetail(null)
                   setDetailDraft('')
                   setDetailTitleDraft('')
+                  setDetailDateDraft('')
                 }}
               >
                 保存
@@ -1405,6 +1731,17 @@ kg
             <Text className="cal-field-label">记录内容</Text>
             <Textarea className="cal-textarea" value={growthFormContent} maxlength={1000} placeholder="写下今天发生的事" onInput={event => setGrowthFormContent(event.detail.value)} />
 
+            <View className="cal-image-actions">
+              <View className="cal-image-button" onClick={handleGrowthChooseImage}>{growthFormUploading ? '上传中' : '添加图片'}</View>
+              {growthFormLocalImagePaths.length > 0 && (
+                <Text>
+                  已选择
+                  {growthFormLocalImagePaths.length}
+                  /9 张
+                </Text>
+              )}
+            </View>
+
             <View className="cal-sheet-actions">
               <View className="cal-cancel-button" onClick={closeGrowthForm}>取消</View>
               <View className={`cal-save-button${growthSubmitting ? ' disabled' : ''}`} onClick={handleCreateGrowthEvent}>{growthSubmitting ? '保存中' : '保存'}</View>
@@ -1412,6 +1749,54 @@ kg
           </View>
         </View>
       )}
+
+      {/* 生日纪念册添加记录弹层 (复用 cal-* 弹层样式) */}
+      {birthdayFormVisible && (
+        <View className="cal-overlay" onClick={closeBirthdayForm}>
+          <View className="cal-sheet" onClick={event => event.stopPropagation()}>
+            <View className="cal-sheet-handle" />
+            <Text className="cal-sheet-title">添加生日记录</Text>
+
+            <Text className="cal-field-label">宠物</Text>
+            <View className="cal-pet-chips">
+              {pets.map(pet => (
+                <View key={pet.id} className={`cal-pet-chip${birthdayFormPetID === pet.id ? ' selected' : ''}`} onClick={() => setBirthdayFormPetID(pet.id)}>{pet.name}</View>
+              ))}
+            </View>
+
+            <View className="cal-form-row">
+              <View className="cal-form-col">
+                <Text className="cal-field-label">年份</Text>
+                <Input className="cal-input" type="number" value={birthdayFormYear} maxlength={4} placeholder="如 2025" onInput={event => setBirthdayFormYear(event.detail.value)} />
+              </View>
+              <View className="cal-form-col">
+                <Text className="cal-field-label">几岁</Text>
+                <Input className="cal-input" type="number" value={birthdayFormAge} maxlength={2} placeholder="如 1" onInput={event => setBirthdayFormAge(event.detail.value)} />
+              </View>
+            </View>
+
+            <Text className="cal-field-label">这一岁的故事</Text>
+            <Textarea className="cal-textarea" value={birthdayFormSummary} maxlength={500} placeholder="记录这一年里值得留念的事" onInput={event => setBirthdayFormSummary(event.detail.value)} />
+
+            <View className="cal-image-actions">
+              <View className="cal-image-button" onClick={handleBirthdayChooseImage}>{birthdayFormUploading ? '上传中' : '添加照片'}</View>
+              {birthdayFormLocalImagePaths.length > 0 && (
+                <Text>
+                  已选择
+                  {birthdayFormLocalImagePaths.length}
+                  /9 张
+                </Text>
+              )}
+            </View>
+
+            <View className="cal-sheet-actions">
+              <View className="cal-cancel-button" onClick={closeBirthdayForm}>取消</View>
+              <View className={`cal-save-button${birthdaySubmitting ? ' disabled' : ''}`} onClick={handleCreateBirthdayRecord}>{birthdaySubmitting ? '保存中' : '保存'}</View>
+            </View>
+          </View>
+        </View>
+      )}
+      <FloatingGuide />
     </View>
   )
 }

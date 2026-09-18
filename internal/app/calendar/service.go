@@ -16,6 +16,7 @@ type Repository interface {
 	ListMonth(context.Context, string, string, string) ([]DayMarkerDTO, error)
 	GetDay(context.Context, string, string) (DayDTO, error)
 	CreateRecord(context.Context, string, string, CreateRecordRequest, time.Time) (RecordDTO, error)
+	UpdateRecord(context.Context, string, string, string, UpdateRecordRequest, *time.Time) (RecordDTO, error)
 	CompleteReminder(context.Context, string, string, string, CompleteReminderRequest, time.Time) (CompleteReminderDTO, error)
 }
 
@@ -85,6 +86,40 @@ func (s *Service) CreateRecord(ctx context.Context, familyID, userID string, req
 		return RecordDTO{}, err
 	}
 	value, err := s.repository.CreateRecord(ctx, familyID, userID, request, occurredAt)
+	if err != nil {
+		return RecordDTO{}, mapError(err)
+	}
+	if err := s.resolveRecordMedia(ctx, &value); err != nil {
+		return RecordDTO{}, err
+	}
+	return value, nil
+}
+
+/* UpdateRecord 部分更新日历记录(内容/发生时间): 供档案事件编辑等场景同步日历 */
+func (s *Service) UpdateRecord(ctx context.Context, familyID, userID, recordID string, request UpdateRecordRequest) (RecordDTO, error) {
+	if strings.TrimSpace(recordID) == "" {
+		return RecordDTO{}, appErrors.InvalidParam("日历记录 ID 不能为空")
+	}
+	if request.Content == nil && request.OccurredAt == nil {
+		return RecordDTO{}, appErrors.InvalidParam("没有可更新字段")
+	}
+	content := request.Content
+	if content != nil {
+		trimmed := strings.TrimSpace(*content)
+		content = &trimmed
+		if len(trimmed) > 2000 {
+			return RecordDTO{}, appErrors.InvalidParam("记录内容不能超过 2000 个字符")
+		}
+	}
+	var occurredAt *time.Time
+	if request.OccurredAt != nil {
+		parsed, err := parseDateTime(*request.OccurredAt)
+		if err != nil {
+			return RecordDTO{}, err
+		}
+		occurredAt = &parsed
+	}
+	value, err := s.repository.UpdateRecord(ctx, familyID, userID, recordID, UpdateRecordRequest{Content: content}, occurredAt)
 	if err != nil {
 		return RecordDTO{}, mapError(err)
 	}

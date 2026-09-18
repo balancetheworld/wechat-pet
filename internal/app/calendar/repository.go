@@ -169,6 +169,32 @@ func (r *SQLRepository) CreateRecord(ctx context.Context, familyID, userID strin
 	return r.getRecord(ctx, familyID, recordID)
 }
 
+/* UpdateRecord 部分更新日历记录: content 指针非 nil 时更新内容, occurredAt 非 nil 时同步更新发生时间与日期列 */
+func (r *SQLRepository) UpdateRecord(ctx context.Context, familyID, userID, recordID string, request UpdateRecordRequest, occurredAt *time.Time) (RecordDTO, error) {
+	sets := []string{"updated_by = ?", "updated_at = CURRENT_TIMESTAMP"}
+	args := []any{userID}
+	if request.Content != nil {
+		sets = append(sets, "content = ?")
+		args = append(args, *request.Content)
+	}
+	if occurredAt != nil {
+		sets = append(sets, "occurred_at = ?", "occurred_on = ?")
+		args = append(args, *occurredAt, occurredAt.Format("2006-01-02"))
+	}
+	args = append(args, recordID, familyID)
+	result, err := r.db.ExecContext(ctx, r.query("UPDATE calendar_records SET "+strings.Join(sets, ", ")+" WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), args...)
+	if err != nil {
+		return RecordDTO{}, err
+	}
+	if affected, err := result.RowsAffected(); err != nil || affected == 0 {
+		if err != nil {
+			return RecordDTO{}, err
+		}
+		return RecordDTO{}, sql.ErrNoRows
+	}
+	return r.getRecord(ctx, familyID, recordID)
+}
+
 func (r *SQLRepository) CompleteReminder(ctx context.Context, familyID, userID, reminderID string, request CompleteReminderRequest, completedAt time.Time) (CompleteReminderDTO, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {

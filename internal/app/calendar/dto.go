@@ -101,6 +101,12 @@ type CreateReminderRequest struct {
 	NotificationChannels []string `json:"notification_channels"`
 }
 
+/* UpdateRecordRequest 部分更新日历记录: 指针为 nil 表示不更新该字段 */
+type UpdateRecordRequest struct {
+	Content    *string `json:"content"`
+	OccurredAt *string `json:"occurred_at"`
+}
+
 type CreateRecordRequest struct {
 	Category          string                  `json:"category"`
 	MedicalType       string                  `json:"medical_type"`

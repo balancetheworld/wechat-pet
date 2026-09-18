@@ -3,6 +3,7 @@ import type { Pet } from '../../types/pet'
 import { Image, Input, Picker, ScrollView, Text, Textarea, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
 import { useCallback, useEffect, useState } from 'react'
+import { FloatingGuide } from '../../components/floating-guide'
 import PageBackground from '../../components/page-background'
 import { routes } from '../../constants/routes'
 import { completeCalendarReminder, createCalendarRecord, getCalendarDay, getCalendarMonth, uploadCalendarImage } from '../../services/calendar'
@@ -176,6 +177,11 @@ export default function Calendar() {
     setMonth(monthOf(today))
     setCalendarExpanded(false)
     void loadInitialData()
+    /* 首次登录悬浮猫指引: 引导页建完家庭后带着标记来到日历页, 在此消费并启动第 7 轮 */
+    if (Taro.getStorageSync('pet-first-guide') === 'calendar') {
+      Taro.removeStorageSync('pet-first-guide')
+      useAppStore.getState().setGuideStage('calendar')
+    }
   })
 
   useEffect(() => {
@@ -616,6 +622,7 @@ export default function Calendar() {
           </View>
         )}
       </ScrollView>
+      <FloatingGuide />
     </View>
   )
 }

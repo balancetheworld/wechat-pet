@@ -17,5 +17,6 @@ func RegisterRoutes(router *gin.RouterGroup, signer *jwtpkg.Signer, familyReposi
 	group.GET("/months/:month", handler.Month)
 	group.GET("/days/:date", handler.Day)
 	group.POST("/records", handler.CreateRecord)
+	group.PATCH("/records/:record_id", handler.UpdateRecord)
 	group.POST("/reminders/:reminder_id/complete", handler.CompleteReminder)
 }

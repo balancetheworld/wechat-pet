@@ -33,6 +33,9 @@ export default function ProfileOnboarding() {
   const [loginMounted, setLoginMounted] = useState(false)
   const [authDisabled, setAuthDisabled] = useState(false)
   const [loginOut, setLoginOut] = useState(false)
+  const [ackMounted, setAckMounted] = useState(false)
+  const [ackOut, setAckOut] = useState(false)
+  const [ackDisabled, setAckDisabled] = useState(false)
   const [profileMounted, setProfileMounted] = useState(false)
   const [profileSubmitted, setProfileSubmitted] = useState(false)
   const [avatarOut, setAvatarOut] = useState(false)
@@ -78,14 +81,14 @@ export default function ProfileOnboarding() {
     return new Promise<void>(resolve => setTimeout(resolve, ms))
   }
 
-  const typeText = useCallback(async (text: string, speed = 150) => {
+  const typeText = useCallback(async (text: string, speed = 70) => {
     for (let i = 0; i <= text.length; i += 1) {
       setSpeechText(text.slice(0, i))
       await sleep(speed)
     }
   }, [])
 
-  const eraseText = useCallback(async (text: string, speed = 70) => {
+  const eraseText = useCallback(async (text: string, speed = 35) => {
     for (let i = text.length; i >= 0; i -= 1) {
       setSpeechText(text.slice(0, i))
       await sleep(speed)
@@ -93,37 +96,50 @@ export default function ProfileOnboarding() {
   }, [])
 
   async function playLoginSuccessFlow() {
-    await eraseText('要使用的话需要先登录哦')
-    await typeText('好耶！登录成功了')
-    await sleep(500)
-    await eraseText('好耶！登录成功了')
-    await typeText('请设置你的头像和名字')
+    await eraseText('要使用需要先登录哦')
+    await typeText('猫猜人是第一次加入我们吧')
     await sleep(300)
+    await eraseText('猫猜人是第一次加入我们吧')
+    await typeText('让猫带人先了解下吧')
+    await sleep(250)
     setLoginOut(true)
-    await sleep(420)
+    await sleep(400)
     setLoginMounted(false)
+    setAckMounted(true)
+  }
+
+  async function handleAckClick() {
+    if (ackDisabled) {
+      return
+    }
+    setAckDisabled(true)
+    await eraseText('让猫带人先了解下吧')
+    await typeText('选择人的昵称和头像吧')
+    await sleep(200)
+    setAckOut(true)
+    await sleep(400)
+    setAckMounted(false)
     setProfileMounted(true)
   }
 
-  async function handleHelloClick() {
+  function handleHelloClick() {
     if (helloDisabled) {
       return
     }
-    setHelloDisabled(true)
-    await eraseText('你好呀')
-    await typeText('欢迎来到宠物小程序')
-    await sleep(500)
-    await eraseText('欢迎来到宠物小程序')
-    await typeText('要使用的话需要先登录哦')
-    await sleep(400)
-    setHelloOut(true)
-    await sleep(420)
-    setHelloMounted(false)
-    setLoginMounted(true)
+    void (async () => {
+      setHelloDisabled(true)
+      await eraseText('你好喵')
+      await typeText('要使用需要先登录哦')
+      await sleep(250)
+      setHelloOut(true)
+      await sleep(400)
+      setHelloMounted(false)
+      setLoginMounted(true)
+    })()
   }
 
   useEffect(() => {
-    void typeText('你好呀')
+    void typeText('你好喵')
   }, [typeText])
 
   /* 冷启动时若本地已有登录态, 静默续登并直接进入主界面 */
@@ -214,14 +230,11 @@ export default function ProfileOnboarding() {
 
   async function playProfileSubmitFlow() {
     setProfileSubmitted(true)
-    await typeText('太好了，这样基本的资料就填好了')
-    await sleep(500)
-    await eraseText('太好了，这样基本的资料就填好了')
-    await typeText('你可以选择创建一个家庭，\n或者知道家庭码加入一个家庭')
-    await sleep(500)
+    await typeText('人可以选择创建自己的家庭，或者加入已有的家庭哦')
+    await sleep(250)
     setAvatarOut(true)
     setFieldsOut(true)
-    await sleep(420)
+    await sleep(400)
     setProfileMounted(false)
     setFamilyStep('choice')
   }
@@ -244,6 +257,8 @@ export default function ProfileOnboarding() {
         useAuthStore.getState().setUserProfile(user, { id: family.id, name: family.name }, 'owner')
       }
       await Taro.showToast({ title: '家庭已创建', icon: 'success' })
+      /* 首次登录悬浮猫指引: 建完家庭进入日历页后开始第 7-8 轮跨页指引 */
+      Taro.setStorageSync('pet-first-guide', 'calendar')
       await reLaunch(routes.pages.home)
     }
     catch (error) {
@@ -318,6 +333,15 @@ export default function ProfileOnboarding() {
           onClick={handleLogin}
         >
           授权微信登录
+        </Button>
+      )}
+
+      {ackMounted && (
+        <Button
+          className={`profile-onboarding__hello${ackOut ? ' profile-onboarding__hello--out' : ''}${ackDisabled ? ' profile-onboarding__hello--disabled' : ''}`}
+          onClick={handleAckClick}
+        >
+          好哦
         </Button>
       )}
 

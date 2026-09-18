@@ -1,0 +1,73 @@
+/* 首次登录悬浮猫指引: 与登录页同款的大猫 + 手写体对话气泡 */
+.floating-guide__catcher {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 1200;
+  /* 透明捕获层: 点击页面任意一处进入下一流程 */
+  background: transparent;
+}
+
+/* 舞台锚定在页面左下角(tab 栏上方), 猫从左下探出, 气泡悬在其头顶, 全程不响应点击 */
+.floating-guide__stage {
+  position: fixed;
+  right: 0;
+  bottom: calc(110rpx + env(safe-area-inset-bottom));
+  left: 0;
+  z-index: 1300;
+  height: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.floating-guide__stage--out {
+  opacity: 0;
+}
+
+/* 登录页同款小猫(等比略缩: 440x524 -> 400x476) */
+.floating-guide__cat {
+  position: absolute;
+  bottom: -30rpx;
+  left: -30rpx;
+  width: 400rpx;
+  height: 476rpx;
+}
+
+/* 登录页同款气泡: 白底 + 蓝边 + 大圆角 + 小尾巴 */
+.floating-guide__bubble {
+  position: absolute;
+  bottom: 470rpx;
+  left: 120rpx;
+  box-sizing: border-box;
+  max-width: 600rpx;
+  padding: 24rpx 32rpx;
+  background: #ffffff;
+  border: 2rpx solid rgba(127, 165, 214, 0.7);
+  border-radius: 40rpx;
+  box-shadow: 0 10rpx 30rpx rgba(74, 100, 137, 0.22), 0 2rpx 8rpx rgba(74, 100, 137, 0.12);
+}
+
+.floating-guide__bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -12rpx;
+  left: 44rpx;
+  width: 0;
+  height: 0;
+  border-top: 12rpx solid #ffffff;
+  border-right: 12rpx solid transparent;
+  border-left: 12rpx solid transparent;
+}
+
+/* 登录页同款手写体台词 */
+.floating-guide__text {
+  font-family: var(--handwritten);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #3d5c82;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

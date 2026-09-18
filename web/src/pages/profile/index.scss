@@ -216,7 +216,7 @@
   background-size: 100% 100% !important;
 }
 
-/* 内容页：固定一屏，不滚动（超出内容由多页承载） */
+/* 内容页：固定一屏，不滚动（超出内容由多页承载) */
 .content-page {
   background: #FFFEFB;
 }
@@ -349,10 +349,9 @@
   gap: 28rpx;
   padding: 28rpx;
   margin-bottom: 28rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border: 1rpx solid transparent;
   border-radius: 20rpx;
-  background: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 8rpx 26rpx rgba(74, 100, 137, 0.12), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  background: transparent;
 }
 
 /* 左上照片: 竖版圆角卡 (固定尺寸, 与右侧信息并排; 用 View 而非 Button,
@@ -452,10 +451,9 @@
   gap: 14rpx;
   padding: 28rpx;
   margin-bottom: 24rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border: 1rpx solid transparent;
   border-radius: 20rpx;
-  background: rgba(255, 255, 255, 0.5);
-  box-shadow: 0 8rpx 26rpx rgba(74, 100, 137, 0.12), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  background: transparent;
 }
 
 /* 头部行: 宠物名居左, "简介 Info." 标题居右 */
@@ -514,9 +512,9 @@
   align-items: center;
   gap: 4rpx;
   padding: 18rpx 8rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border: 1rpx solid transparent;
   border-radius: 16rpx;
-  background: rgba(255, 255, 255, 0.45);
+  background: transparent;
 }
 
 .stat .strong {
@@ -547,9 +545,9 @@
   align-items: center;
   gap: 16rpx;
   padding: 20rpx 24rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border: 1rpx solid transparent;
   border-radius: 14rpx;
-  background: rgba(255, 255, 255, 0.45);
+  background: transparent;
   text-align: left;
 }
 
@@ -685,7 +683,7 @@
 .detail-title-input {
   width: 100%;
   box-sizing: border-box;
-  padding: 10rpx 4rpx;
+  padding: 10rpx 16rpx;
   min-height: 56rpx;
   font-size: 32rpx;
   font-weight: 600;
@@ -694,7 +692,38 @@
   background: rgba(255, 255, 255, 0.92);
   border: none;
   border-bottom: 2rpx solid #7FA5D6;
-  border-radius: 0;
+  border-radius: 12rpx;
+}
+
+/* 标题下方的元信息行 (如事件记录的 "2024-08-22 · 宠物医生") */
+.detail-meta {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  color: #8A8278;
+  letter-spacing: 1rpx;
+}
+
+/* 编辑态元信息行: 日期输入框 + 记录者文字 水平排列 */
+.detail-meta-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-top: 6rpx;
+}
+
+.detail-date-input {
+  width: 240rpx;
+  box-sizing: border-box;
+  padding: 4rpx 12rpx;
+  min-height: 44rpx;
+  font-size: 22rpx;
+  line-height: 1.5;
+  color: #2A2520;
+  background: rgba(255, 255, 255, 0.92);
+  border: none;
+  border-bottom: 2rpx solid #7FA5D6;
+  border-radius: 8rpx;
 }
 
 .detail-card-actions {
@@ -729,6 +758,12 @@
   display: flex;
   flex-direction: column;
   gap: 14rpx;
+  /* 全局主题(proto.scss → app.wxss)给 .manual-list 强加了白底+白边框+阴影,
+     形成"包住01-05的大白卡"; 普通声明运行时会输给它, 必须 !important 压过,
+     让提问列表透出底下的书页白纸 */
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
 }
 
 .manual-item {
@@ -736,9 +771,13 @@
   align-items: center;
   gap: 16rpx;
   padding: 18rpx 20rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border: 1rpx solid transparent;
   border-radius: 16rpx;
-  background: rgba(255, 255, 255, 0.45);
+  /* 提问条本体彻底透明: 全局主题(proto.scss 编译进 app.wxss)有 .manual-item{background:#fffdf7}
+     的平铺规则, 普通声明在运行时会输给它, 必须 !important 才能压过 */
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
   text-align: left;
 }
 
@@ -765,7 +804,7 @@
   width: 56rpx;
   height: 56rpx;
   flex-shrink: 0;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border: 1rpx solid transparent;
   border-radius: 50%;
   background: rgba(91, 132, 190, 0.85);
   color: #FFFEFB;
@@ -914,6 +953,12 @@
   font-size: 80rpx;
 }
 
+/* 大图卡: 有照片时铺满照片区展示最新一年的生日照片 */
+.media-placeholder-image {
+  width: 100%;
+  height: 100%;
+}
+
 .birthday-copy {
   position: relative;
   display: flex;
@@ -969,10 +1014,17 @@
   gap: 18rpx;
   padding: 18rpx 22rpx;
   margin-bottom: 12rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border: 1rpx solid transparent;
   border-radius: 14rpx;
-  background: rgba(255, 255, 255, 0.45);
+  background: transparent;
   cursor: pointer;
+  /* 全局主题(app.wxss)给 .year-row 加了玻璃拟态: 白底+玻璃边框+backdrop-filter+阴影,
+     普通声明会输给它, 必须 !important 压掉阴影与毛玻璃, 让年份行贴在书页纸面上 */
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .year-row .strong {
@@ -1046,9 +1098,9 @@
 
 .weight-change {
   padding: 4rpx 14rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border: 1rpx solid transparent;
   border-radius: 999rpx;
-  background: rgba(255, 255, 255, 0.55);
+  background: transparent;
   font-size: 22rpx;
   color: #2A2520;
   font-family: 'Ma Shan Zheng', cursive;
@@ -1109,10 +1161,16 @@
   gap: 8rpx;
   padding: 20rpx 24rpx;
   margin-bottom: 18rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
+  border: 1rpx solid transparent;
   border-radius: 16rpx;
-  background: rgba(255, 255, 255, 0.45);
+  background: transparent;
   cursor: pointer;
+  /* 全局主题(app.wxss)会给同类元素垫米白底, 普通声明运行时会输给它, 必须 !important */
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 
 .moment::before {
@@ -1133,6 +1191,11 @@
   color: #8A8278;
   font-family: 'Ma Shan Zheng', cursive;
   letter-spacing: 1rpx;
+  /* 全局主题(app.wxss)给 .moment .time 加了蓝底胶囊(rgba(163,194,232,.2)),
+     普通声明运行时会输给它, 必须 !important 压掉, 露出下层书页 */
+  background: transparent !important;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .moment .h3 {
@@ -1503,6 +1566,50 @@
   border: 1rpx solid #D0E8F0;
   border-radius: 10rpx;
   background: rgba(255, 255, 255, 0.56);
+}
+
+/* 生日表单: 数字输入框 (与 picker-row 同款外观) */
+.archive-page .cal-input {
+  height: 68rpx;
+  box-sizing: border-box;
+  padding: 0 14rpx;
+  font-size: 24rpx;
+  color: #2A2520;
+  border: 1rpx solid #D0E8F0;
+  border-radius: 10rpx;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+/* 生日表单: 年份/几岁 双列排布 */
+.archive-page .cal-form-row {
+  display: flex;
+  gap: 20rpx;
+}
+
+.archive-page .cal-form-col {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 添加图片区 (与 calendar 页 cal-image-actions / cal-image-button 同款) */
+.archive-page .cal-image-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14rpx;
+  color: #6B829A;
+  font-size: 22rpx;
+}
+
+.archive-page .cal-image-button {
+  box-sizing: border-box;
+  padding: 14rpx 20rpx;
+  font-size: 25rpx;
+  color: rgba(74, 100, 137, 0.92);
+  border: 1rpx solid #D0E8F0;
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.48);
+  box-shadow: 0 4rpx 12rpx rgba(74, 100, 137, 0.08);
 }
 
 .archive-page .cal-sheet-actions {
