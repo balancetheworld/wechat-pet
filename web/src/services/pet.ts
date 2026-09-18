@@ -47,3 +47,21 @@ export function getPetResource<T>(petID: string, resource: string) {
     path: `/api/v1/pets/${encodeURIComponent(petID)}/${resource}`,
   })
 }
+
+/* 更新档案资源条目 (如 growth-events): 后端为通用 PATCH /pets/:id/:resource/:resource_id */
+export function updatePetResource(petID: string, resource: string, resourceID: string, data: Record<string, unknown>) {
+  return request<unknown>({
+    path: `/api/v1/pets/${encodeURIComponent(petID)}/${resource}/${encodeURIComponent(resourceID)}`,
+    method: 'PATCH',
+    data,
+  })
+}
+
+/* 新建档案资源条目 (如 birthday-records): 后端为通用 POST /pets/:id/:resource */
+export function createPetResource(petID: string, resource: string, data: Record<string, unknown>) {
+  return request<Record<string, unknown>>({
+    path: `/api/v1/pets/${encodeURIComponent(petID)}/${resource}`,
+    method: 'POST',
+    data,
+  })
+}

@@ -66,6 +66,28 @@ func (h *Handler) CreateRecord(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *Handler) UpdateRecord(c *gin.Context) {
+	familyID, familyOK := middleware.GetCurrentFamilyID(c)
+	userID, userOK := middleware.GetCurrentUserID(c)
+	if !familyOK || !userOK {
+		response.Fail(c, appErrors.Forbidden())
+		return
+	}
+	var request calendarapp.UpdateRecordRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&request); err != nil {
+			response.Fail(c, appErrors.InvalidParam("日历记录参数无效"))
+			return
+		}
+	}
+	result, err := h.service.UpdateRecord(c.Request.Context(), familyID, userID, c.Param("record_id"), request)
+	if err != nil {
+		response.Fail(c, asAppError(err))
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *Handler) CompleteReminder(c *gin.Context) {
 	familyID, familyOK := middleware.GetCurrentFamilyID(c)
 	userID, userOK := middleware.GetCurrentUserID(c)

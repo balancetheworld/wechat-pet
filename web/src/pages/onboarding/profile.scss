@@ -233,23 +233,23 @@
   background: rgba(127,165,214,0.45);
 }
 
-/* ============ 欢迎页：你好按钮 + 授权微信登录按钮 ============ */
+/* ============ 欢迎页：你好按钮 + 授权微信登录按钮（两者样式统一为对话按钮胶囊） ============ */
 .profile-onboarding__auth {
   position: relative;
   z-index: 3;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 72%;
-  min-height: 144px;
+  width: 68%;
+  min-height: 156px;
   margin-bottom: 32px;
-  border: 4rpx solid rgba(94, 139, 200, 0.85);
-  border-radius: 72px !important; /* 覆盖 app.scss 全局 button !important 圆角 */
-  font-size: 40px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  color: #4A6489;
-  background: rgba(255, 255, 255, 0.55);
+  border: 4rpx solid rgba(94, 139, 200, 0.85) !important;
+  border-radius: 999px !important; /* 覆盖 app.scss 全局 button !important 圆角, 与你好/好哦按钮统一 */
+  font-size: 44px !important;
+  font-weight: 700 !important;
+  letter-spacing: 4px;
+  color: #4A6489 !important;
+  background: rgba(255, 255, 255, 0.55) !important;
   box-shadow: 0 10px 26px rgba(74, 100, 137, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(14px) saturate(1.2);
   -webkit-backdrop-filter: blur(14px) saturate(1.2);
@@ -357,7 +357,8 @@
 
 /* 资料区里的保存按钮：全宽大圆角，统一玻璃风（!important 覆盖 app.scss 蓝底白字） */
 .profile-onboarding__profile .profile-onboarding__submit {
-  border: 4rpx solid rgba(94, 139, 200, 0.85);
+  padding: 24rpx 0 !important; /* 上下内边距, 避免按钮显得扁 */
+  border: 4rpx solid rgba(94, 139, 200, 0.85) !important;
   border-radius: 100px !important; /* 覆盖 app.scss 全局 button !important 圆角 */
   color: #4A6489 !important; /* 覆盖 app.scss 白字 */
   background: rgba(255, 255, 255, 0.55) !important; /* 覆盖 app.scss 蓝底 */
@@ -415,13 +416,14 @@
 .profile-onboarding__join-btn {
   flex: 1 1 0;
   min-height: 144rpx;
-  border: 4rpx solid rgba(94, 139, 200, 0.85);
-  border-radius: 72rpx !important; /* 覆盖 app.scss 全局 button !important 圆角 */
-  font-size: 38rpx;
-  font-weight: 600;
-  letter-spacing: 2rpx;
-  color: #4A6489;
-  background: rgba(255, 255, 255, 0.55);
+  padding: 20rpx 0 !important; /* 上下内边距 */
+  border: 4rpx solid rgba(94, 139, 200, 0.85) !important;
+  border-radius: 999rpx !important; /* 与你好/好哦对话按钮统一的大圆角胶囊 */
+  font-size: 40rpx !important;
+  font-weight: 700 !important;
+  letter-spacing: 4rpx;
+  color: #4A6489 !important;
+  background: rgba(255, 255, 255, 0.55) !important;
   box-shadow: 0 10rpx 26rpx rgba(74, 100, 137, 0.18), inset 0 1rpx 0 rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(14px) saturate(1.2);
   -webkit-backdrop-filter: blur(14px) saturate(1.2);
@@ -483,13 +485,14 @@
 .profile-onboarding__family-submit {
   width: 100%;
   min-height: 100rpx;
-  border: 4rpx solid rgba(94, 139, 200, 0.85);
-  border-radius: 100rpx !important; /* 覆盖 app.scss 全局 button !important 圆角 */
-  font-size: 36rpx;
-  font-weight: 600;
-  letter-spacing: 2rpx;
-  color: #4A6489;
-  background: rgba(255, 255, 255, 0.55);
+  padding: 20rpx 0 !important; /* 上下内边距 */
+  border: 4rpx solid rgba(94, 139, 200, 0.85) !important;
+  border-radius: 999rpx !important; /* 与你好/好哦对话按钮统一的大圆角胶囊 */
+  font-size: 40rpx !important;
+  font-weight: 700 !important;
+  letter-spacing: 4rpx;
+  color: #4A6489 !important;
+  background: rgba(255, 255, 255, 0.55) !important;
   box-shadow: 0 10rpx 26rpx rgba(74, 100, 137, 0.18), inset 0 1rpx 0 rgba(255, 255, 255, 0.8);
   backdrop-filter: blur(14px) saturate(1.2);
   -webkit-backdrop-filter: blur(14px) saturate(1.2);
@@ -499,12 +502,13 @@
   border: none;
 }
 
-/* 返回按钮：弱化胶囊，点击回到「创建/加入」选择页 */
+/* 返回按钮：弱化胶囊，点击回到「创建/加入」选择页（形状与对话按钮统一, 颜色弱化） */
 .profile-onboarding__family-back {
   width: 100%;
   min-height: 88rpx;
-  border: 3rpx solid rgba(94, 139, 200, 0.55);
-  border-radius: 44rpx !important; /* 覆盖 app.scss 全局 button !important 圆角 */
+  padding: 16rpx 0 !important; /* 上下内边距 */
+  border: 3rpx solid rgba(94, 139, 200, 0.55) !important;
+  border-radius: 999rpx !important; /* 与对话按钮统一的胶囊形状 */
   font-size: 30rpx;
   font-weight: 600;
   letter-spacing: 2rpx;
