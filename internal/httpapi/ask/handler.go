@@ -80,6 +80,30 @@ func (h *Handler) CreateSessionFromInput(c *gin.Context) {
 	response.Success(c, askapp.NewExecutionDTO(result))
 }
 
+func (h *Handler) ContinueSession(c *gin.Context) {
+	familyID, familyOK := middleware.GetCurrentFamilyID(c)
+	userID, userOK := middleware.GetCurrentUserID(c)
+	if !familyOK || !userOK {
+		response.Fail(c, appErrors.Forbidden())
+		return
+	}
+	var request createSessionRequest
+	if err := c.ShouldBindJSON(&request); err != nil {
+		response.Fail(c, appErrors.InvalidParam("问问参数无效"))
+		return
+	}
+	result, err := h.service.ContinueSession(c.Request.Context(), familyID, userID, c.Param("session_id"), request.Input, c.GetHeader("Idempotency-Key"))
+	if err != nil {
+		response.Fail(c, asAppError(err))
+		return
+	}
+	if err := h.enqueue(c, result); err != nil {
+		response.Fail(c, appErrors.Internal(err))
+		return
+	}
+	response.Success(c, askapp.NewExecutionDTO(result))
+}
+
 func (h *Handler) ProcessRun(c *gin.Context) {
 	familyID, ok := middleware.GetCurrentFamilyID(c)
 	if !ok {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,7 +24,7 @@ func TestSQLRepositoryPersistsRunAndEvents(t *testing.T) {
 	}
 	now := time.Unix(100, 0).UTC()
 	session := Session{ID: "session-1", FamilyID: "family-1", PetID: "pet-1", CreatedBy: "user-1", Status: SessionActive, RiskLevel: RiskUnknown, PromptVersion: "prompt-v1", RuleVersion: "rule-v1", KnowledgeVersion: "knowledge-v1", CreatedAt: now, UpdatedAt: now}
-	turn := Turn{ID: "turn-1", SessionID: session.ID, TurnIndex: 0, Status: RunQueued, Input: "最近没有精神", SelectedRunID: "run-1", CreatedAt: now}
+	turn := Turn{ID: "turn-1", SessionID: session.ID, TurnIndex: 0, Status: TurnReceived, Input: "最近没有精神", SelectedRunID: "run-1", CreatedAt: now}
 	run := Run{ID: "run-1", SessionID: session.ID, TurnID: turn.ID, RunIndex: 0, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: "rule-v1", PromptVersion: "prompt-v1", CreatedAt: now}
 	queuedEvent := Event{ID: "event-1", SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	if err := repository.CreateSessionRun(context.Background(), session, turn, run, queuedEvent); err != nil {
@@ -51,7 +52,7 @@ func TestSQLRepositoryPersistsRunAndEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if loaded.ID != session.ID || loaded.Status != SessionCompleted || loaded.RiskLevel != RiskGreen {
+	if loaded.ID != session.ID || loaded.Status != SessionActive || loaded.RiskLevel != RiskGreen {
 		t.Fatalf("loaded session = %+v", loaded)
 	}
 	loadedRun, err := repository.GetRun(context.Background(), session.ID, run.ID)
@@ -86,7 +87,7 @@ func TestSQLRepositoryCreateSessionRunRollsBack(t *testing.T) {
 	}
 	now := time.Unix(100, 0).UTC()
 	session := Session{ID: "session-1", FamilyID: "family-1", PetID: "pet-1", CreatedBy: "user-1", Status: SessionActive, RiskLevel: RiskUnknown, PromptVersion: "prompt-v1", RuleVersion: "rule-v1", KnowledgeVersion: "knowledge-v1", CreatedAt: now, UpdatedAt: now}
-	turn := Turn{ID: "turn-1", SessionID: session.ID, TurnIndex: 0, Status: RunQueued, Input: "最近没有精神", SelectedRunID: "run-1", CreatedAt: now}
+	turn := Turn{ID: "turn-1", SessionID: session.ID, TurnIndex: 0, Status: TurnReceived, Input: "最近没有精神", SelectedRunID: "run-1", CreatedAt: now}
 	run := Run{ID: "run-1", SessionID: session.ID, TurnID: "missing-turn", RunIndex: 0, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: "rule-v1", PromptVersion: "prompt-v1", CreatedAt: now}
 	event := Event{ID: "event-1", SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	if err := repository.CreateSessionRun(context.Background(), session, turn, run, event); err == nil {
@@ -114,7 +115,7 @@ func TestSQLRepositoryClaimsAndRecoversRunLease(t *testing.T) {
 	}
 	now := time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC)
 	session := Session{ID: "session-lease", FamilyID: "family-1", PetID: "pet-1", CreatedBy: "user-1", Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: "prompt", RuleVersion: "rule", KnowledgeVersion: "knowledge", CreatedAt: now, UpdatedAt: now}
-	turn := Turn{ID: "turn-lease", SessionID: session.ID, Status: RunQueued, SelectedRunID: "run-lease", Input: "问题", CreatedAt: now}
+	turn := Turn{ID: "turn-lease", SessionID: session.ID, Status: TurnReceived, SelectedRunID: "run-lease", Input: "问题", CreatedAt: now}
 	run := Run{ID: "run-lease", SessionID: session.ID, TurnID: turn.ID, RowVersion: 1, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: "rule", PromptVersion: "prompt", CreatedAt: now}
 	event := Event{ID: "event-lease", SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	if err := repository.CreateSessionRun(context.Background(), session, turn, run, event); err != nil {
@@ -176,7 +177,7 @@ func TestSQLRepositoryReclaimingQueuedLeaseRejectsLateWorker(t *testing.T) {
 	}
 	now := time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC)
 	session := Session{ID: "session-queued-lease", FamilyID: "family-1", PetID: "pet-1", CreatedBy: "user-1", Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: "prompt", RuleVersion: "rule", KnowledgeVersion: "knowledge", CreatedAt: now, UpdatedAt: now}
-	turn := Turn{ID: "turn-queued-lease", SessionID: session.ID, Status: RunQueued, SelectedRunID: "run-queued-lease", Input: "问题", CreatedAt: now}
+	turn := Turn{ID: "turn-queued-lease", SessionID: session.ID, Status: TurnReceived, SelectedRunID: "run-queued-lease", Input: "问题", CreatedAt: now}
 	run := Run{ID: "run-queued-lease", SessionID: session.ID, TurnID: turn.ID, RowVersion: 1, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: "rule", PromptVersion: "prompt", CreatedAt: now}
 	event := Event{ID: "event-queued-lease", SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	if err := repository.CreateSessionRun(context.Background(), session, turn, run, event); err != nil {
@@ -208,7 +209,7 @@ func TestSQLRepositoryPersistsRetryAndFailsAfterAttemptLimit(t *testing.T) {
 	}
 	now := time.Date(2026, 9, 10, 10, 0, 0, 0, time.UTC)
 	session := Session{ID: "session-retry", FamilyID: "family-1", PetID: "pet-1", CreatedBy: "user-1", Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: "prompt", RuleVersion: "rule", KnowledgeVersion: "knowledge", CreatedAt: now, UpdatedAt: now}
-	turn := Turn{ID: "turn-retry", SessionID: session.ID, Status: RunQueued, SelectedRunID: "run-retry", Input: "问题", CreatedAt: now}
+	turn := Turn{ID: "turn-retry", SessionID: session.ID, Status: TurnReceived, SelectedRunID: "run-retry", Input: "问题", CreatedAt: now}
 	run := Run{ID: "run-retry", SessionID: session.ID, TurnID: turn.ID, RowVersion: 1, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: "rule", PromptVersion: "prompt", CreatedAt: now}
 	event := Event{ID: "event-retry", SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	if err := repository.CreateSessionRun(context.Background(), session, turn, run, event); err != nil {
@@ -250,7 +251,7 @@ func TestSQLRepositoryPersistsRetryAndFailsAfterAttemptLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(events) != 3 || events[1].Type != "run.retry_scheduled" || events[2].Type != "run.failed" {
+	if len(events) != 3 || events[1].Type != "run.retry_scheduled" || events[2].Type != "run.failed" || !strings.Contains(events[2].Data, `"error_code":"worker_attempts_exhausted"`) || !strings.Contains(events[2].Data, "多次调用 AI 服务仍未成功") {
 		t.Fatalf("retry events = %+v", events)
 	}
 }
@@ -268,13 +269,13 @@ func TestSQLRepositoryCreateFollowUpTurnRunRollsBack(t *testing.T) {
 	}
 	now := time.Unix(100, 0).UTC()
 	session := Session{ID: "session-1", FamilyID: "family-1", PetID: "pet-1", CreatedBy: "user-1", Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: "prompt-v1", RuleVersion: "rule-v1", KnowledgeVersion: "knowledge-v1", CreatedAt: now, UpdatedAt: now}
-	turn := Turn{ID: "turn-1", SessionID: session.ID, TurnIndex: 0, Status: RunQueued, Input: "问题", SelectedRunID: "run-1", CreatedAt: now}
+	turn := Turn{ID: "turn-1", SessionID: session.ID, TurnIndex: 0, Status: TurnReceived, Input: "问题", SelectedRunID: "run-1", CreatedAt: now}
 	run := Run{ID: "run-1", SessionID: session.ID, TurnID: turn.ID, RunIndex: 0, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: "rule-v1", PromptVersion: "prompt-v1", CreatedAt: now}
 	event := Event{ID: "event-1", SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	if err := repository.CreateSessionRun(context.Background(), session, turn, run, event); err != nil {
 		t.Fatal(err)
 	}
-	followTurn := Turn{ID: "turn-2", SessionID: session.ID, TurnIndex: 1, Status: RunQueued, Input: "回答", SelectedRunID: "run-2", CreatedAt: now.Add(time.Minute)}
+	followTurn := Turn{ID: "turn-2", SessionID: session.ID, TurnIndex: 1, Status: TurnReceived, Input: "回答", SelectedRunID: "run-2", CreatedAt: now.Add(time.Minute)}
 	followRun := Run{ID: "run-2", SessionID: session.ID, TurnID: followTurn.ID, RunIndex: 0, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: "rule-v1", PromptVersion: "prompt-v1", CreatedAt: followTurn.CreatedAt}
 	badEvent := Event{ID: "event-1", SessionID: session.ID, TurnID: followTurn.ID, RunID: followRun.ID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: followTurn.CreatedAt}
 	if err := repository.CreateFollowUpTurnRun(context.Background(), session, followTurn, followRun, badEvent); err == nil {
@@ -311,17 +312,38 @@ func createAskSchema(t *testing.T, db *sql.DB) {
 		t.Fatal(err)
 	}
 	statements := []string{
-		`CREATE TABLE ask_sessions (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, created_by TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, turn_count INTEGER NOT NULL, prompt_version TEXT NOT NULL, rule_version TEXT NOT NULL, knowledge_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, completed_at TIMESTAMP)`,
+		// v2：会话（Session 仅 active/closed；新增 input_sequence/event_sequence/launch_instance/generation + deleted_at）
+		`CREATE TABLE ask_sessions (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, created_by TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, turn_count INTEGER NOT NULL, input_sequence INTEGER NOT NULL DEFAULT 0, event_sequence INTEGER NOT NULL DEFAULT 0, launch_instance TEXT NOT NULL DEFAULT '', generation INTEGER NOT NULL DEFAULT 1, prompt_version TEXT NOT NULL, rule_version TEXT NOT NULL, knowledge_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, completed_at TIMESTAMP, deleted_at TIMESTAMP)`,
 		`CREATE TABLE ask_session_pets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, pet_id TEXT NOT NULL, mention TEXT NOT NULL, sort_order INTEGER NOT NULL, UNIQUE(session_id, pet_id), UNIQUE(session_id, sort_order))`,
-		`CREATE TABLE ask_turns (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, status TEXT NOT NULL, input TEXT NOT NULL, selected_run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(session_id, turn_index))`,
-		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL REFERENCES ask_turns(id), run_index INTEGER NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, clarification_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, risk_level TEXT NOT NULL, rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at TIMESTAMP, attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TIMESTAMP, UNIQUE(turn_id, run_index))`,
-		`CREATE TABLE ask_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(run_id, sequence))`,
-		`CREATE TABLE ask_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT, role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL)`,
-		`CREATE TABLE ask_idempotency_keys (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, response_data TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(user_id, operation, idempotency_key))`,
+		// v2：Turn 独立状态 received/attached/superseded；新增 input_sequence/superseded_by + deleted_at
+		`CREATE TABLE ask_turns (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, input_sequence INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, input TEXT NOT NULL, selected_run_id TEXT NOT NULL, superseded_by TEXT, created_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP, UNIQUE(session_id, turn_index))`,
+		// v2：Run 新增 origin_turn_id/input_revision/execution_epoch/termination_reason/checkpoint + deleted_at
+		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL REFERENCES ask_turns(id), origin_turn_id TEXT NOT NULL DEFAULT '', run_index INTEGER NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, clarification_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, risk_level TEXT NOT NULL, input_revision INTEGER NOT NULL DEFAULT 0, execution_epoch INTEGER NOT NULL DEFAULT 0, termination_reason TEXT NOT NULL DEFAULT '', checkpoint TEXT NOT NULL DEFAULT '', rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at TIMESTAMP, attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TIMESTAMP, deleted_at TIMESTAMP, UNIQUE(turn_id, run_index))`,
+		`CREATE TABLE ask_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP, UNIQUE(run_id, sequence))`,
+		`CREATE TABLE ask_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT, role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP)`,
+		`CREATE TABLE ask_idempotency_keys (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, response_data TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP, UNIQUE(user_id, operation, idempotency_key))`,
+		// v2 新增：至多一次模型请求
+		`CREATE TABLE ask_attempts (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'queued', purpose TEXT NOT NULL DEFAULT '', input_snapshot TEXT NOT NULL DEFAULT '', request_id TEXT NOT NULL DEFAULT '', error_code TEXT NOT NULL DEFAULT '', usage TEXT NOT NULL DEFAULT '', started_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, completed_at TIMESTAMP, deleted_at TIMESTAMP, UNIQUE(run_id, sequence))`,
+		// v2 新增：任务项
+		`CREATE TABLE ask_task_items (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, run_id TEXT NOT NULL, kind TEXT NOT NULL, object_id TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'pending', reason TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL)`,
+		// v2 新增：确认写入操作
+		`CREATE TABLE ask_operations (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, run_id TEXT NOT NULL, created_by TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', preview TEXT NOT NULL DEFAULT '', target TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL DEFAULT '', result TEXT NOT NULL DEFAULT '', version INTEGER NOT NULL DEFAULT 0, confirmed_at TIMESTAMP, expires_at TIMESTAMP, verify_until TIMESTAMP, verify_count INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP)`,
+		// v2 新增：长期记忆
+		`CREATE TABLE ask_memories (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, content TEXT NOT NULL, source_type TEXT NOT NULL DEFAULT '', source_id TEXT NOT NULL DEFAULT '', source_version TEXT NOT NULL DEFAULT '', active INTEGER NOT NULL DEFAULT 1, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP)`,
+		// v2 新增：来源集合版本
+		`CREATE TABLE ask_source_versions (source_type TEXT NOT NULL, source_id TEXT NOT NULL, version TEXT NOT NULL, versioned_at TIMESTAMP NOT NULL, PRIMARY KEY (source_type, source_id))`,
+		// v2 新增：四类预算账本（9.3）
+		`CREATE TABLE ask_budgets (id TEXT PRIMARY KEY, scope TEXT NOT NULL, scope_id TEXT NOT NULL, max_model_calls INTEGER NOT NULL DEFAULT 0, max_tool_calls INTEGER NOT NULL DEFAULT 0, max_tokens INTEGER NOT NULL DEFAULT 0, max_cost_micros BIGINT NOT NULL DEFAULT 0, max_concurrency INTEGER NOT NULL DEFAULT 0, model_calls_used INTEGER NOT NULL DEFAULT 0, tool_calls_used INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, cost_used_micros BIGINT NOT NULL DEFAULT 0, model_calls_reserved INTEGER NOT NULL DEFAULT 0, tool_calls_reserved INTEGER NOT NULL DEFAULT 0, tokens_reserved INTEGER NOT NULL DEFAULT 0, cost_reserved_micros BIGINT NOT NULL DEFAULT 0, concurrency_reserved INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, UNIQUE(scope, scope_id))`,
+		// v2 新增：原子预留记录（9.3）
+		`CREATE TABLE ask_reservations (id TEXT PRIMARY KEY, budget_id TEXT NOT NULL REFERENCES ask_budgets(id), model_calls INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0, cost_micros BIGINT NOT NULL DEFAULT 0, concurrency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'reserved', created_at TIMESTAMP NOT NULL, settled_at TIMESTAMP, released_at TIMESTAMP)`,
 	}
 	for _, statement := range statements {
 		if _, err := db.Exec(statement); err != nil {
 			t.Fatal(err)
 		}
+	}
+	// 9.2：同一用户 + 家庭至多一个当前 Session
+	if _, err := db.Exec(`CREATE UNIQUE INDEX idx_ask_sessions_current_unique ON ask_sessions (family_id, created_by) WHERE status = 'active' AND deleted_at IS NULL`); err != nil {
+		t.Fatal(err)
 	}
 }

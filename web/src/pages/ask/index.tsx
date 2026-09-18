@@ -36,13 +36,11 @@ export default function Ask() {
     submit,
     reply,
     retryConnection,
-    reset,
   } = useAskSession()
 
   const busy = phase === 'creating' || phase === 'thinking' || phase === 'reconnecting' || phase === 'replying'
   const hasError = Boolean(error) && (phase === 'input_error' || phase === 'ambiguous' || phase === 'network_error' || phase === 'failed')
   const hasConversation = conversation.length > 0 || hasError
-  const terminal = phase === 'completed' || phase === 'escalated' || phase === 'failed'
   const petOptions = ['按问题识别宠物', ...pets.map(pet => pet.name)]
   const selectedPetIndex = Math.max(0, pets.findIndex(pet => pet.id === currentPetId) + 1)
   async function handleSend() {
@@ -98,7 +96,7 @@ export default function Ask() {
     if (phase === 'network_error') {
       return '网络连接不稳定，请稍后重试。'
     }
-    return '这次没有完成，请重新发起问题。'
+    return '问问服务出现未知错误，请稍后重试。'
   }
 
   return (
@@ -150,7 +148,6 @@ export default function Ask() {
                   )}
                 </View>
               )}
-              {terminal && <Button className="ask-new-button" onClick={reset}>问新的问题</Button>}
             </View>
           </ScrollView>
         )}

@@ -2,7 +2,7 @@ import type { AskEvent, AskExecution, AskSnapshot } from '../types/ask'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { createAskSession, createAskSessionForPet, getAskSnapshot, replyAskRun } from '../services/ask'
+import { continueAskSession, createAskSession, createAskSessionForPet, getAskSnapshot, replyAskRun } from '../services/ask'
 import { openAskEventStream } from '../services/ask-stream'
 import { getPets } from '../services/pet'
 import { ApiError } from '../services/request'
@@ -41,6 +41,10 @@ function isTerminalRunStatus(status: AskExecution['run']['status']) {
   return status === 'waiting_input' || status === 'completed' || status === 'escalated' || status === 'failed' || status === 'canceled' || status === 'interrupted'
 }
 
+function isFollowUpRunStatus(status: AskExecution['run']['status']) {
+  return status === 'completed' || status === 'escalated' || status === 'failed' || status === 'canceled' || status === 'interrupted'
+}
+
 function errorPhase(error: unknown) {
   if (!(error instanceof ApiError)) {
     return 'network_error' as const
@@ -71,7 +75,7 @@ function isRetryableRequest(error: unknown) {
 }
 
 interface PendingRequest {
-  kind: 'create' | 'reply'
+  kind: 'create' | 'continue' | 'reply'
   input: string
   idempotencyKey: string
   petID?: string
@@ -82,7 +86,7 @@ interface PendingRequest {
 
 export function useAskSession() {
   const queryClient = useQueryClient()
-  const [runtime, dispatch] = useReducer(askReducer, initialAskRuntimeState)
+  const [runtime, dispatch] = useReducer(askReducer, initialAskRuntimeState, state => useAskStore.getState().activeSessionId ? { ...state, phase: 'reconnecting' as const } : state)
   const [pageVisible, setPageVisible] = useState(true)
   const [connectionVersion, setConnectionVersion] = useState(0)
   const pendingRequest = useRef<PendingRequest | null>(null)
@@ -180,6 +184,14 @@ export function useAskSession() {
     },
   })
 
+  const continueMutation = useMutation({
+    mutationFn: ({ sessionID, input, key }: { sessionID: string, input: string, key: string }) => continueAskSession(sessionID, { input }, key),
+    onSuccess: restoreSnapshot,
+    onError(error) {
+      dispatch({ type: 'request.failed', phase: errorPhase(error), message: errorMessage(error) })
+    },
+  })
+
   useEffect(() => {
     if (!pageVisible || !activeSessionId || !activeRunId) {
       return
@@ -268,6 +280,7 @@ export function useAskSession() {
       }
     }
     async function initialize() {
+      dispatch({ type: 'snapshot.loading' })
       try {
         const snapshot = await getAskSnapshot(sessionID)
         if (disposed) {
@@ -297,6 +310,30 @@ export function useAskSession() {
 
   async function submit(input = draft) {
     const value = input.trim()
+    if (activeSessionId && (!runtime.session || !runtime.run || runtime.session.id !== activeSessionId)) {
+      return
+    }
+    if (activeSessionId && runtime.run && isFollowUpRunStatus(runtime.run.status)) {
+      const current = pendingRequest.current
+      const pending = current?.kind === 'continue' && current.input === value && current.sessionID === activeSessionId ? current : { kind: 'continue' as const, input: value, idempotencyKey: idempotencyKey(), sessionID: activeSessionId }
+      const reused = pending === current
+      pendingRequest.current = pending
+      if (!reused) {
+        dispatch({ type: 'local.followed_up', input: value, clientRunID: localRunID() })
+      }
+      try {
+        const continued = await continueMutation.mutateAsync({ sessionID: activeSessionId, input: value, key: pending.idempotencyKey })
+        pendingRequest.current = null
+        useAskStore.getState().setDraft('')
+        return continued
+      }
+      catch (error) {
+        if (!isRetryableRequest(error)) {
+          pendingRequest.current = null
+        }
+        throw error
+      }
+    }
     if (petsLoad.current) {
       await petsLoad.current
     }
@@ -362,6 +399,7 @@ export function useAskSession() {
     pendingRequest.current = null
     createMutation.reset()
     replyMutation.reset()
+    continueMutation.reset()
     dispatch({ type: 'reset' })
     resetStore()
   }

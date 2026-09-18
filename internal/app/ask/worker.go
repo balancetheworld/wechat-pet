@@ -9,15 +9,18 @@ import (
 )
 
 type RunJob struct {
-	FamilyID     string
-	SessionID    string
-	RunID        string
-	RowVersion   int
-	AttemptCount int
+	FamilyID       string
+	SessionID      string
+	RunID          string
+	RowVersion     int
+	ExecutionEpoch int
+	AttemptCount   int
 }
 
+// RunProcessor 处理一次已领取的 Run。expectedVersion 是状态版本（row_version），
+// expectedEpoch 是执行代次（execution_epoch）；两者各管一类并发问题，不能混用。
 type RunProcessor interface {
-	ProcessRunVersion(context.Context, string, string, string, int) (ExecutionResult, error)
+	ProcessRunVersion(context.Context, string, string, string, int, int) (ExecutionResult, error)
 }
 
 type RunEnqueuer interface {
@@ -135,7 +138,7 @@ func (w *RunWorker) process(ctx context.Context, job RunJob) {
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan error, 1)
 	go w.heartbeat(executionCtx, cancelExecution, claimed, stopHeartbeat, heartbeatDone)
-	_, err = w.processor.ProcessRunVersion(executionCtx, claimed.FamilyID, claimed.SessionID, claimed.RunID, claimed.RowVersion)
+	_, err = w.processor.ProcessRunVersion(executionCtx, claimed.FamilyID, claimed.SessionID, claimed.RunID, claimed.RowVersion, claimed.ExecutionEpoch)
 	close(stopHeartbeat)
 	<-heartbeatDone
 	cancelExecution()

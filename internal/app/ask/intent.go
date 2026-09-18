@@ -1,83 +1,27 @@
 package ask
 
-import (
-	"context"
-	"errors"
-	"strings"
-)
+import "strings"
 
+// Intent 是前端兼容的意图字段（降级映射用，文档 8.4）。v2 决策循环不再做
+// 意图分类，最终回答的 intent 字段由回答组类型推导（见 run_decision.go intentForGroups）。
 type Intent string
 
 const (
-	IntentCasualChat  Intent = "casual_chat"
-	IntentPetHealth   Intent = "pet_health"
-	IntentPetFact     Intent = "pet_fact"
-	IntentFamilyQuery Intent = "family_query"
-	IntentAmbiguous   Intent = "ambiguous"
-	IntentUnsupported Intent = "unsupported"
+	IntentCasualChat Intent = "casual_chat"
+	IntentPetHealth  Intent = "pet_health"
+	IntentPetFact    Intent = "pet_fact"
 )
 
-type IntentInput struct {
-	Session  Session
-	Turn     Turn
-	Run      Run
-	Messages []ContextMessage
-}
-
-type IntentDecision struct {
-	Intent   Intent
-	Reply    string
-	Question string
-}
-
-type IntentRouter interface {
-	Route(context.Context, IntentInput) (IntentDecision, error)
-}
-
-func ValidateIntentDecision(value IntentDecision) error {
-	switch value.Intent {
-	case IntentPetHealth, IntentPetFact, IntentFamilyQuery:
-		return nil
-	case IntentCasualChat, IntentUnsupported:
-		if strings.TrimSpace(value.Reply) == "" {
-			return errors.New("intent reply is required")
-		}
-		return nil
-	case IntentAmbiguous:
-		if strings.TrimSpace(value.Question) == "" {
-			return errors.New("intent question is required")
-		}
-		return nil
-	default:
-		return errors.New("intent is invalid")
-	}
-}
-
-func DetectFamilyQuery(input string) (IntentDecision, bool) {
+// DetectFamilyQuery 判断输入是否为「查询家庭宠物列表」类问题。仅用于
+// CreateSessionFromInput 在无宠物可解析时区分「家庭暂无宠物」与「需补充宠物名称」。
+func DetectFamilyQuery(input string) bool {
 	value := strings.ToLower(strings.TrimSpace(input))
 	value = strings.Trim(value, "，。！？!?、~～. ")
-	patterns := []string{"我家有哪些宠物", "家里有哪些宠物", "有哪些宠物", "宠物列表", "我的宠物有哪些"}
+	patterns := []string{"我家有哪些宠物", "家里有哪些宠物", "有哪些宠物", "宠物列表", "我的宠物有哪些", "有几只宠物", "几只宠物", "家里有多少只宠物", "我有几只宠物"}
 	for _, pattern := range patterns {
 		if strings.Contains(value, pattern) {
-			return IntentDecision{Intent: IntentFamilyQuery}, true
+			return true
 		}
 	}
-	return IntentDecision{}, false
-}
-
-func DetectSimpleIntent(input string) (IntentDecision, bool) {
-	value := strings.ToLower(strings.TrimSpace(input))
-	value = strings.Trim(value, "，。！？!?、~～. ")
-	switch value {
-	case "你好", "您好", "嗨", "哈喽", "hello", "hi":
-		return IntentDecision{Intent: IntentCasualChat, Reply: "你好，我可以陪你聊聊，也可以帮你查看宠物记录或整理健康问题。"}, true
-	case "谢谢", "感谢", "谢谢你":
-		return IntentDecision{Intent: IntentCasualChat, Reply: "不客气，有需要可以继续问我。"}, true
-	case "你是谁":
-		return IntentDecision{Intent: IntentCasualChat, Reply: "我是宠物家庭助手，可以帮你查看宠物记录并整理健康观察信息。"}, true
-	case "你能做什么", "你会做什么":
-		return IntentDecision{Intent: IntentCasualChat, Reply: "我可以帮你查看宠物记录、整理健康观察信息，也可以回答简单问题。"}, true
-	default:
-		return IntentDecision{}, false
-	}
+	return false
 }

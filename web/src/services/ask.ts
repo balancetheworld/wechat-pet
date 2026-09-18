@@ -19,6 +19,15 @@ export function createAskSessionForPet(petID: string, data: CreateAskSessionRequ
   })
 }
 
+export function continueAskSession(sessionID: string, data: CreateAskSessionRequest, idempotencyKey: string) {
+  return request<AskExecution>({
+    path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/turns`,
+    method: 'POST',
+    data,
+    header: { 'Idempotency-Key': idempotencyKey },
+  })
+}
+
 export function processAskRun(sessionID: string, runID: string) {
   return request<AskExecution>({
     path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/runs/${encodeURIComponent(runID)}/process`,
