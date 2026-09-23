@@ -84,6 +84,8 @@ type Request struct {
 	Tools        []ToolSpec // 候选工具（无工具时传空集合）
 	// 响应约束（按用途固定：agent_step / context_summary / memory_derivation 分别绑定对应 Schema）
 	ResponseSchema any
+	// 响应协议标识（如 record_array_v1）。Provider 据此决定结构化输出模式与工具传递方式。
+	ResponseProtocol string
 	// 参数配置
 	Parameters []Parameter
 	// 运行限制

@@ -105,3 +105,43 @@
 ## 7. 结论
 
 T3 块 B 验证完成：`deepseek-flash` @ tokenflux 的组合能力（文字/图片/工具/结构化/流式/取消）真实可用，用量字段完整可对账。**唯一阻断上线的项是隐私条款缺失**（第 5 节），其余为适配器实现的工程约束（第 6 节），将在 T3 适配器接入与 T5 决策循环落地时逐项应用。
+
+## 8. record_array_v1 strict 结构化输出验证（2026-09-23 补测）
+
+### 8.1 背景
+
+非 strict 下 `text.format=json_schema` 不产生约束：同一请求 5 次里 2 次返回非法 JSON（模型把 `{"items":[…]}` 包装的 `]}` 提前闭合，再继续写 coverage/end），整份响应解析失败 → `provider_output_invalid`（不可重试）→ Run 直接失败。因此补测 strict 能力并改造 Schema。
+
+### 8.2 网关 strict 能力边界（实测）
+
+| 能力 | 结果 |
+|---|---|
+| 根 object + 全部 properties 进入 required + `additionalProperties:false` | 支持且真正约束（提示词要求额外字段时被强制丢弃） |
+| 必填数组、嵌套对象、标量可空 `["string","null"]` | 支持 |
+| `items` 使用 `anyOf` 或 `$ref`/`$defs` 的判别联合 | 支持 |
+| 根为数组 | 拒绝（400） |
+| `oneOf` | 拒绝（400，只接受 `type`/`anyOf`/`$ref`） |
+| `["array","null"]`、`["object","null"]` | 拒绝（400，type 联合只接受标量） |
+| 自由对象（`additionalProperties:true`） | 拒绝（strict 要求 false） |
+
+### 8.3 协议调整
+
+- `record_array_v1` 外壳改为 `{"records":[…]}`：根 object，`records` 为 `anyOf` 八种记录的数组；可省略标量改为必填 nullable，可省略数组改为必填空数组；判别联合由 `oneOf` 改为 `anyOf`。
+- `call.arguments` 由自由对象改为 **JSON 字符串**（服务端解析并归一化为对象），这是 strict 下唯一无法保留自由结构的字段。解析端同时接受字符串与对象两种形式，保证非 strict 回退仍可用。
+- Provider 对 strict 兼容 Schema 请求 `strict:true`；网关以 400 拒绝时回退一次非 strict，并以 `strict_fallback` 标记观测。
+
+### 8.4 验证结果
+
+脚本：`scripts/strict_provider_verify.mjs`（Schema 由 `scripts/dump_record_schema.go` 从服务端固定定义读取，避免脚本内重复维护）。
+
+```text
+[PASS] greeting#1  records=[header,group,segment,coverage,end]   arguments_ok=true
+[PASS] greeting#2  records=[header,group,segment,coverage,end]   arguments_ok=true
+[PASS] tool_query#1 records=[header,group,call,coverage,end]     arguments_ok=true
+[PASS] tool_query#2 records=[header,call,coverage,end]           arguments_ok=true
+strict 验证通过：全部调用都符合 record_array_v1
+```
+
+### 8.5 仍未覆盖
+
+strict 只约束结构，不约束语义：`source_turn_ids` 等来源字段可能被模型填成不存在的标识、coverage 覆盖关系与风险等级仍需服务端校验兜底；`provider_output_invalid` 目前仍为不可重试分类。

@@ -48,6 +48,7 @@ type TurnDTO struct {
 	InputSequence int        `json:"input_sequence"`
 	Status        TurnStatus `json:"status"`
 	Input         string     `json:"input"`
+	AssetRefs     []string   `json:"asset_refs,omitempty"`
 	SelectedRunID string     `json:"selected_run_id"`
 	CreatedAt     time.Time  `json:"created_at"`
 }
@@ -70,6 +71,21 @@ type ExecutionDTO struct {
 	Session SessionDTO `json:"session"`
 	Run     RunDTO     `json:"run"`
 	Events  []EventDTO `json:"events"`
+}
+
+type OperationDTO struct {
+	ID          string          `json:"id"`
+	SessionID   string          `json:"session_id"`
+	RunID       string          `json:"run_id"`
+	Status      OperationStatus `json:"status"`
+	Preview     string          `json:"preview"`
+	Target      string          `json:"target"`
+	Result      string          `json:"result"`
+	Version     int             `json:"version"`
+	ConfirmedAt *time.Time      `json:"confirmed_at"`
+	ExpiresAt   *time.Time      `json:"expires_at"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
 }
 
 type SnapshotTurnDTO struct {
@@ -111,7 +127,7 @@ func NewRunDTO(value Run) RunDTO {
 }
 
 func NewTurnDTO(value Turn) TurnDTO {
-	return TurnDTO{ID: value.ID, SessionID: value.SessionID, TurnIndex: value.TurnIndex, InputSequence: value.InputSequence, Status: value.Status, Input: value.Input, SelectedRunID: value.SelectedRunID, CreatedAt: value.CreatedAt}
+	return TurnDTO{ID: value.ID, SessionID: value.SessionID, TurnIndex: value.TurnIndex, InputSequence: value.InputSequence, Status: value.Status, Input: value.Input, AssetRefs: value.AssetRefs, SelectedRunID: value.SelectedRunID, CreatedAt: value.CreatedAt}
 }
 
 func NewEventDTO(value Event) EventDTO {
@@ -132,6 +148,10 @@ func NewEventDTOs(values []Event) []EventDTO {
 
 func NewExecutionDTO(value ExecutionResult) ExecutionDTO {
 	return ExecutionDTO{Session: NewSessionDTO(value.Session), Run: NewRunDTO(value.Run), Events: NewEventDTOs(value.Events)}
+}
+
+func NewOperationDTO(value Operation) OperationDTO {
+	return OperationDTO{ID: value.ID, SessionID: value.SessionID, RunID: value.RunID, Status: value.Status, Preview: value.Preview, Target: value.Target, Result: value.Result, Version: value.Version, ConfirmedAt: value.ConfirmedAt, ExpiresAt: value.ExpiresAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
 }
 
 func NewSnapshotDTO(value Snapshot) SnapshotDTO {

@@ -96,8 +96,8 @@ func (r *chatReferenceRepository) SearchReferences(ctx context.Context, query Ch
 	}
 
 	outcome := ChatReferenceOutcome{
-		Scope:   allowed,
-		Source:  ReadSource{SourceType: "chat_reference", SourceID: query.CurrentSessionID, ReadAt: time.Now().UTC()},
+		Scope:  allowed,
+		Source: ReadSource{SourceType: "chat_reference", SourceID: query.CurrentSessionID, ReadAt: time.Now().UTC()},
 	}
 	if len(matches) == 0 {
 		outcome.Status = ChatReferenceNotFound
@@ -160,7 +160,7 @@ func (r *SQLRepository) ListRecentSessions(ctx context.Context, familyID, userID
 	if limit <= 0 {
 		limit = maxReferenceSessions
 	}
-	rows, err := r.db.QueryContext(ctx, r.query("SELECT id, family_id, pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at FROM ask_sessions WHERE family_id = ? AND created_by = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?"), familyID, userID, limit)
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT id, family_id, COALESCE(resolved_pet_id, ''), created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at FROM ask_sessions WHERE family_id = ? AND created_by = ? AND deleted_at IS NULL ORDER BY created_at DESC, id DESC LIMIT ?"), familyID, userID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -195,7 +195,7 @@ func (r *SQLRepository) SearchReferenceMessages(ctx context.Context, sessionIDs 
 		placeholders[index] = "?"
 		args = append(args, id)
 	}
-	condition := "m.session_id IN (" + strings.Join(placeholders, ", ") + ") AND m.deleted_at IS NULL"
+	condition := "m.session_id IN (" + strings.Join(placeholders, ", ") + ") AND m.deleted_at IS NULL AND r.status = 'completed'"
 	if !filter.StartAt.IsZero() {
 		condition += " AND m.created_at >= ?"
 		args = append(args, filter.StartAt)

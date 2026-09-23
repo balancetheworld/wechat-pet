@@ -14,11 +14,11 @@ import (
 // StepDecision 是一次 agent_step 响应经校验后的处置决策（文档 2.2、8.4）。
 type StepDecision struct {
 	Action      ResponseAction
-	TaskUpdates []TaskUpdate   // header 冻结的任务项更新
-	Calls       []CallRecord   // call_tools 的调用集合
+	TaskUpdates []TaskUpdate     // header 冻结的任务项更新
+	Calls       []CallRecord     // call_tools 的调用集合
 	Questions   []QuestionRecord // request_input 的问题集合
-	Groups      []AnswerGroup  // final_answer 的按对象回答组
-	Coverage    []TaskCoverage // coverage 的覆盖关系
+	Groups      []AnswerGroup    // final_answer 的按对象回答组
+	Coverage    []TaskCoverage   // coverage 的覆盖关系
 }
 
 // DecideStep 把一次已解析的 record_array_v1 响应分发为动作处置（文档 8.4）。
@@ -52,7 +52,49 @@ func DecideStep(records []ProtocolRecord) (StepDecision, error) {
 		}
 		decision.Groups = groups
 	}
+	if len(decision.Coverage) == 0 {
+		decision.Coverage = deriveStepCoverage(decision)
+	}
 	return decision, nil
+}
+
+// deriveStepCoverage 在模型漏写 coverage 时按记录推导覆盖关系：
+// 任务项来自 header.task_updates 与各记录引用的 task_key，
+// 调用/追问/回答组分别归到对应任务的 call_keys/question_keys/answer_group_keys。
+// 顺序按任务首次出现固定，保证结果确定、可重放。
+func deriveStepCoverage(decision StepDecision) []TaskCoverage {
+	index := make(map[string]int, len(decision.TaskUpdates)+1)
+	coverage := make([]TaskCoverage, 0, len(decision.TaskUpdates)+1)
+	lookup := func(taskKey string) int {
+		if position, ok := index[taskKey]; ok {
+			return position
+		}
+		coverage = append(coverage, TaskCoverage{TaskKey: taskKey})
+		index[taskKey] = len(coverage) - 1
+		return index[taskKey]
+	}
+	for _, update := range decision.TaskUpdates {
+		lookup(update.TaskKey)
+	}
+	for _, call := range decision.Calls {
+		for _, taskKey := range call.TaskKeys {
+			position := lookup(taskKey)
+			coverage[position].CallKeys = append(coverage[position].CallKeys, call.CallKey)
+		}
+	}
+	for _, question := range decision.Questions {
+		for _, taskKey := range question.TaskKeys {
+			position := lookup(taskKey)
+			coverage[position].QuestionKeys = append(coverage[position].QuestionKeys, question.QuestionKey)
+		}
+	}
+	for _, group := range decision.Groups {
+		for _, taskKey := range group.TaskKeys {
+			position := lookup(taskKey)
+			coverage[position].AnswerGroupKeys = append(coverage[position].AnswerGroupKeys, group.GroupKey)
+		}
+	}
+	return coverage
 }
 
 // BuildToolBatch 把 call_tools 的调用记录构造为不可变调用批次（文档 7.4）。
@@ -68,6 +110,7 @@ func BuildToolBatch(calls []CallRecord, attemptID, runID, batchID string) ToolBa
 			ToolName:    call.ToolName,
 			ToolVersion: call.CatalogVersion,
 			Arguments:   call.Arguments,
+			DependsOn:   append([]string(nil), call.DependsOn...),
 		})
 	}
 	return ToolBatch{BatchID: batchID, RunID: runID, AttemptID: attemptID, Calls: toolCalls}

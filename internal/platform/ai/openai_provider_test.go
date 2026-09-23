@@ -3,9 +3,11 @@ package ai
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
+	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
 	"github.com/openai/openai-go/responses"
 )
 
@@ -226,6 +228,78 @@ func TestBuildParamsStrictForTopLevelArray(t *testing.T) {
 	}
 	if params2.Text.Format.OfJSONSchema == nil || !params2.Text.Format.OfJSONSchema.Strict.Value {
 		t.Fatal("object schema should be strict")
+	}
+}
+
+func TestBuildParamsStrictForRecordProtocol(t *testing.T) {
+	p := &OpenAIProvider{model: "test-model"}
+	params, err := p.buildParams(Request{
+		ResponseProtocol: askapp.RecordArrayV1,
+		ResponseSchema:   askapp.RecordArraySchema(),
+		Tools:            []ToolSpec{{Name: "resolve_pet", Version: "v1", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string"}}, "required": []string{"query"}}}},
+	})
+	if err != nil {
+		t.Fatalf("buildParams: %v", err)
+	}
+	if params.Text.Format.OfJSONSchema == nil || !params.Text.Format.OfJSONSchema.Strict.Value {
+		t.Fatal("record_array_v1 schema is strict-compatible and should request strict")
+	}
+	if len(params.Tools) != 0 {
+		t.Fatalf("record protocol must not send native tools, got %d", len(params.Tools))
+	}
+	if !strings.Contains(params.Instructions.Value, "不要使用原生工具调用") {
+		t.Fatalf("record protocol tools should stay in instructions: %s", params.Instructions.Value)
+	}
+}
+
+func TestStrictDisabledParams(t *testing.T) {
+	p := &OpenAIProvider{model: "test-model"}
+	params, err := p.buildParams(Request{ResponseSchema: askapp.RecordArraySchema()})
+	if err != nil {
+		t.Fatalf("buildParams: %v", err)
+	}
+	fallback, ok := strictDisabledParams(params)
+	if !ok || fallback.Text.Format.OfJSONSchema.Strict.Value {
+		t.Fatal("strict params should fall back to non-strict")
+	}
+	if !params.Text.Format.OfJSONSchema.Strict.Value {
+		t.Fatal("original params must not be mutated")
+	}
+	if _, ok := strictDisabledParams(responses.ResponseNewParams{}); ok {
+		t.Fatal("params without schema should not fall back")
+	}
+}
+
+func TestBuildParamsRecordArrayUsesProtocolToolsOnly(t *testing.T) {
+	p := &OpenAIProvider{model: "test-model"}
+	request := Request{
+		Messages:       []Message{{Role: "system", Content: "安全规则"}},
+		ResponseSchema: map[string]any{"type": "array", "items": map[string]any{}},
+		Tools: []ToolSpec{{
+			Name:        "search_health_records",
+			Version:     "v1",
+			Description: "查询健康记录",
+			Parameters:  map[string]any{"type": "object"},
+		}},
+	}
+	params, err := p.buildParams(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(params.Tools) != 0 {
+		t.Fatalf("record_array_v1 should not enable native tools, got %d", len(params.Tools))
+	}
+	if !strings.Contains(params.Instructions.Value, "search_health_records") || !strings.Contains(params.Instructions.Value, "record_array_v1") {
+		t.Fatalf("instructions missing protocol tool catalog: %q", params.Instructions.Value)
+	}
+
+	request.ResponseSchema = map[string]any{"type": "object", "properties": map[string]any{}}
+	params, err = p.buildParams(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(params.Tools) != 1 {
+		t.Fatalf("object protocol should keep native tools, got %d", len(params.Tools))
 	}
 }
 

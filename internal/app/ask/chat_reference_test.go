@@ -11,7 +11,7 @@ import (
 
 func insertReferenceSession(t *testing.T, db *sql.DB, id, family, user, pet, status string, createdAt time.Time) {
 	t.Helper()
-	if _, err := db.Exec("INSERT INTO ask_sessions (id, family_id, pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'unknown', 0, 'prompt-v1', 'rule-v1', 'knowledge-v1', ?, ?)", id, family, pet, user, status, createdAt, createdAt); err != nil {
+	if _, err := db.Exec("INSERT INTO ask_sessions (id, family_id, pet_id, resolved_pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, 'unknown', 0, 'prompt-v1', 'rule-v1', 'knowledge-v1', ?, ?)", id, family, pet, pet, user, status, createdAt, createdAt); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -108,6 +108,50 @@ func TestSearchReferencesReturnsMatchesWithSource(t *testing.T) {
 	}
 	if outcome.Source.Version == "" {
 		t.Fatalf("source version empty")
+	}
+}
+
+func TestSearchReferencesExcludesFailedRunButKeepsSessionMessages(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	base := time.Date(2026, 9, 17, 10, 0, 0, 0, time.UTC)
+	insertReferenceSession(t, db, "s1", "family-1", "user-1", "pet-1", "active", base)
+	insertReferenceMessage(t, db, "s1", "turn-1", "run-1", "msg-1", "user", "成功的呕吐记录", 0, 1, base, "")
+	insertReferenceMessage(t, db, "s1", "turn-2", "run-2", "msg-2", "user", "失败的呕吐提问", 1, 1, base.Add(time.Minute), "")
+	if _, err := db.Exec("UPDATE ask_runs SET status = 'failed' WHERE id = ?", "run-2"); err != nil {
+		t.Fatal(err)
+	}
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages, err := repository.ListSessionMessages(context.Background(), "s1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[1].ID != "msg-2" {
+		t.Fatalf("session messages = %+v", messages)
+	}
+	turns, err := repository.ListContextTurns(context.Background(), "s1", 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 2 || turns[1].Input != "失败的呕吐提问" {
+		t.Fatalf("context turns = %+v", turns)
+	}
+	reference := NewChatReferenceRepository(repository)
+	outcome, err := reference.SearchReferences(context.Background(), ChatReferenceQuery{
+		FamilyID: "family-1", UserID: "user-1", CurrentSessionID: "s1", Keywords: []string{"呕吐"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Status != ChatReferenceOK || len(outcome.Matches) != 1 || outcome.Matches[0].MessageID != "msg-1" {
+		t.Fatalf("references = %+v", outcome)
 	}
 }
 

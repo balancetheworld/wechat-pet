@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
 	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -16,6 +17,17 @@ import (
 type servicePetRepository struct {
 	pet  petapp.Pet
 	pets []petapp.Pet
+}
+
+type serviceCalendarRepository struct {
+	since  time.Time
+	before time.Time
+}
+
+func (r *serviceCalendarRepository) ListRecentRecords(_ context.Context, _, _ string, since, before time.Time, _ int) ([]calendarapp.ContextRecord, error) {
+	r.since = since
+	r.before = before
+	return nil, nil
 }
 
 func (r servicePetRepository) List(context.Context, string) ([]petapp.Pet, error) {
@@ -61,11 +73,16 @@ func (servicePetRepository) Delete(context.Context, string, string, string) erro
 type repeatModel struct {
 	records []ProtocolRecord
 	inputs  []StepInput
+	usage   ModelUsage
 }
 
-func (m *repeatModel) Step(_ context.Context, input StepInput) ([]ProtocolRecord, error) {
+func (m *repeatModel) Step(_ context.Context, input StepInput) (ModelStepResult, error) {
 	m.inputs = append(m.inputs, input)
-	return m.records, nil
+	usage := m.usage
+	if usage == (ModelUsage{}) {
+		usage = ModelUsage{Complete: true}
+	}
+	return ModelStepResult{Records: m.records, Usage: usage}, nil
 }
 
 // TestServiceProcessRunWithoutV2DependenciesDegrades 验证未注入 v2 决策循环依赖时，
@@ -140,7 +157,9 @@ func TestServiceCreateAndProcessRun(t *testing.T) {
 // TestServiceContinuesSessionWithHistoryAndIdempotency 验证继续会话把历史消息组装进
 // 决策循环上下文，且幂等键命中返回相同结果。
 func TestServiceContinuesSessionWithHistoryAndIdempotency(t *testing.T) {
-	model := &scriptedModel{responses: [][]ProtocolRecord{finalAnswerRecords(), finalAnswerRecords()}}
+	firstAnswer := finalAnswerRecords()
+	firstAnswer[2].Segment.Text = "不要自行使用阿莫西林"
+	model := &scriptedModel{responses: [][]ProtocolRecord{firstAnswer, finalAnswerRecords()}}
 	service, repository := newV2Service(t, model, &fakeBusinessRead{})
 
 	first, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "最近没精神", "create-history")
@@ -151,7 +170,7 @@ func TestServiceContinuesSessionWithHistoryAndIdempotency(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	second, err := service.ContinueSession(context.Background(), "family-1", "user-1", first.Session.ID, "现在好多了", "continue-history")
+	second, err := service.ContinueSession(context.Background(), "family-1", "user-1", first.Session.ID, "你刚才说的药是什么？", "continue-history")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,11 +190,11 @@ func TestServiceContinuesSessionWithHistoryAndIdempotency(t *testing.T) {
 			historyTexts = append(historyTexts, b.Text)
 		}
 	}
-	if len(historyTexts) != 1 || !strings.Contains(historyTexts[0], "最近没精神") || strings.Contains(historyTexts[0], "现在好多了") {
+	if len(historyTexts) != 2 || historyTexts[0] != "user: 最近没精神" || historyTexts[1] != "assistant: 不要自行使用阿莫西林" {
 		t.Fatalf("history blocks = %+v", historyTexts)
 	}
 
-	replayed, err := service.ContinueSession(context.Background(), "family-1", "user-1", first.Session.ID, "现在好多了", "continue-history")
+	replayed, err := service.ContinueSession(context.Background(), "family-1", "user-1", first.Session.ID, "你刚才说的药是什么？", "continue-history")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -221,6 +240,33 @@ func TestServiceEscalatesAndCompletesSession(t *testing.T) {
 	final := lastEvent(processed.Events)
 	if final.Type != "risk.escalated" {
 		t.Fatalf("final event = %s, want risk.escalated", final.Type)
+	}
+}
+
+func TestServiceDoesNotRepeatHistoricalRiskEscalation(t *testing.T) {
+	model := &scriptedModel{responses: [][]ProtocolRecord{finalAnswerRecords()}}
+	service, _ := newV2Service(t, model, &fakeBusinessRead{})
+
+	first, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "呼吸困难", "create-risk-history")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ProcessRun(context.Background(), "family-1", first.Session.ID, first.Run.ID); err != nil {
+		t.Fatal(err)
+	}
+	second, err := service.ContinueSession(context.Background(), "family-1", "user-1", first.Session.ID, "谢谢", "continue-risk-history")
+	if err != nil {
+		t.Fatal(err)
+	}
+	processed, err := service.ProcessRun(context.Background(), "family-1", second.Session.ID, second.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed.Run.Status != RunCompleted || processed.Run.RiskLevel == RiskRed || lastEvent(processed.Events).Type != "assistant.completed" {
+		t.Fatalf("processed result = %+v", processed)
+	}
+	if len(model.inputs) != 1 {
+		t.Fatalf("model calls = %d, want 1", len(model.inputs))
 	}
 }
 
@@ -293,6 +339,123 @@ func TestServiceCreateSessionFromInputPersistsMultiplePets(t *testing.T) {
 	}
 }
 
+func TestLoadHealthContextIncludesEverySessionPet(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pets := []petapp.Pet{{ID: "pet-1", FamilyID: "family-1", Name: "旺仔"}, {ID: "pet-2", FamilyID: "family-1", Name: "球球"}}
+	service, err := NewService(repository, servicePetRepository{pets: pets})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := service.loadHealthContext(context.Background(), Session{ID: "session-1", FamilyID: "family-1", PetID: "pet-1", Pets: []SessionPet{{PetID: "pet-1"}, {PetID: "pet-2"}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Pets) != 2 || snapshot.Pets[0].Name != "旺仔" || snapshot.Pets[1].Name != "球球" {
+		t.Fatalf("snapshot pets = %+v", snapshot.Pets)
+	}
+	blocks := referenceBlocks(snapshot)
+	text := ""
+	for _, block := range blocks {
+		text += block.Text
+	}
+	if !strings.Contains(text, "旺仔") || !strings.Contains(text, "球球") {
+		t.Fatalf("reference blocks = %+v", blocks)
+	}
+}
+
+func TestLoadHealthContextUsesInjectedQueryWindow(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pet: petapp.Pet{ID: "pet-1", FamilyID: "family-1", Name: "旺仔"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 9, 19, 10, 0, 0, 0, time.UTC)
+	calendar := &serviceCalendarRepository{}
+	service.now = func() time.Time { return now }
+	service.SetCalendarRepository(calendar)
+
+	snapshot, err := service.loadHealthContext(context.Background(), Session{ID: "session-1", FamilyID: "family-1", PetID: "pet-1"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.CapturedAt.Equal(now) || !calendar.before.Equal(now) || !calendar.since.Equal(now.AddDate(0, 0, -90)) {
+		t.Fatalf("snapshot=%s since=%s before=%s", snapshot.CapturedAt, calendar.since, calendar.before)
+	}
+}
+
+func TestServiceCreateSessionFromInputDoesNotGuessPet(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pets: []petapp.Pet{{ID: "pet-1", Name: "旺仔"}, {ID: "pet-2", Name: "球球"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, resolution, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "最近怎么样？", "create-unresolved")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Status != PetResolveNone || created.Session.PetID != "" || len(created.Session.Pets) != 2 || created.Run.Status != RunQueued {
+		t.Fatalf("unresolved session should enter agent run, resolution=%+v execution=%+v", resolution, created)
+	}
+}
+
+func TestServiceCreateSessionFromInputSinglePetWithoutNameEntersRun(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pets: []petapp.Pet{{ID: "pet-1", Name: "旺仔"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, resolution, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "最近精神不好", "create-single-unresolved")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolution.Status != PetResolveNone || created.Session.PetID != "" || len(created.Session.Pets) != 1 || created.Run.Status != RunQueued {
+		t.Fatalf("single-pet unresolved session should enter agent run, resolution=%+v execution=%+v", resolution, created)
+	}
+	stored, err := repository.GetSession(context.Background(), "family-1", created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.PetID != "" {
+		t.Fatalf("stored resolved pet id = %q, want empty", stored.PetID)
+	}
+}
+
 func TestServiceCreateSessionIsIdempotent(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -334,6 +497,45 @@ func TestServiceCreateSessionIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestServiceCreateSessionClosesCurrentSession(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(repository, servicePetRepository{pets: []petapp.Pet{{ID: "pet-1", Name: "旺仔"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, _, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔最近没精神", "first-create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, _, err := service.CreateSessionFromInput(context.Background(), "family-1", "user-1", "旺仔今天怎么样", "second-create")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous, err := repository.GetSession(context.Background(), "family-1", first.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := repository.GetSession(context.Background(), "family-1", second.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if previous.Status != SessionClosed || previous.CompletedAt == nil {
+		t.Fatalf("previous session = %+v", previous)
+	}
+	if current.Status != SessionActive || current.CompletedAt != nil {
+		t.Fatalf("current session = %+v", current)
+	}
+}
+
 func TestServiceValidatesCreateInput(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -369,18 +571,25 @@ func TestServiceReplyResumesSameRunAndPersistsMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := repository.db.Exec("UPDATE ask_runs SET attempt_count = 3 WHERE id = ?", waiting.Run.ID); err != nil {
+		t.Fatal(err)
+	}
+	waiting.Run, err = repository.GetRun(context.Background(), created.Session.ID, waiting.Run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	replied, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, created.Run.ID, "现在呼吸困难", waiting.Run.RowVersion, "reply-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replied.Session.TurnCount != 1 || replied.Run.ID != created.Run.ID || replied.Run.TurnID != created.Run.TurnID || replied.Run.Status != RunQueued || replied.Run.ClarificationCount != 1 {
+	if replied.Session.TurnCount != 2 || replied.Run.ID != created.Run.ID || replied.Run.TurnID == created.Run.TurnID || replied.Run.Status != RunQueued || replied.Run.ClarificationCount != 1 || replied.Run.InputRevision != waiting.Run.InputRevision+1 || replied.Run.AttemptCount != 3 {
 		t.Fatalf("reply result = %+v", replied)
 	}
-	turn, err := repository.GetTurn(context.Background(), created.Session.ID, created.Run.TurnID)
+	turn, err := repository.GetTurn(context.Background(), created.Session.ID, replied.Run.TurnID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if turn.TurnIndex != 0 || turn.Input != "最近没精神" || turn.Status != TurnAttached {
+	if turn.TurnIndex != 1 || turn.Input != "现在呼吸困难" || turn.Status != TurnReceived {
 		t.Fatalf("resumed turn = %+v", turn)
 	}
 	messages, err := repository.ListMessages(context.Background(), created.Session.ID, created.Run.ID)
@@ -389,6 +598,13 @@ func TestServiceReplyResumesSameRunAndPersistsMessages(t *testing.T) {
 	}
 	if len(messages) != 3 || messages[0].Role != "user" || messages[1].Role != "question" || messages[2].Role != "user" || messages[2].Content != "现在呼吸困难" {
 		t.Fatalf("messages = %+v", messages)
+	}
+	turns, err := repository.GetSnapshotTurns(context.Background(), created.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(turns) != 2 || turns[0].Turn.ID != created.Run.TurnID || turns[1].Turn.ID != replied.Run.TurnID || len(turns[0].Messages) != 2 || len(turns[1].Messages) != 1 {
+		t.Fatalf("snapshot turns = %+v", turns)
 	}
 	replayed, err := service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, created.Run.ID, "现在呼吸困难", waiting.Run.RowVersion, "reply-1")
 	if err != nil {
@@ -412,9 +628,8 @@ func TestServiceReplyResumesSameRunAndPersistsMessages(t *testing.T) {
 	}
 }
 
-func TestServiceReplyValidatesStateVersionAndAllowsUnlimitedClarifications(t *testing.T) {
-	// 追问无限次：每次 ProcessRun 都返回 request_input（需要补信息）。
-	model := &repeatModel{records: requestInputRecords()}
+func TestServiceReplyValidatesStateVersionAndPreservesCumulativeBudget(t *testing.T) {
+	model := &repeatModel{records: requestInputRecords(), usage: ModelUsage{InputTokens: 1500, OutputTokens: 1000, TotalTokens: 2500, Complete: true}}
 	service, _ := newV2Service(t, model, &fakeBusinessRead{})
 
 	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "问题", "create-11")
@@ -448,7 +663,7 @@ func TestServiceReplyValidatesStateVersionAndAllowsUnlimitedClarifications(t *te
 		t.Fatal(err)
 	}
 	current := waiting
-	for index := 3; index <= 5; index++ {
+	for index := 3; index <= DefaultBudgetLimits(BudgetRun).MaxModelCalls+2; index++ {
 		current, err = service.Reply(context.Background(), "family-1", "user-1", created.Session.ID, current.Run.ID, "第"+strconv.Itoa(index)+"轮回答", current.Run.RowVersion, "reply-limit-"+strconv.Itoa(index))
 		if err != nil {
 			t.Fatal(err)
@@ -457,11 +672,18 @@ func TestServiceReplyValidatesStateVersionAndAllowsUnlimitedClarifications(t *te
 		if processErr != nil {
 			t.Fatal(processErr)
 		}
+		if processed.Run.Status == RunFailed {
+			if processed.Run.ErrorCode != "budget_exhausted" || processed.Run.ClarificationCount != index {
+				t.Fatalf("budget exhaustion result = %+v, model calls = %d", processed, len(model.inputs))
+			}
+			return
+		}
 		if processed.Run.Status != RunWaitingInput || processed.Run.ErrorCode != "" || processed.Run.ClarificationCount != index {
-			t.Fatalf("unlimited clarification result = %+v", processed)
+			t.Fatalf("clarification result = %+v", processed)
 		}
 		current = processed
 	}
+	t.Fatal("cumulative run budget was not exhausted")
 }
 
 var _ = time.Now

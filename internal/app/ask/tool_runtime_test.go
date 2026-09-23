@@ -204,6 +204,32 @@ func TestValidateBatchRejectsInvalidArgumentsAndDuplicates(t *testing.T) {
 	}
 }
 
+func TestValidateBatchEnforcesDeclaredParameterSchema(t *testing.T) {
+	catalog, err := DefaultCatalog(DefaultToolVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		tool string
+		args string
+	}{
+		{name: "missing required", tool: "search_health_records", args: `{}`},
+		{name: "wrong type", tool: "search_health_records", args: `{"pet_id":123}`},
+		{name: "invalid enum", tool: "search_health_records", args: `{"pet_id":"p1","category":"other"}`},
+		{name: "unknown field", tool: "search_health_records", args: `{"pet_id":"p1","unexpected":true}`},
+		{name: "out of range", tool: "search_health_records", args: `{"pet_id":"p1","limit":101}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			batch := ToolBatch{Calls: []ToolCall{{ToolCallID: "c1", CallIndex: 0, ToolName: tc.tool, ToolVersion: DefaultToolVersion, Arguments: json.RawMessage(tc.args)}}}
+			if _, ok := ValidateBatch(batch, catalog, Filter{}).(*BatchValidationError); !ok {
+				t.Fatalf("expected schema validation failure for %s", tc.args)
+			}
+		})
+	}
+}
+
 func TestCanRunInParallel(t *testing.T) {
 	catalog := testToolRuntimeCatalog(t)
 

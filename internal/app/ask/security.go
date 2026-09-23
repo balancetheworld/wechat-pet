@@ -35,15 +35,15 @@ func MergeRisk(ruleLevel, modelLevel RiskLevel) RiskLevel {
 // 规则输出保存规则版本、触发码、原文依据和最低风险；
 // 模型输出保存自身评估与不确定性；最终结果不能低于规则风险。
 type MergedRisk struct {
-	FinalLevel  RiskLevel
-	RuleLevel   RiskLevel
-	RuleVersion string
-	RuleCode    string // 确定性规则触发码；空表示未命中规则
-	RuleBasis   string // 触发规则的原文依据
-	RuleMessage string
-	RuleAction  string
-	ModelLevel  RiskLevel
-	ModelUncertainty string
+	FinalLevel       RiskLevel `json:"final_level"`
+	RuleLevel        RiskLevel `json:"rule_level"`
+	RuleVersion      string    `json:"rule_version"`
+	RuleCode         string    `json:"rule_code"`
+	RuleBasis        string    `json:"rule_basis"`
+	RuleMessage      string    `json:"rule_message"`
+	RuleAction       string    `json:"rule_action"`
+	ModelLevel       RiskLevel `json:"model_level"`
+	ModelUncertainty string    `json:"model_uncertainty"`
 }
 
 // MergeRiskWithDetail 合并规则决策与模型风险，输出结构化结果（文档 11.1）。
@@ -66,10 +66,10 @@ func MergeRiskWithDetail(rule RiskDecision, modelLevel RiskLevel, modelUncertain
 type InjectionKind string
 
 const (
-	InjectionRuleOverride     InjectionKind = "rule_override"      // 试图覆盖系统规则/扮演身份
-	InjectionPrivilege        InjectionKind = "privilege_escalation" // 试图提升角色/越权
-	InjectionToolBypass       InjectionKind = "tool_bypass"        // 试图绕过工具权限/确认
-	InjectionDataExfil        InjectionKind = "data_exfil"         // 试图读取其他家庭/密钥
+	InjectionRuleOverride InjectionKind = "rule_override"        // 试图覆盖系统规则/扮演身份
+	InjectionPrivilege    InjectionKind = "privilege_escalation" // 试图提升角色/越权
+	InjectionToolBypass   InjectionKind = "tool_bypass"          // 试图绕过工具权限/确认
+	InjectionDataExfil    InjectionKind = "data_exfil"           // 试图读取其他家庭/密钥
 )
 
 // InjectionHit 是一次注入检测的命中（文档 11.2）。

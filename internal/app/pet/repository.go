@@ -15,14 +15,14 @@ import (
 var ErrNotFound = sql.ErrNoRows
 
 type Pet struct {
-	ID        string
-	FamilyID  string
-	Name      string
-	CreatedBy string
-	UpdatedBy string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	DeletedAt *time.Time
+	ID        string     `json:"id"`
+	FamilyID  string     `json:"family_id"`
+	Name      string     `json:"name"`
+	CreatedBy string     `json:"created_by"`
+	UpdatedBy string     `json:"updated_by"`
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
 }
 
 type Repository interface {

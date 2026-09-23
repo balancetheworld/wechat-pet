@@ -43,7 +43,9 @@ func (r *businessReadRepository) ResolvePet(ctx context.Context, familyID, input
 	resolution := ResolvePets(input, pets)
 	source := ReadSource{SourceType: sourceTypePet, SourceID: familyID, ReadAt: time.Now().UTC()}
 	source.Version = petCollectionVersion(pets)
-	r.recordSourceVersion(ctx, source)
+	if err := r.recordSourceVersion(ctx, source); err != nil {
+		return PetResolveOutcome{}, err
+	}
 	return PetResolveOutcome{
 		Status:    resolution.Status,
 		Resolved:  resolution.Resolved,
@@ -52,8 +54,89 @@ func (r *businessReadRepository) ResolvePet(ctx context.Context, familyID, input
 	}, nil
 }
 
+// ListFamilyPets 读取当前授权家庭的宠物列表。列表本身是低信任数据，
+// 只暴露 pet_id 与名字，供模型消歧或回答「有几只宠物」。
+func (r *businessReadRepository) ListFamilyPets(ctx context.Context, familyID string) (PetListOutcome, error) {
+	pets, err := r.pets.List(ctx, familyID)
+	if err != nil {
+		return PetListOutcome{}, err
+	}
+	items := make([]PetListItem, 0, len(pets))
+	for _, pet := range pets {
+		items = append(items, PetListItem{PetID: pet.ID, Name: pet.Name})
+	}
+	source := ReadSource{SourceType: sourceTypePet, SourceID: familyID, ReadAt: time.Now().UTC()}
+	source.Version = petCollectionVersion(pets)
+	if err := r.recordSourceVersion(ctx, source); err != nil {
+		return PetListOutcome{}, err
+	}
+	return PetListOutcome{Pets: items, Source: source}, nil
+}
+
 // ReadPetProfile 读取宠物档案与健康信息。缺资料不填默认病史；无记录返回
 // sql.ErrNoRows 映射为可区分错误，读取故障透传。
+// ListCalendarRecords 读取家庭在时间范围内的日程记录（跨宠物）。
+// ListReminders 读取家庭在指定日期（YYYY-MM-DD）之前的待办提醒。
+func (r *businessReadRepository) ListReminders(ctx context.Context, familyID, before string, limit int) (ReminderListOutcome, error) {
+	if r.calendar == nil {
+		return ReminderListOutcome{}, errors.New("calendar repository unavailable")
+	}
+	reminders, err := r.calendar.ListFamilyReminders(ctx, familyID, before, limit)
+	if err != nil {
+		return ReminderListOutcome{}, err
+	}
+	items := make([]ReminderListItem, 0, len(reminders))
+	versions := make([]string, 0, len(reminders)*2)
+	for _, reminder := range reminders {
+		items = append(items, ReminderListItem{
+			ReminderID:   reminder.ID,
+			PetID:        reminder.PetID,
+			PetName:      reminder.PetName,
+			ReminderDate: reminder.ReminderDate,
+			Category:     reminder.Category,
+			MedicalType:  reminder.MedicalType,
+			Content:      reminder.Content,
+		})
+		versions = append(versions, reminder.ID, reminder.ReminderDate)
+	}
+	source := ReadSource{SourceType: sourceTypeHealthRecord, SourceID: familyID, ReadAt: time.Now().UTC()}
+	source.Version = hashSourceVersion(versions...)
+	if err := r.recordSourceVersion(ctx, source); err != nil {
+		return ReminderListOutcome{}, err
+	}
+	return ReminderListOutcome{Reminders: items, Source: source}, nil
+}
+
+func (r *businessReadRepository) ListCalendarRecords(ctx context.Context, familyID string, since, before time.Time, limit int) (CalendarRecordListOutcome, error) {
+	if r.calendar == nil {
+		return CalendarRecordListOutcome{}, errors.New("calendar repository unavailable")
+	}
+	records, err := r.calendar.ListFamilyRecords(ctx, familyID, since, before, limit)
+	if err != nil {
+		return CalendarRecordListOutcome{}, err
+	}
+	items := make([]CalendarRecordListItem, 0, len(records))
+	versions := make([]string, 0, len(records)*2)
+	for _, record := range records {
+		items = append(items, CalendarRecordListItem{
+			RecordID:    record.ID,
+			PetID:       record.PetID,
+			PetName:     record.PetName,
+			Category:    record.Category,
+			MedicalType: record.MedicalType,
+			Content:     record.Content,
+			OccurredAt:  record.OccurredAt,
+		})
+		versions = append(versions, record.ID, record.OccurredAt.UTC().Format(time.RFC3339Nano))
+	}
+	source := ReadSource{SourceType: sourceTypeHealthRecord, SourceID: familyID, ReadAt: time.Now().UTC()}
+	source.Version = hashSourceVersion(versions...)
+	if err := r.recordSourceVersion(ctx, source); err != nil {
+		return CalendarRecordListOutcome{}, err
+	}
+	return CalendarRecordListOutcome{Records: items, Source: source}, nil
+}
+
 func (r *businessReadRepository) ReadPetProfile(ctx context.Context, familyID, petID string) (PetProfileOutcome, error) {
 	pet, err := r.pets.Get(ctx, familyID, petID)
 	if err != nil {
@@ -69,7 +152,9 @@ func (r *businessReadRepository) ReadPetProfile(ctx context.Context, familyID, p
 	}
 	source := ReadSource{SourceType: sourceTypePet, SourceID: petID, ReadAt: time.Now().UTC()}
 	source.Version = hashSourceVersion(petID, pet.UpdatedAt.UTC().Format(time.RFC3339Nano))
-	r.recordSourceVersion(ctx, source)
+	if err := r.recordSourceVersion(ctx, source); err != nil {
+		return PetProfileOutcome{}, err
+	}
 	return PetProfileOutcome{Profile: profile, Health: health, Source: source}, nil
 }
 
@@ -93,7 +178,9 @@ func (r *businessReadRepository) SearchHealthRecords(ctx context.Context, family
 	}
 	source := ReadSource{SourceType: sourceTypeHealthRecord, SourceID: petID, ReadAt: time.Now().UTC()}
 	source.Version = recordCollectionVersion(page.Records)
-	r.recordSourceVersion(ctx, source)
+	if err := r.recordSourceVersion(ctx, source); err != nil {
+		return HealthRecordSearchOutcome{}, err
+	}
 	return HealthRecordSearchOutcome{
 		Records:    records,
 		HasMore:    page.HasMore,
@@ -121,15 +208,30 @@ func (r *businessReadRepository) AggregateHealthRecords(ctx context.Context, fam
 		aggregate.CoveredStartAt.UTC().Format(time.RFC3339Nano),
 		aggregate.CoveredEndAt.UTC().Format(time.RFC3339Nano),
 	)
-	r.recordSourceVersion(ctx, source)
+	if err := r.recordSourceVersion(ctx, source); err != nil {
+		return HealthRecordAggregateOutcome{}, err
+	}
+	var latestAt, coveredStartAt, coveredEndAt *time.Time
+	if !aggregate.LatestAt.IsZero() {
+		value := aggregate.LatestAt
+		latestAt = &value
+	}
+	if !aggregate.CoveredStartAt.IsZero() {
+		value := aggregate.CoveredStartAt
+		coveredStartAt = &value
+	}
+	if !aggregate.CoveredEndAt.IsZero() {
+		value := aggregate.CoveredEndAt
+		coveredEndAt = &value
+	}
 	return HealthRecordAggregateOutcome{
 		RecordCount:     aggregate.RecordCount,
 		OccurrenceCount: aggregate.OccurrenceCount,
 		OccurrenceKnown: aggregate.OccurrenceKnown,
 		UnknownRecords:  aggregate.UnknownRecords,
-		LatestAt:        aggregate.LatestAt,
-		CoveredStartAt:  aggregate.CoveredStartAt,
-		CoveredEndAt:    aggregate.CoveredEndAt,
+		LatestAt:        latestAt,
+		CoveredStartAt:  coveredStartAt,
+		CoveredEndAt:    coveredEndAt,
 		Source:          source,
 	}, nil
 }
@@ -156,7 +258,9 @@ func (r *businessReadRepository) ReadHealthRecord(ctx context.Context, familyID,
 	}
 	source := ReadSource{SourceType: sourceTypeRecord, SourceID: recordID, ReadAt: time.Now().UTC()}
 	source.Version = hashSourceVersion(recordID, occurredAt.UTC().Format(time.RFC3339Nano))
-	r.recordSourceVersion(ctx, source)
+	if err := r.recordSourceVersion(ctx, source); err != nil {
+		return HealthRecordOutcome{}, err
+	}
 	return HealthRecordOutcome{
 		Record: HealthRecordItem{
 			ID:                record.ID,
@@ -172,11 +276,11 @@ func (r *businessReadRepository) ReadHealthRecord(ctx context.Context, familyID,
 }
 
 // recordSourceVersion 尽力持久化来源集合版本；失败不影响读取结果返回。
-func (r *businessReadRepository) recordSourceVersion(ctx context.Context, source ReadSource) {
+func (r *businessReadRepository) recordSourceVersion(ctx context.Context, source ReadSource) error {
 	if r.source == nil || source.Version == "" {
-		return
+		return nil
 	}
-	_ = r.source.UpsertSourceVersion(ctx, source.SourceType, source.SourceID, source.Version)
+	return r.source.UpsertSourceVersion(ctx, source.SourceType, source.SourceID, source.Version)
 }
 
 // petCollectionVersion 计算家庭宠物集合的稳定版本。

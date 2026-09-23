@@ -1,6 +1,6 @@
 import type { AskEvent, AskExecution, AskSnapshot } from '../types/ask'
 import { expect, it } from 'vitest'
-import { askReducer, hasSequenceGap, initialAskRuntimeState, mergeAskDeltaEvents } from './ask-reducer'
+import { askReducer, assistantPreviewText, hasSequenceGap, initialAskRuntimeState, mergeAskDeltaEvents, visibleTurnEvents } from './ask-reducer'
 
 function event(sequence: number, type: string): AskEvent {
   return {
@@ -55,7 +55,7 @@ function snapshot(events: AskEvent[]): AskSnapshot {
         id: 'turn-1',
         session_id: 'session-1',
         turn_index: 0,
-        status: value.run.status,
+        status: 'received',
         input: '旺仔怎么了',
         selected_run_id: value.run.id,
         created_at: '2026-09-09T10:00:00Z',
@@ -177,15 +177,52 @@ it('detects event sequence gaps before reducer consumption', () => {
 })
 
 it('merges contiguous assistant deltas for preview without merging across other events', () => {
-  const first = { ...event(1, 'assistant.delta'), data: { delta: '你好' } }
-  const second = { ...event(2, 'assistant.delta'), data: { delta: '，旺仔' } }
+  const first = { ...event(1, 'assistant.delta'), data: { message_id: 'message-1', delta: '你好' } }
+  const second = { ...event(2, 'assistant.delta'), data: { message_id: 'message-1', delta: '，旺仔' } }
   const progress = event(3, 'run.progress')
-  const third = { ...event(4, 'assistant.delta'), data: { delta: '今天' } }
+  const third = { ...event(4, 'assistant.delta'), data: { message_id: 'message-1', delta: '今天' } }
   const merged = mergeAskDeltaEvents([first, second, progress, third])
   expect(merged).toHaveLength(3)
-  expect(merged[0].data).toEqual({ delta: '你好，旺仔' })
+  expect(merged[0].data).toEqual({ message_id: 'message-1', delta: '你好，旺仔' })
   expect(merged[1]).toBe(progress)
-  expect(merged[2].data).toEqual({ delta: '今天' })
+  expect(merged[2].data).toEqual({ message_id: 'message-1', delta: '今天' })
+})
+
+it('accumulates chunked assistant deltas in sequence order', () => {
+  const chunks = ['目前', '需要', '观察', '精神变化']
+  const merged = mergeAskDeltaEvents(chunks.map((delta, index) => ({ ...event(index + 1, 'assistant.delta'), data: { message_id: 'message-1', delta } })))
+  expect(merged).toHaveLength(1)
+  expect(merged[0].data).toEqual({ message_id: 'message-1', delta: '目前需要观察精神变化' })
+})
+
+it('accumulates the assistant preview text of a single run', () => {
+  const events = [
+    { ...event(1, 'assistant.delta'), data: { message_id: 'message-1', delta: '目前' } },
+    { ...event(2, 'assistant.delta'), data: { message_id: 'message-1', delta: '需要观察' } },
+    { ...event(3, 'assistant.delta'), run_id: 'run-2', data: { message_id: 'message-2', delta: '另一条回答' } },
+  ]
+  expect(assistantPreviewText(events, 'run-1')).toBe('目前需要观察')
+  expect(assistantPreviewText(events, 'run-2')).toBe('另一条回答')
+  expect(assistantPreviewText(events, 'run-3')).toBe('')
+})
+
+it('replaces accumulated assistant preview with the terminal answer', () => {
+  const preview = [
+    { ...event(2, 'assistant.delta'), data: { message_id: 'message-1', delta: '目前' } },
+    { ...event(3, 'assistant.delta'), data: { message_id: 'message-1', delta: '需要观察' } },
+  ]
+  const completed = { ...event(4, 'assistant.completed'), data: { answer: '目前需要观察精神变化', groups: [], coverage: [], intent: 'casual_chat' } }
+  const visible = visibleTurnEvents([event(1, 'run.progress'), ...preview, completed])
+  expect(visible.map(value => value.type)).toEqual(['run.progress', 'assistant.completed'])
+  expect(visible[1].data).toEqual(completed.data)
+})
+
+it('clears accumulated assistant preview when the run fails or is canceled', () => {
+  const preview = { ...event(2, 'assistant.delta'), data: { message_id: 'message-1', delta: '目前需要观察' } }
+  const failed = visibleTurnEvents([event(1, 'run.progress'), preview, event(3, 'run.failed')])
+  expect(failed.map(value => value.type)).toEqual(['run.progress', 'run.failed'])
+  const canceled = visibleTurnEvents([event(1, 'run.progress'), preview, event(3, 'run.canceled')])
+  expect(canceled.map(value => value.type)).toEqual(['run.progress'])
 })
 
 it('allows a network error to return to reconnecting', () => {
@@ -205,12 +242,29 @@ it('enters reconnecting while restoring an existing session without dropping its
   expect(reconnecting.turns).toEqual(completed.turns)
 })
 
-it('restores persisted same run replies as separate messages', () => {
+it('restores reply turns by server turn identity when timestamps are equal', () => {
   const value = snapshot([event(1, 'run.queued'), event(2, 'assistant.question')])
-  value.turns[0].events[1].created_at = '2026-09-09T10:01:00Z'
-  value.turns[0].messages.push({ role: 'question', content: '什么时候开始的？', created_at: '2026-09-09T10:01:00Z' })
-  value.turns[0].messages.push({ role: 'user', content: '今天早上', created_at: '2026-09-09T10:02:00Z' })
-  value.turns[0].events.push({ ...event(3, 'run.queued'), created_at: '2026-09-09T10:02:00Z' })
+  const replyEvent = event(3, 'run.queued')
+  value.turns.push({
+    turn: {
+      ...value.turns[0].turn,
+      id: 'turn-2',
+      turn_index: 1,
+      input: '今天早上',
+    },
+    run: {
+      ...value.turns[0].run,
+      turn_id: 'turn-2',
+    },
+    events: [replyEvent],
+    messages: [{ role: 'user', content: '今天早上', created_at: '2026-09-09T10:00:00Z' }],
+    runs: [{
+      run: { ...value.turns[0].run, turn_id: 'turn-2' },
+      events: [replyEvent],
+      messages: [{ role: 'user', content: '今天早上', created_at: '2026-09-09T10:00:00Z' }],
+    }],
+  })
+  value.session.turn_count = 2
   value.event_cursors[0].sequence = 3
   const restored = askReducer(initialAskRuntimeState, { type: 'snapshot.loaded', snapshot: value })
   expect(restored.turns).toHaveLength(2)

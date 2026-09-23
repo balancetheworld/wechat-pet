@@ -2,10 +2,82 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
+	"sync"
 	"testing"
+	"time"
 
 	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
 )
+
+type memoryAttemptRepository struct {
+	mu       sync.Mutex
+	attempts map[string]askapp.Attempt
+}
+
+func (r *memoryAttemptRepository) CreateAttempt(_ context.Context, attempt askapp.Attempt) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.attempts == nil {
+		r.attempts = make(map[string]askapp.Attempt)
+	}
+	if _, exists := r.attempts[attempt.ID]; exists {
+		return askapp.ErrAttemptStateConflict
+	}
+	attempt.Status = askapp.AttemptQueued
+	r.attempts[attempt.ID] = attempt
+	return nil
+}
+
+func (r *memoryAttemptRepository) GetAttempt(_ context.Context, id string) (askapp.Attempt, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	attempt, ok := r.attempts[id]
+	if !ok {
+		return askapp.Attempt{}, askapp.ErrAttemptNotFound
+	}
+	return attempt, nil
+}
+
+func (r *memoryAttemptRepository) ListAttempts(_ context.Context, runID string) ([]askapp.Attempt, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]askapp.Attempt, 0)
+	for _, attempt := range r.attempts {
+		if attempt.RunID == runID {
+			result = append(result, attempt)
+		}
+	}
+	return result, nil
+}
+
+func (r *memoryAttemptRepository) TransitionAttempt(_ context.Context, id string, from, to askapp.AttemptStatus, errorCode, requestID, usage string, at time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	attempt, ok := r.attempts[id]
+	if !ok || attempt.Status != from {
+		return askapp.ErrAttemptStateConflict
+	}
+	attempt.Status = to
+	attempt.ErrorCode = errorCode
+	attempt.RequestID = requestID
+	attempt.Usage = usage
+	if to == askapp.AttemptSucceeded || to == askapp.AttemptFailed {
+		attempt.CompletedAt = &at
+	}
+	r.attempts[id] = attempt
+	return nil
+}
+
+type concurrentProvider struct{}
+
+func (concurrentProvider) Complete(_ context.Context, request Request) (Response, error) {
+	return Response{AttemptID: request.AttemptID, Text: validFinalAnswerJSON}, nil
+}
+
+func (concurrentProvider) Stream(_ context.Context, _ Request, _ func(StreamEvent) error) (Response, error) {
+	return Response{}, context.Canceled
+}
 
 // fakeProvider 实现 Provider，记录最近一次 Complete 请求并返回固定响应。
 type fakeProvider struct {
@@ -53,10 +125,10 @@ func TestBlocksToMessagesSeparatesInstructions(t *testing.T) {
 		t.Fatalf("second message role = %q, want user", messages[1].Role)
 	}
 	body := messages[1].Content
-	idxTask := indexOf(body, "任务项")
-	idxHistory := indexOf(body, "历史消息")
-	idxCurrent := indexOf(body, "当前问题")
-	idxTool := indexOf(body, "工具结果")
+	idxTask := indexOf(body, "【参考资料】\n任务项")
+	idxHistory := indexOf(body, "【历史对话】\n历史消息")
+	idxCurrent := indexOf(body, "【当前问题】\n当前问题")
+	idxTool := indexOf(body, "【工具结果】\n工具结果")
 	if !(idxTask >= 0 && idxHistory > idxTask && idxCurrent > idxHistory && idxTool > idxCurrent) {
 		t.Fatalf("user message layer order wrong: %q", body)
 	}
@@ -126,6 +198,31 @@ func TestParseRecordArrayValid(t *testing.T) {
 func TestParseRecordArrayIncomplete(t *testing.T) {
 	if _, err := parseRecordArray(`[{"type":"header","schema_version":"record_array_v1","action":"final_answer","task_updates":[]}`); err == nil {
 		t.Fatal("incomplete array should error")
+	}
+}
+
+func TestParseRecordArrayNormalizesCallArguments(t *testing.T) {
+	const text = `{"records":[{"type":"header","schema_version":"record_array_v1","action":"call_tools","task_updates":[{"task_key":"t1","goal":"查记录","source_turn_ids":[],"subject_keys":[]}]},{"type":"call","call_key":"c1","task_keys":["t1"],"tool_name":"search_health_records","catalog_version":"ask-tools-v2","depends_on":[],"arguments":"{\"pet_id\":\"pet-1\",\"limit\":2}"}]}`
+	records, err := parseRecordArray(text)
+	if err != nil {
+		t.Fatalf("parseRecordArray error: %v", err)
+	}
+	if len(records) != 2 || records[1].Call == nil {
+		t.Fatalf("records = %+v", records)
+	}
+	if got := string(records[1].Call.Arguments); got != `{"pet_id":"pet-1","limit":2}` {
+		t.Fatalf("arguments = %s, want normalized JSON object", got)
+	}
+}
+
+func TestParseRecordArrayAcceptsObjectCallArguments(t *testing.T) {
+	const text = `[{"type":"call","call_key":"c1","task_keys":["t1"],"tool_name":"search_health_records","catalog_version":"ask-tools-v2","arguments":{"pet_id":"pet-1"}}]`
+	records, err := parseRecordArray(text)
+	if err != nil {
+		t.Fatalf("parseRecordArray error: %v", err)
+	}
+	if records[0].Call == nil || string(records[0].Call.Arguments) != `{"pet_id":"pet-1"}` {
+		t.Fatalf("call = %+v", records[0].Call)
 	}
 }
 
@@ -212,7 +309,7 @@ func TestMaxOutputTokens(t *testing.T) {
 }
 
 func TestAgentModelAdapterStepBuildsRequestAndParses(t *testing.T) {
-	provider := &fakeProvider{response: Response{Text: validFinalAnswerJSON}}
+	provider := &fakeProvider{response: Response{ProviderRequestID: "request-1", Text: validFinalAnswerJSON, Usage: Usage{InputTokens: 12, OutputTokens: 5, TotalTokens: 17, Complete: true}}}
 	profile := Profile{
 		ProviderID: "openai", Model: "deepseek-flash", Version: "v1",
 		AdapterVersion: "adapter-v1",
@@ -223,29 +320,81 @@ func TestAgentModelAdapterStepBuildsRequestAndParses(t *testing.T) {
 		Blocks: []askapp.ContextBlock{{Layer: askapp.LayerCurrentTask, Kind: "current_turn", Text: "你好"}},
 		Tools:  []askapp.Tool{{Name: "search_records", Version: "v1"}},
 	}
-	records, err := adapter.Step(context.Background(), input)
+	result, err := adapter.Step(context.Background(), input)
 	if err != nil {
 		t.Fatalf("Step error: %v", err)
 	}
-	if len(records) != 5 {
-		t.Fatalf("records = %d, want 5", len(records))
+	if len(result.Records) != 5 {
+		t.Fatalf("records = %d, want 5", len(result.Records))
+	}
+	if result.ProviderRequestID != "request-1" || result.Usage.TotalTokens != 17 || !result.Usage.Complete {
+		t.Fatalf("model result = %+v", result)
 	}
 	req := provider.lastRequest
 	if req.Purpose != PurposeAgentStep {
 		t.Fatalf("purpose = %q, want agent_step", req.Purpose)
 	}
-	if req.AttemptID != "attempt-1" {
-		t.Fatalf("attempt = %q, want attempt-1", req.AttemptID)
+	if req.AttemptID == "" {
+		t.Fatal("attempt ID should not be empty")
 	}
 	if req.MaxOutputTokens != 2048 {
 		t.Fatalf("max_output_tokens = %d, want 2048", req.MaxOutputTokens)
 	}
 	schema, ok := req.ResponseSchema.(map[string]any)
-	if !ok || schema["type"] != "array" {
-		t.Fatalf("response schema should be record_array_v1 array, got %v", req.ResponseSchema)
+	if !ok || !askapp.IsRecordArraySchema(schema) {
+		t.Fatalf("response schema should be record_array_v1 object root, got %v", req.ResponseSchema)
+	}
+	if req.ResponseProtocol != askapp.RecordArrayV1 {
+		t.Fatalf("response protocol = %q, want %s", req.ResponseProtocol, askapp.RecordArrayV1)
 	}
 	if len(req.Messages) == 0 || len(req.Tools) != 1 {
 		t.Fatalf("messages=%d tools=%d, want 1 message and 1 tool", len(req.Messages), len(req.Tools))
+	}
+}
+
+func TestAgentModelAdapterPersistsCompleteRequestSnapshotAndUsage(t *testing.T) {
+	repository := &memoryAttemptRepository{}
+	provider := &fakeProvider{response: Response{ProviderRequestID: "provider-request-1", Text: validFinalAnswerJSON, Usage: Usage{InputTokens: 20, OutputTokens: 7, TotalTokens: 27, Source: "provider", Complete: true}}}
+	profile := Profile{ProviderID: "openai", Model: "model-1", Version: "profile-v1", AdapterVersion: "adapter-v1", Parameters: []Parameter{{Name: "temperature", Value: 0.2}}}
+	adapter := NewAgentModelAdapter(provider, profile, repository)
+	input := askapp.StepInput{
+		SessionID: "session-1", RunID: "run-1",
+		Blocks: []askapp.ContextBlock{{Layer: askapp.LayerCurrentTask, Text: "问题"}},
+		Tools:  []askapp.Tool{{Name: "search_records", Version: "v2", Parameters: []byte(`{"type":"object"}`)}},
+		Budget: askapp.ModelBudgetSnapshot{Limits: askapp.BudgetLimits{MaxTokens: 5000}, Reservation: askapp.BudgetAmount{ModelCalls: 1, Tokens: 2048}},
+	}
+	if _, err := adapter.Step(context.Background(), input); err != nil {
+		t.Fatal(err)
+	}
+	attempts, err := repository.ListAttempts(context.Background(), "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 {
+		t.Fatalf("attempts = %d, want 1", len(attempts))
+	}
+	attempt := attempts[0]
+	if attempt.RequestID != "provider-request-1" {
+		t.Fatalf("request_id = %q", attempt.RequestID)
+	}
+	var snapshot map[string]any
+	if err := json.Unmarshal([]byte(attempt.InputSnapshot), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"attempt_id", "messages", "tools", "response_schema", "response_protocol", "provider_id", "model", "profile_version", "adapter_version", "capabilities", "parameters", "max_output_tokens", "budget"} {
+		if _, ok := snapshot[key]; !ok {
+			t.Fatalf("snapshot missing %q: %s", key, attempt.InputSnapshot)
+		}
+	}
+	if _, ok := snapshot["image_content"]; ok {
+		t.Fatal("snapshot must not contain image bytes")
+	}
+	var usage Usage
+	if err := json.Unmarshal([]byte(attempt.Usage), &usage); err != nil {
+		t.Fatal(err)
+	}
+	if usage.TotalTokens != 27 || !usage.Complete {
+		t.Fatalf("usage = %+v", usage)
 	}
 }
 
@@ -267,11 +416,63 @@ func TestAgentModelAdapterStepAssignsDistinctAttemptIDs(t *testing.T) {
 	}
 }
 
+func TestAgentModelAdapterPersistsConcurrentAttempts(t *testing.T) {
+	repository := &memoryAttemptRepository{}
+	adapter := NewAgentModelAdapter(concurrentProvider{}, Profile{}, repository)
+	const count = 32
+	var wg sync.WaitGroup
+	errs := make(chan error, count)
+	for index := 0; index < count; index++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := adapter.Step(context.Background(), askapp.StepInput{SessionID: "session-1", RunID: "run-1"})
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	attempts, err := repository.ListAttempts(context.Background(), "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != count {
+		t.Fatalf("attempts = %d, want %d", len(attempts), count)
+	}
+	for _, attempt := range attempts {
+		if attempt.Status != askapp.AttemptSucceeded || attempt.CompletedAt == nil {
+			t.Fatalf("attempt = %+v", attempt)
+		}
+	}
+}
+
 func TestAgentModelAdapterStepPropagatesProviderError(t *testing.T) {
 	provider := &fakeProvider{err: NewProviderError(ErrProviderTimeout, true, 0, context.DeadlineExceeded)}
 	adapter := NewAgentModelAdapter(provider, Profile{})
 	if _, err := adapter.Step(context.Background(), askapp.StepInput{}); err == nil {
 		t.Fatal("provider error should propagate")
+	}
+}
+
+func TestAgentModelAdapterStepClassifiesInvalidOutput(t *testing.T) {
+	repository := &memoryAttemptRepository{}
+	provider := &fakeProvider{response: Response{Text: ""}}
+	adapter := NewAgentModelAdapter(provider, Profile{}, repository)
+	_, err := adapter.Step(context.Background(), askapp.StepInput{SessionID: "session-1", RunID: "run-1"})
+	if code, retryable := askapp.ExecutorErrorDetails(err); code != ErrProviderOutputInvalid || retryable {
+		t.Fatalf("invalid output error = (%q, %v), want (%q, false)", code, retryable, ErrProviderOutputInvalid)
+	}
+	attempts, err := repository.ListAttempts(context.Background(), "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attempts) != 1 || attempts[0].Status != askapp.AttemptFailed || attempts[0].ErrorCode != ErrProviderOutputInvalid {
+		t.Fatalf("attempt = %+v", attempts)
 	}
 }
 

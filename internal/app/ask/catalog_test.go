@@ -1,6 +1,7 @@
 package ask
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -192,6 +193,57 @@ func TestEmergencySkillsFallback(t *testing.T) {
 	emergency := catalog.EmergencySkills()
 	if len(emergency) != 1 || emergency[0].ID != "emergency" {
 		t.Fatalf("急症安全兜底 = %+v，应只含 emergency", emergency)
+	}
+}
+
+func TestDefaultCatalogRecallsVaccineRecordForNaturalChinese(t *testing.T) {
+	catalog, err := NewCatalog(DefaultTools(), nil, DefaultToolVersion, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := catalog.RecallTools("上次疫苗什么时候", readOnlyFilter(), 0)
+	for _, match := range result.Matches {
+		if match.Tool.OperationID == "search.health_record" {
+			return
+		}
+	}
+	t.Fatalf("recall result = %+v", result)
+}
+
+func TestDefaultCatalogChineseRecallRegression(t *testing.T) {
+	catalog, err := DefaultCatalog(DefaultToolVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		query       string
+		operationID string
+		parameter   string
+	}{
+		{query: "上次疫苗什么时候", operationID: "search.health_record", parameter: "pet_id"},
+		{query: "最近拉肚子几次", operationID: "aggregate.health_record", parameter: "pet_id"},
+		{query: "旺仔和球球分别是谁", operationID: "resolve.pet", parameter: "query"},
+		{query: "帮我看下档案", operationID: "read.pet_profile", parameter: "pet_id"},
+	}
+	for _, test := range tests {
+		result := catalog.RecallTools(test.query, readOnlyFilter(), 0)
+		var found *Tool
+		for _, match := range result.Matches {
+			if match.Tool.OperationID == test.operationID {
+				tool := match.Tool
+				found = &tool
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("query=%q operation=%q matches=%+v", test.query, test.operationID, result.Matches)
+		}
+		var schema struct {
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if !json.Valid(found.Parameters) || json.Unmarshal(found.Parameters, &schema) != nil || schema.Properties[test.parameter] == nil {
+			t.Fatalf("query=%q tool=%q parameter schema invalid: %s", test.query, test.operationID, found.Parameters)
+		}
 	}
 }
 

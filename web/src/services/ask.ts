@@ -1,5 +1,5 @@
-import type { AskEvent, AskExecution, AskSession, AskSnapshot, CreateAskSessionRequest, ReplyAskRunRequest } from '../types/ask'
-import { request } from './request'
+import type { AskEvent, AskExecution, AskOperation, AskSession, AskSnapshot, CreateAskSessionRequest, ReplyAskRunRequest } from '../types/ask'
+import { request, uploadFile } from './request'
 
 export function createAskSession(data: CreateAskSessionRequest, idempotencyKey: string) {
   return request<AskExecution>({
@@ -59,5 +59,45 @@ export function getAskSnapshot(sessionID: string) {
 export function getAskEvents(sessionID: string, runID: string, after = 0) {
   return request<AskEvent[]>({
     path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/runs/${encodeURIComponent(runID)}/events?after=${after}`,
+  })
+}
+
+export function uploadAskImage(filePath: string) {
+  return uploadFile<{ asset_id: string }>({ path: '/api/v1/assets/upload', filePath, name: 'file', formData: { type: 'ask_image' } })
+}
+
+export function stopAskRun(sessionID: string, runID: string, expectedVersion: number) {
+  return request<AskExecution>({ path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/runs/${encodeURIComponent(runID)}/stop`, method: 'POST', data: { expected_version: expectedVersion } })
+}
+
+export function retryAskRun(sessionID: string, runID: string, expectedVersion: number) {
+  return request<AskExecution>({ path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/runs/${encodeURIComponent(runID)}/retry`, method: 'POST', data: { expected_version: expectedVersion } })
+}
+
+export function getAskOperations(sessionID: string) {
+  return request<AskOperation[]>({ path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/operations` })
+}
+
+export function confirmAskOperation(sessionID: string, operationID: string, expectedVersion: number, summary: string) {
+  return request<AskOperation>({
+    path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/operations/${encodeURIComponent(operationID)}/confirm`,
+    method: 'POST',
+    data: { expected_version: expectedVersion, summary },
+  })
+}
+
+export function abandonAskOperation(sessionID: string, operationID: string, expectedVersion: number) {
+  return request<AskOperation>({
+    path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/operations/${encodeURIComponent(operationID)}/abandon`,
+    method: 'POST',
+    data: { expected_version: expectedVersion },
+  })
+}
+
+export function executeAskOperation(sessionID: string, operationID: string, expectedVersion: number) {
+  return request<AskOperation>({
+    path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/operations/${encodeURIComponent(operationID)}/execute`,
+    method: 'POST',
+    data: { expected_version: expectedVersion },
   })
 }

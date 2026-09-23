@@ -26,6 +26,9 @@ func UnresolvedItems(items []TaskItem) []TaskItem {
 //
 // 返回 nil 表示清单可随 Run 完成一并提交；否则返回首个阻塞错误。
 func CheckRunClosure(items []TaskItem) error {
+	if len(items) == 0 {
+		return fmt.Errorf("coverage: run closure has no tasks")
+	}
 	unresolved := UnresolvedItems(items)
 	if len(unresolved) > 0 {
 		return fmt.Errorf("coverage: run closure has %d unresolved task(s), first %q is %q",

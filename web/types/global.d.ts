@@ -12,6 +12,7 @@ declare module '*.sass';
 declare module '*.styl';
 
 declare const TARO_APP_API_BASE_URL: string
+declare const TARO_APP_DEBUG: boolean
 
 declare namespace NodeJS {
   interface ProcessEnv {

@@ -17,7 +17,7 @@ func headerRecord(action ResponseAction) ProtocolRecord {
 
 func coverageRecord() ProtocolRecord {
 	return ProtocolRecord{Type: RecordCoverage, Coverage: &CoverageRecord{
-		Type: RecordCoverage,
+		Type:  RecordCoverage,
 		Tasks: []TaskCoverage{{TaskKey: "t1", CallKeys: []string{"c1"}}},
 	}}
 }
@@ -138,6 +138,53 @@ func TestValidateFinalAnswerOK(t *testing.T) {
 		ResultRef: &TaskResultRef{Kind: ResultRefAnswerGroup, RefID: "g1", Version: "v1"}}}
 	if err := ValidateFinalAnswer(decision, taskItems); err != nil {
 		t.Fatalf("expected closure OK, got %v", err)
+	}
+}
+
+func TestRunDecisionLoopRejectsGhostReferences(t *testing.T) {
+	group := ProtocolRecord{Type: RecordGroup, Group: &GroupRecord{
+		Type: RecordGroup, GroupKey: "g1", TaskKeys: []string{"t1"},
+		AnswerKind: AnswerFact, Scope: ScopeFull,
+		Subjects: []AnswerSubject{{SubjectKey: "s1", Kind: SubjectUnresolved, Description: "未明确宠物"}},
+	}}
+	segment := ProtocolRecord{Type: RecordSegment, Segment: &SegmentRecord{
+		Type: RecordSegment, SegmentKey: "seg1", GroupKey: "g1", SubjectKeys: []string{"s1"},
+		Field: "result", Text: "记录内容", BasisKind: BasisBusinessFact,
+		EvidenceRefs: []EvidenceRef{{SourceType: "calendar_record", SourceID: "ghost-record"}},
+	}}
+	records := []ProtocolRecord{
+		{Type: RecordHeader, Header: &HeaderRecord{Type: RecordHeader, SchemaVersion: RecordArrayV1, Action: ActionFinalAnswer, TaskUpdates: []TaskUpdate{{TaskKey: "t1", Goal: "查记录"}}}},
+		group,
+		segment,
+		{Type: RecordCoverage, Coverage: &CoverageRecord{Type: RecordCoverage, Tasks: []TaskCoverage{{TaskKey: "t1", AnswerGroupKeys: []string{"g1"}}}}},
+		endRecord(),
+	}
+	model := &scriptedModel{responses: [][]ProtocolRecord{records}}
+	if _, err := RunDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{}, 1); err == nil {
+		t.Fatal("expected ghost evidence reference to be rejected")
+	}
+}
+
+func TestRunDecisionLoopRejectsFinalAnswerWithoutTasks(t *testing.T) {
+	group := ProtocolRecord{Type: RecordGroup, Group: &GroupRecord{
+		Type: RecordGroup, GroupKey: "g1", TaskKeys: []string{"ghost-task"},
+		AnswerKind: AnswerCasual, Scope: ScopeFull,
+		Subjects: []AnswerSubject{{SubjectKey: "s1", Kind: SubjectUnresolved, Description: "未明确宠物"}},
+	}}
+	segment := ProtocolRecord{Type: RecordSegment, Segment: &SegmentRecord{
+		Type: RecordSegment, SegmentKey: "seg1", GroupKey: "g1", SubjectKeys: []string{"s1"},
+		Field: "reply", Text: "你好", BasisKind: BasisGeneralKnowledge,
+	}}
+	records := []ProtocolRecord{
+		{Type: RecordHeader, Header: &HeaderRecord{Type: RecordHeader, SchemaVersion: RecordArrayV1, Action: ActionFinalAnswer}},
+		group,
+		segment,
+		{Type: RecordCoverage, Coverage: &CoverageRecord{Type: RecordCoverage, Tasks: []TaskCoverage{{TaskKey: "ghost-task", AnswerGroupKeys: []string{"g1"}}}}},
+		endRecord(),
+	}
+	model := &scriptedModel{responses: [][]ProtocolRecord{records}}
+	if _, err := RunDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{}, 1); err == nil {
+		t.Fatal("expected final answer without task updates to be rejected")
 	}
 }
 

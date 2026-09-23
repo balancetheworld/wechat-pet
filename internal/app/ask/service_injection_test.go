@@ -12,8 +12,8 @@ import (
 // stubAgentModel 是最小 AgentModel 替身，仅用于 setter 注入测试。
 type stubAgentModel struct{}
 
-func (stubAgentModel) Step(context.Context, StepInput) ([]ProtocolRecord, error) {
-	return nil, nil
+func (stubAgentModel) Step(context.Context, StepInput) (ModelStepResult, error) {
+	return ModelStepResult{}, nil
 }
 
 func TestServiceSettersInjectV2Dependencies(t *testing.T) {

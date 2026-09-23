@@ -26,6 +26,18 @@ func TestValidateAnswerGroup(t *testing.T) {
 			t.Fatalf("expected result required error, got %v", err)
 		}
 	})
+	t.Run("business fact requires evidence", func(t *testing.T) {
+		g := AnswerGroup{GroupKey: "g1", TaskKeys: []string{"t1"}, AnswerKind: AnswerFact, Subjects: []AnswerSubject{petSubject}, Scope: ScopeFull, Segments: []SegmentRecord{{SegmentKey: "seg1", Field: "result", Text: "没有记录", BasisKind: BasisBusinessFact}}}
+		if err := ValidateAnswerGroup(g); err == nil || !strings.Contains(err.Error(), "evidence_refs") {
+			t.Fatalf("expected evidence_refs error, got %v", err)
+		}
+	})
+	t.Run("business fact with evidence is ok", func(t *testing.T) {
+		g := AnswerGroup{GroupKey: "g1", TaskKeys: []string{"t1"}, AnswerKind: AnswerFact, Subjects: []AnswerSubject{petSubject}, Scope: ScopeFull, Segments: []SegmentRecord{{SegmentKey: "seg1", Field: "result", Text: "有一条记录", BasisKind: BasisBusinessFact, EvidenceRefs: []EvidenceRef{{SourceType: "calendar_record", SourceID: "r1"}}}}}
+		if err := ValidateAnswerGroup(g); err != nil {
+			t.Fatalf("business fact with evidence rejected: %v", err)
+		}
+	})
 	t.Run("non-full scope requires limitation", func(t *testing.T) {
 		g := AnswerGroup{GroupKey: "g1", TaskKeys: []string{"t1"}, AnswerKind: AnswerFact, Subjects: []AnswerSubject{petSubject}, Scope: ScopeDeclined, Segments: []SegmentRecord{{Field: "result", Text: "查不到"}}}
 		if err := ValidateAnswerGroup(g); err == nil || !strings.Contains(err.Error(), "limitation") {
@@ -71,7 +83,7 @@ func TestAssembleAnswerGroups(t *testing.T) {
 	records := []ProtocolRecord{
 		{Type: RecordHeader, Header: &HeaderRecord{Type: RecordHeader, SchemaVersion: RecordArrayV1, Action: ActionFinalAnswer, TaskUpdates: []TaskUpdate{}}},
 		{Type: RecordGroup, Group: &GroupRecord{Type: RecordGroup, GroupKey: "g1", TaskKeys: []string{"t1"}, AnswerKind: AnswerHealth, Subjects: []AnswerSubject{{SubjectKey: "s1", Kind: SubjectPet, PetID: "p1"}}, Scope: ScopeFull}},
-		{Type: RecordSegment, Segment: &SegmentRecord{Type: RecordSegment, SegmentKey: "seg1", GroupKey: "g1", SubjectKeys: []string{"s1"}, Field: "observation", Text: "未见异常", BasisKind: BasisBusinessFact}},
+		{Type: RecordSegment, Segment: &SegmentRecord{Type: RecordSegment, SegmentKey: "seg1", GroupKey: "g1", SubjectKeys: []string{"s1"}, Field: "observation", Text: "未见异常", BasisKind: BasisBusinessFact, EvidenceRefs: []EvidenceRef{{SourceType: "calendar_record", SourceID: "r1"}}}},
 		{Type: RecordRisk, Risk: &RiskRecord{Type: RecordRisk, GroupKey: "g1", SubjectKey: "s1", Level: RiskGreen}},
 		{Type: RecordCoverage, Coverage: &CoverageRecord{Type: RecordCoverage, Tasks: []TaskCoverage{}}},
 		{Type: RecordEnd},

@@ -23,13 +23,14 @@ const (
 // ContextBlock 是上下文组装中的一个内容块（文档 5.8）。
 // 每块携带来源身份，用于去重与裁剪；相同文本但不同对象、时间或版本不得合并。
 type ContextBlock struct {
-	Layer    ContextLayer
-	Kind     string // instruction / task / question / profile / record / summary / history / current_turn / tool_call / tool_result / referenced_chat
-	ObjectID string // 来源对象标识（pet_id / turn_id / message_id / 记录 ID / 摘要 ID）
-	Version  string // 内容版本
-	Position string // 实际片段位置
-	Text     string
-	Required bool // 必须保留：核心规则、当前输入、急症触发信息、必要输出约束
+	Layer        ContextLayer
+	Kind         string // instruction / task / question / profile / record / summary / history / current_turn / tool_call / tool_result / referenced_chat
+	ObjectID     string // 来源对象标识（pet_id / turn_id / message_id / 记录 ID / 摘要 ID）
+	Version      string // 内容版本
+	Position     string // 实际片段位置
+	Text         string
+	EvidenceRefs []EvidenceRef
+	Required     bool // 必须保留：核心规则、当前输入、急症触发信息、必要输出约束
 }
 
 // ContextPriority 是 5.9 已确认的裁剪优先级。数值越小越必须保留；

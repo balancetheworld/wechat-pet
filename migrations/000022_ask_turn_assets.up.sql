@@ -1,0 +1,1 @@
+ALTER TABLE ask_turns ADD COLUMN asset_refs TEXT NOT NULL DEFAULT '[]';

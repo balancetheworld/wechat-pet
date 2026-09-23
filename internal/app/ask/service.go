@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -14,21 +15,24 @@ import (
 	calendarapp "github.com/balancetheworld/wechat-pet/internal/app/calendar"
 	petapp "github.com/balancetheworld/wechat-pet/internal/app/pet"
 	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
+	fileservice "github.com/balancetheworld/wechat-pet/internal/service/file"
 )
 
 const (
-	DefaultPromptVersion      = "ask-prompt-v2"
-	DefaultRuleVersion        = "ask-rules-v1"
-	DefaultKnowledgeVersion   = "ask-knowledge-v1"
-	MaxInputLength            = 4000
-	MaxIdempotencyKeyLength   = 128
-	ContextTurnLimit          = 5
-	ContextMaxChars           = 6000
-	DefaultContextVersion     = "ask-context-v5"
-	createSessionOperation    = "ask.session.create"
-	createPetSessionOperation = "ask.pet_session.create"
-	continueSessionOperation  = "ask.session.continue"
-	replyRunOperation         = "ask.run.reply"
+	DefaultPromptVersion        = "ask-prompt-v2"
+	DefaultRuleVersion          = "ask-rules-v1"
+	DefaultKnowledgeVersion     = "ask-knowledge-v1"
+	MaxInputLength              = 4000
+	MaxIdempotencyKeyLength     = 128
+	ContextTurnLimit            = 5
+	ContextMaxChars             = 6000
+	DefaultContextVersion       = "ask-context-v5"
+	MaxAssistantDeltaChunkRunes = 24
+	MaxAssistantDeltaChunks     = 40
+	createSessionOperation      = "ask.session.create"
+	createPetSessionOperation   = "ask.pet_session.create"
+	continueSessionOperation    = "ask.session.continue"
+	replyRunOperation           = "ask.run.reply"
 )
 
 type contextTurnRepository interface {
@@ -44,7 +48,19 @@ type petHealthReader interface {
 }
 
 type calendarRecordReader interface {
-	ListRecentRecords(context.Context, string, string, time.Time, int) ([]calendarapp.ContextRecord, error)
+	ListRecentRecords(context.Context, string, string, time.Time, time.Time, int) ([]calendarapp.ContextRecord, error)
+}
+
+type calendarRecordWriter interface {
+	CreateRecord(context.Context, string, string, calendarapp.CreateRecordRequest) (calendarapp.RecordDTO, error)
+	UpdateRecord(context.Context, string, string, string, calendarapp.UpdateRecordRequest) (calendarapp.RecordDTO, error)
+	CompleteReminder(context.Context, string, string, string, calendarapp.CompleteReminderRequest) (calendarapp.CompleteReminderDTO, error)
+}
+
+type imageAssetReader interface {
+	AuthorizeFamily(context.Context, string, string) error
+	Get(context.Context, string) (fileservice.Asset, error)
+	Read(context.Context, string) ([]byte, error)
 }
 
 type RunDecision struct {
@@ -61,8 +77,8 @@ type ExecutionResult struct {
 	Events  []Event
 }
 
-func (s *Service) GetSnapshot(ctx context.Context, familyID, sessionID string) (Snapshot, error) {
-	session, err := s.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID))
+func (s *Service) GetSnapshot(ctx context.Context, familyID, sessionID, userID string) (Snapshot, error) {
+	session, err := s.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID), userID)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -75,8 +91,8 @@ func (s *Service) GetSnapshot(ctx context.Context, familyID, sessionID string) (
 
 var ErrRunNotWaitingInput = errors.New("ask run is not waiting for input")
 
-func (s *Service) GetSession(ctx context.Context, familyID, sessionID string) (Session, error) {
-	value, err := s.repository.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID))
+func (s *Service) GetSession(ctx context.Context, familyID, sessionID, userID string) (Session, error) {
+	value, err := s.repository.GetSessionForUser(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID), strings.TrimSpace(userID))
 	if errors.Is(err, ErrSessionNotFound) {
 		return Session{}, appErrors.NotFound("问问会话不存在")
 	}
@@ -105,11 +121,11 @@ func (s *Service) loadSessionPets(ctx context.Context, value Session) (Session, 
 	return value, nil
 }
 
-func (s *Service) GetEvents(ctx context.Context, familyID, sessionID, runID string, after int) ([]Event, error) {
+func (s *Service) GetEvents(ctx context.Context, familyID, sessionID, runID string, after int, userID string) ([]Event, error) {
 	if strings.TrimSpace(familyID) == "" || strings.TrimSpace(sessionID) == "" || strings.TrimSpace(runID) == "" || after < 0 {
 		return nil, appErrors.InvalidParam("事件查询参数无效")
 	}
-	if _, err := s.GetSession(ctx, familyID, sessionID); err != nil {
+	if _, err := s.GetSession(ctx, familyID, sessionID, userID); err != nil {
 		return nil, err
 	}
 	if _, err := s.repository.GetRun(ctx, strings.TrimSpace(sessionID), strings.TrimSpace(runID)); err != nil {
@@ -125,8 +141,8 @@ func (s *Service) GetEvents(ctx context.Context, familyID, sessionID, runID stri
 	return values, nil
 }
 
-func (s *Service) GetExecution(ctx context.Context, familyID, sessionID, runID string) (ExecutionResult, error) {
-	session, err := s.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID))
+func (s *Service) GetExecution(ctx context.Context, familyID, sessionID, runID, userID string) (ExecutionResult, error) {
+	session, err := s.GetSession(ctx, strings.TrimSpace(familyID), strings.TrimSpace(sessionID), userID)
 	if err != nil {
 		return ExecutionResult{}, err
 	}
@@ -145,17 +161,20 @@ func (s *Service) GetExecution(ctx context.Context, familyID, sessionID, runID s
 }
 
 type Service struct {
-	repository Repository
-	pets       petapp.Repository
-	rules      RuleEngine
-	now        func() time.Time
-	versions   Versions
-	calendar   calendarRecordReader
+	repository     Repository
+	pets           petapp.Repository
+	rules          RuleEngine
+	now            func() time.Time
+	versions       Versions
+	calendar       calendarRecordReader
+	calendarWriter calendarRecordWriter
 	// v2 决策循环依赖（文档 4、6、7）：由 main 装配注入，供 processRun 走
 	// RunDecisionLoop 使用。尚未注入时 processRun 降级为 provider_unavailable。
 	agentModel   AgentModel
 	catalog      *Catalog
 	businessRead BusinessReadRepository
+	imageAssets  imageAssetReader
+	debugLogger  *slog.Logger
 }
 
 type Versions struct {
@@ -192,6 +211,10 @@ func (s *Service) SetCalendarRepository(repository any) {
 	}
 }
 
+func (s *Service) SetCalendarWriter(writer calendarRecordWriter) {
+	s.calendarWriter = writer
+}
+
 // SetAgentModel 注入决策循环模型端口（v2，文档 4）。nil 表示未启用 v2 决策循环。
 func (s *Service) SetAgentModel(model AgentModel) {
 	s.agentModel = model
@@ -207,7 +230,50 @@ func (s *Service) SetBusinessReadRepository(repository BusinessReadRepository) {
 	s.businessRead = repository
 }
 
+func (s *Service) SetImageAssetReader(reader imageAssetReader) {
+	s.imageAssets = reader
+}
+
+func (s *Service) SetDebugLogger(logger *slog.Logger) {
+	s.debugLogger = logger
+}
+
+func (s *Service) validateAssetRefs(ctx context.Context, familyID string, assetRefs []string) error {
+	if len(assetRefs) > 4 {
+		return appErrors.InvalidParam("单次最多上传 4 张图片")
+	}
+	if len(assetRefs) == 0 {
+		return nil
+	}
+	if s.imageAssets == nil {
+		return appErrors.Conflict("图片服务暂不可用")
+	}
+	seen := make(map[string]struct{}, len(assetRefs))
+	for _, assetID := range assetRefs {
+		assetID = strings.TrimSpace(assetID)
+		if assetID == "" {
+			return appErrors.InvalidParam("图片引用无效")
+		}
+		if _, ok := seen[assetID]; ok {
+			return appErrors.InvalidParam("图片引用重复")
+		}
+		seen[assetID] = struct{}{}
+		if err := s.imageAssets.AuthorizeFamily(ctx, assetID, familyID); err != nil {
+			return appErrors.Forbidden()
+		}
+		asset, err := s.imageAssets.Get(ctx, assetID)
+		if err != nil || asset.Type != "ask_image" {
+			return appErrors.InvalidParam("图片引用无效")
+		}
+	}
+	return nil
+}
+
 func (s *Service) CreateSession(ctx context.Context, familyID, userID, petID, input, idempotencyKey string) (ExecutionResult, error) {
+	return s.CreateSessionWithAssets(ctx, familyID, userID, petID, input, nil, idempotencyKey)
+}
+
+func (s *Service) CreateSessionWithAssets(ctx context.Context, familyID, userID, petID, input string, assetRefs []string, idempotencyKey string) (ExecutionResult, error) {
 	familyID = strings.TrimSpace(familyID)
 	userID = strings.TrimSpace(userID)
 	petID = strings.TrimSpace(petID)
@@ -219,7 +285,7 @@ func (s *Service) CreateSession(ctx context.Context, familyID, userID, petID, in
 	if petID == "" {
 		return ExecutionResult{}, appErrors.InvalidParam("宠物 ID 不能为空")
 	}
-	if input == "" {
+	if input == "" && len(assetRefs) == 0 {
 		return ExecutionResult{}, appErrors.InvalidParam("问题内容不能为空")
 	}
 	if len([]rune(input)) > MaxInputLength {
@@ -228,10 +294,6 @@ func (s *Service) CreateSession(ctx context.Context, familyID, userID, petID, in
 	if err := validateIdempotencyKey(idempotencyKey); err != nil {
 		return ExecutionResult{}, err
 	}
-	hash := idempotencyHash(familyID, petID, input)
-	if result, found, err := s.replayExecution(ctx, userID, createPetSessionOperation, idempotencyKey, hash); err != nil || found {
-		return result, err
-	}
 	pet, err := s.pets.Get(ctx, familyID, petID)
 	if errors.Is(err, petapp.ErrNotFound) {
 		return ExecutionResult{}, appErrors.NotFound("宠物不存在")
@@ -239,11 +301,23 @@ func (s *Service) CreateSession(ctx context.Context, familyID, userID, petID, in
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
-	result, _, err := s.createSessionWithPets(ctx, familyID, userID, input, []petapp.Pet{pet}, createPetSessionOperation, idempotencyKey, hash)
+	resolution := PetResolution{Status: PetResolveResolved, Resolved: []petapp.Pet{pet}, Input: input}
+	if err := s.validateAssetRefs(ctx, familyID, assetRefs); err != nil {
+		return ExecutionResult{}, err
+	}
+	hash := idempotencyHash(append([]string{familyID, petID, input}, assetRefs...)...)
+	if result, found, err := s.replayExecution(ctx, userID, createPetSessionOperation, idempotencyKey, hash); err != nil || found {
+		return result, err
+	}
+	result, _, err := s.createSessionWithPets(ctx, familyID, userID, input, assetRefs, []petapp.Pet{pet}, resolution, createPetSessionOperation, idempotencyKey, hash)
 	return result, err
 }
 
 func (s *Service) CreateSessionFromInput(ctx context.Context, familyID, userID, input, idempotencyKey string) (ExecutionResult, PetResolution, error) {
+	return s.CreateSessionFromInputWithAssets(ctx, familyID, userID, input, nil, idempotencyKey)
+}
+
+func (s *Service) CreateSessionFromInputWithAssets(ctx context.Context, familyID, userID, input string, assetRefs []string, idempotencyKey string) (ExecutionResult, PetResolution, error) {
 	familyID = strings.TrimSpace(familyID)
 	userID = strings.TrimSpace(userID)
 	input = strings.TrimSpace(input)
@@ -251,7 +325,7 @@ func (s *Service) CreateSessionFromInput(ctx context.Context, familyID, userID, 
 	if familyID == "" || userID == "" {
 		return ExecutionResult{}, PetResolution{}, appErrors.Unauthorized()
 	}
-	if input == "" {
+	if input == "" && len(assetRefs) == 0 {
 		return ExecutionResult{}, PetResolution{}, appErrors.InvalidParam("问题内容不能为空")
 	}
 	if len([]rune(input)) > MaxInputLength {
@@ -260,7 +334,10 @@ func (s *Service) CreateSessionFromInput(ctx context.Context, familyID, userID, 
 	if err := validateIdempotencyKey(idempotencyKey); err != nil {
 		return ExecutionResult{}, PetResolution{}, err
 	}
-	hash := idempotencyHash(familyID, input)
+	if err := s.validateAssetRefs(ctx, familyID, assetRefs); err != nil {
+		return ExecutionResult{}, PetResolution{}, err
+	}
+	hash := idempotencyHash(append([]string{familyID, input}, assetRefs...)...)
 	if result, found, err := s.replayExecution(ctx, userID, createSessionOperation, idempotencyKey, hash); err != nil || found {
 		return result, PetResolution{Status: PetResolveResolved, Input: input}, err
 	}
@@ -269,23 +346,21 @@ func (s *Service) CreateSessionFromInput(ctx context.Context, familyID, userID, 
 		return ExecutionResult{}, PetResolution{}, appErrors.Internal(err)
 	}
 	resolution := ResolvePets(input, pets)
-	if resolution.Status == PetResolveNone {
-		familyQuery := DetectFamilyQuery(input)
-		if len(pets) > 0 {
-			return s.createSessionWithPets(ctx, familyID, userID, input, pets[:1], createSessionOperation, idempotencyKey, hash)
-		}
-		if familyQuery {
-			return ExecutionResult{}, resolution, appErrors.InvalidParam("当前家庭暂无宠物")
-		}
-		return ExecutionResult{}, resolution, appErrors.InvalidParam("请在问题中补充宠物名称")
+	if len(pets) == 0 {
+		return ExecutionResult{}, resolution, appErrors.InvalidParam("当前家庭暂无宠物")
 	}
-	if resolution.Status == PetResolveAmbiguous {
-		return ExecutionResult{}, resolution, appErrors.Conflict("宠物名称存在歧义，请补充更多信息")
+	sessionPets := resolution.Resolved
+	if resolution.Status != PetResolveResolved {
+		sessionPets = pets
 	}
-	return s.createSessionWithPets(ctx, familyID, userID, input, resolution.Resolved, createSessionOperation, idempotencyKey, hash)
+	return s.createSessionWithPets(ctx, familyID, userID, input, assetRefs, sessionPets, resolution, createSessionOperation, idempotencyKey, hash)
 }
 
 func (s *Service) ContinueSession(ctx context.Context, familyID, userID, sessionID, input, idempotencyKey string) (ExecutionResult, error) {
+	return s.ContinueSessionWithAssets(ctx, familyID, userID, sessionID, input, nil, idempotencyKey)
+}
+
+func (s *Service) ContinueSessionWithAssets(ctx context.Context, familyID, userID, sessionID, input string, assetRefs []string, idempotencyKey string) (ExecutionResult, error) {
 	familyID = strings.TrimSpace(familyID)
 	userID = strings.TrimSpace(userID)
 	sessionID = strings.TrimSpace(sessionID)
@@ -297,7 +372,7 @@ func (s *Service) ContinueSession(ctx context.Context, familyID, userID, session
 	if sessionID == "" {
 		return ExecutionResult{}, appErrors.InvalidParam("问问会话参数无效")
 	}
-	if input == "" {
+	if input == "" && len(assetRefs) == 0 {
 		return ExecutionResult{}, appErrors.InvalidParam("问题内容不能为空")
 	}
 	if len([]rune(input)) > MaxInputLength {
@@ -306,11 +381,14 @@ func (s *Service) ContinueSession(ctx context.Context, familyID, userID, session
 	if err := validateIdempotencyKey(idempotencyKey); err != nil {
 		return ExecutionResult{}, err
 	}
-	hash := idempotencyHash(familyID, sessionID, input)
+	if err := s.validateAssetRefs(ctx, familyID, assetRefs); err != nil {
+		return ExecutionResult{}, err
+	}
+	hash := idempotencyHash(append([]string{familyID, sessionID, input}, assetRefs...)...)
 	if result, found, err := s.replayExecution(ctx, userID, continueSessionOperation, idempotencyKey, hash); err != nil || found {
 		return result, err
 	}
-	session, err := s.GetSession(ctx, familyID, sessionID)
+	session, err := s.GetSession(ctx, familyID, sessionID, userID)
 	if err != nil {
 		return ExecutionResult{}, err
 	}
@@ -352,7 +430,7 @@ func (s *Service) ContinueSession(ctx context.Context, familyID, userID, session
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
-	turn := Turn{ID: turnID, SessionID: session.ID, TurnIndex: session.TurnCount, Status: TurnReceived, Input: input, SelectedRunID: runID, CreatedAt: now}
+	turn := Turn{ID: turnID, SessionID: session.ID, TurnIndex: session.TurnCount, Status: TurnReceived, Input: input, AssetRefs: assetRefs, SelectedRunID: runID, CreatedAt: now}
 	run := Run{ID: runID, SessionID: session.ID, TurnID: turnID, RunIndex: 0, RowVersion: 1, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: session.RuleVersion, PromptVersion: session.PromptVersion, CreatedAt: now}
 	event := Event{ID: eventID, SessionID: session.ID, TurnID: turnID, RunID: runID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	message := Message{ID: messageID, SessionID: session.ID, TurnID: turnID, RunID: runID, Role: "user", Content: input, CreatedAt: now}
@@ -380,16 +458,19 @@ func (s *Service) ContinueSession(ctx context.Context, familyID, userID, session
 	return result, nil
 }
 
-func (s *Service) createSessionWithPets(ctx context.Context, familyID, userID, input string, pets []petapp.Pet, operation, idempotencyKey, hash string) (ExecutionResult, PetResolution, error) {
+func (s *Service) createSessionWithPets(ctx context.Context, familyID, userID, input string, assetRefs []string, pets []petapp.Pet, resolution PetResolution, operation, idempotencyKey, hash string) (ExecutionResult, PetResolution, error) {
 	if len(pets) == 0 {
-		return ExecutionResult{}, PetResolution{}, appErrors.InvalidParam("请在问题中补充宠物名称")
+		return ExecutionResult{}, resolution, appErrors.InvalidParam("当前家庭暂无宠物")
 	}
-	result, err := s.createSession(ctx, familyID, userID, input, pets, operation, idempotencyKey, hash)
-	resolution := PetResolution{Status: PetResolveResolved, Resolved: pets, Input: input}
+	petID := ""
+	if resolution.Status == PetResolveResolved {
+		petID = pets[0].ID
+	}
+	result, err := s.createSession(ctx, familyID, userID, petID, input, assetRefs, pets, operation, idempotencyKey, hash)
 	return result, resolution, err
 }
 
-func (s *Service) createSession(ctx context.Context, familyID, userID, input string, pets []petapp.Pet, operation, idempotencyKey, hash string) (ExecutionResult, error) {
+func (s *Service) createSession(ctx context.Context, familyID, userID, petID, input string, assetRefs []string, pets []petapp.Pet, operation, idempotencyKey, hash string) (ExecutionResult, error) {
 	now := s.now().UTC()
 	sessionID, err := newID()
 	if err != nil {
@@ -415,8 +496,8 @@ func (s *Service) createSession(ctx context.Context, familyID, userID, input str
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
-	session := Session{ID: sessionID, FamilyID: familyID, CreatedBy: userID, PetID: pets[0].ID, Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: s.versions.PromptVersion, RuleVersion: s.versions.RuleVersion, KnowledgeVersion: s.versions.KnowledgeVersion, CreatedAt: now, UpdatedAt: now}
-	turn := Turn{ID: turnID, SessionID: sessionID, TurnIndex: 0, Status: TurnReceived, Input: input, SelectedRunID: runID, CreatedAt: now}
+	session := Session{ID: sessionID, FamilyID: familyID, CreatedBy: userID, PetID: petID, Status: SessionActive, RiskLevel: RiskUnknown, TurnCount: 1, PromptVersion: s.versions.PromptVersion, RuleVersion: s.versions.RuleVersion, KnowledgeVersion: s.versions.KnowledgeVersion, CreatedAt: now, UpdatedAt: now}
+	turn := Turn{ID: turnID, SessionID: sessionID, TurnIndex: 0, Status: TurnReceived, Input: input, AssetRefs: assetRefs, SelectedRunID: runID, CreatedAt: now}
 	run := Run{ID: runID, SessionID: sessionID, TurnID: turnID, RunIndex: 0, RowVersion: 1, Status: RunQueued, RiskLevel: RiskUnknown, RuleVersion: s.versions.RuleVersion, PromptVersion: s.versions.PromptVersion, CreatedAt: now}
 	event := Event{ID: eventID, SessionID: sessionID, TurnID: turnID, RunID: runID, Sequence: 1, Type: "run.queued", Data: `{}`, CreatedAt: now}
 	message := Message{ID: messageID, SessionID: sessionID, TurnID: turnID, RunID: runID, Role: "user", Content: input, CreatedAt: now}
@@ -501,11 +582,18 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		}
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
+	images, err := s.loadModelImages(ctx, session.FamilyID, turn.AssetRefs)
+	if err != nil {
+		return ExecutionResult{}, err
+	}
 	messages, err := s.repository.ListSessionMessages(ctx, session.ID)
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
 	currentInput := turn.Input
+	if currentInput == "" && len(turn.AssetRefs) > 0 {
+		currentInput = "请结合用户上传的图片进行分析。"
+	}
 	for index := len(messages) - 1; index >= 0; index-- {
 		if messages[index].Role == "user" && strings.TrimSpace(messages[index].Content) != "" {
 			currentInput = messages[index].Content
@@ -531,21 +619,23 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	run.StartedAt = &now
 	turn.Status = TurnAttached
 	events = append(events, startedEvent)
-	progressEvent, err := s.appendProgressEvent(ctx, session, run, "intent_routing", "正在理解你的问题")
+	progressEvent, err := s.appendProgressEvent(ctx, session, run, "intent_routing", "正在检查问题")
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
 	events = append(events, progressEvent)
-	riskText := turn.Input
-	for _, message := range messages {
-		if message.Role == "user" && message.Content != turn.Input {
-			riskText += "\n" + message.Content
+	injectionHits := DetectInjection(currentInput)
+	if len(injectionHits) > 0 {
+		auditEvent, auditErr := s.appendInjectionAuditEvent(ctx, session, run, turn, injectionHits)
+		if auditErr != nil {
+			return ExecutionResult{}, appErrors.Internal(auditErr)
 		}
+		events = append(events, auditEvent)
 	}
-	risk := s.rules.Evaluate(RiskInput{Text: riskText})
+	risk := s.rules.Evaluate(RiskInput{Text: currentInput})
 	var decision RunDecision
 	if risk.Level == RiskRed {
-		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "已理解你的问题")
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "问题已接收")
 		if err != nil {
 			return ExecutionResult{}, appErrors.Internal(err)
 		}
@@ -555,31 +645,36 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 			return ExecutionResult{}, appErrors.Internal(err)
 		}
 		events = append(events, progressEvent)
-		decision = RunDecision{Status: RunCompleted, RiskLevel: RiskRed, EventType: "risk.escalated", Data: map[string]any{"trigger_code": risk.TriggerCode, "message": risk.Message, "action": risk.Action}}
+		emergencySkills := make([]map[string]string, 0)
+		if s.catalog != nil {
+			for _, skill := range s.catalog.EmergencySkills() {
+				emergencySkills = append(emergencySkills, map[string]string{"skill_id": skill.ID, "version": skill.Version})
+			}
+		}
+		decision = RunDecision{Status: RunCompleted, RiskLevel: RiskRed, EventType: "risk.escalated", Data: map[string]any{"trigger_code": risk.TriggerCode, "message": risk.Message, "action": risk.Action, "emergency_skills": emergencySkills}}
 	} else if s.agentModel != nil && s.catalog != nil && s.businessRead != nil {
 		// v2 决策循环：组装上下文 -> 决策 -> 工具 -> 降级映射（文档 2、7、8）。
-		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "已理解你的问题")
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "问题已接收")
 		if err != nil {
 			return ExecutionResult{}, appErrors.Internal(err)
 		}
 		events = append(events, progressEvent)
-		progressEvent, err = s.appendProgressEvent(ctx, session, run, "context_ready", "已关联宠物资料和近期记录")
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "context_ready", "对话上下文已准备")
 		if err != nil {
 			return ExecutionResult{}, appErrors.Internal(err)
 		}
 		events = append(events, progressEvent)
-		contextSnapshot, err = s.loadHealthContext(ctx, session, contextMessages)
-		if err != nil {
-			return ExecutionResult{}, err
-		}
 		progressEvent, err = s.appendProgressEvent(ctx, session, run, "response_generating", "正在生成答复")
 		if err != nil {
 			return ExecutionResult{}, appErrors.Internal(err)
 		}
 		events = append(events, progressEvent)
-		decision, err = s.runV2DecisionLoop(ctx, session, contextMessages, currentInput, contextSnapshot, risk.Level)
+		decision, err = s.runV2DecisionLoop(ctx, session, run, contextMessages, currentInput, contextSnapshot, images, risk.Level)
 		if err != nil {
 			errorCode, retryable := ExecutorErrorDetails(err)
+			if s.debugLogger != nil {
+				s.debugLogger.Error("ask run executor failed", "run_id", run.ID, "session_id", session.ID, "error_code", errorCode, "retryable", retryable, "error", err)
+			}
 			if retryable {
 				return ExecutionResult{Session: session, Run: run, Events: events}, err
 			}
@@ -589,7 +684,7 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		// v2 决策循环依赖未注入：降级为 provider_unavailable。生产环境 main.go
 		// 已注入完整 v2 依赖（agentModel/catalog/businessRead），此处仅作为未配置
 		// AI 能力时的兜底，保证 Run 不会永久停留在 running 状态。
-		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "已理解你的问题")
+		progressEvent, err = s.appendProgressEvent(ctx, session, run, "intent_completed", "问题已接收")
 		if err != nil {
 			return ExecutionResult{}, appErrors.Internal(err)
 		}
@@ -616,13 +711,23 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		decision.Data = providerFailureDecision(decision.ErrorCode).Data
 		data, _ = json.Marshal(decision.Data)
 	}
+	if decision.Status == RunCompleted && decision.EventType == "assistant.completed" {
+		answer, _ := decision.Data["answer"].(string)
+		deltaEvents, deltaErr := s.appendAssistantAnswerDeltas(ctx, session, run, messageID, answer)
+		if deltaErr != nil {
+			return ExecutionResult{}, appErrors.Internal(deltaErr)
+		}
+		events = append(events, deltaEvents...)
+	}
 	finishedAt := s.now().UTC()
 	finishedEvent := Event{ID: finishedEventID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Sequence: nextSequence(events), Type: decision.EventType, Data: string(data), CreatedAt: finishedAt}
-	questionMessage := Message{}
+	responseMessage := Message{}
 	if decision.Status == RunWaitingInput {
-		questionMessage = Message{ID: messageID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Role: "question", Content: strings.TrimSpace(decision.Data["question"].(string)), CreatedAt: finishedAt}
+		responseMessage = Message{ID: messageID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Role: "question", Content: strings.TrimSpace(decision.Data["question"].(string)), CreatedAt: finishedAt}
+	} else if decision.EventType == "assistant.completed" {
+		responseMessage = Message{ID: messageID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Role: "assistant", Content: strings.TrimSpace(decision.Data["answer"].(string)), CreatedAt: finishedAt}
 	}
-	if err := s.repository.TransitionRun(ctx, run.ID, run.RowVersion, RunRunning, decision.Status, decision.RiskLevel, decision.ErrorCode, finishedAt, finishedEvent, questionMessage); err != nil {
+	if err := s.repository.TransitionRun(ctx, run.ID, run.RowVersion, RunRunning, decision.Status, decision.RiskLevel, decision.ErrorCode, finishedAt, finishedEvent, responseMessage); err != nil {
 		if errors.Is(err, ErrRunStateConflict) {
 			return ExecutionResult{}, appErrors.Conflict("问问执行状态已改变")
 		}
@@ -644,53 +749,147 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 	return ExecutionResult{Session: session, Run: run, Events: events}, nil
 }
 
-func (s *Service) loadHealthContext(ctx context.Context, session Session, messages []ContextMessage) (ContextSnapshot, error) {
-	pet, err := s.pets.Get(ctx, session.FamilyID, session.PetID)
-	if err != nil {
-		if errors.Is(err, petapp.ErrNotFound) {
-			return ContextSnapshot{}, appErrors.NotFound("宠物不存在")
-		}
-		return ContextSnapshot{}, appErrors.Internal(err)
+func (s *Service) appendInjectionAuditEvent(ctx context.Context, session Session, run Run, turn Turn, hits []InjectionHit) (Event, error) {
+	kinds := make([]string, 0, len(hits))
+	markers := make([]string, 0, len(hits))
+	for _, hit := range hits {
+		kinds = append(kinds, string(hit.Kind))
+		markers = append(markers, hit.Marker)
 	}
+	data, err := json.Marshal(map[string]any{
+		"kinds":         kinds,
+		"markers":       markers,
+		"rule_version":  CurrentRuleVersion,
+		"input_version": hashSourceVersion(turn.ID, turn.Input),
+	})
+	if err != nil {
+		return Event{}, err
+	}
+	id, err := newID()
+	if err != nil {
+		return Event{}, err
+	}
+	return s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "security.injection_detected", Data: string(data), CreatedAt: s.now().UTC()})
+}
+
+func (s *Service) loadModelImages(ctx context.Context, familyID string, assetRefs []string) ([]ModelImage, error) {
+	if len(assetRefs) == 0 {
+		return nil, nil
+	}
+	if err := s.validateAssetRefs(ctx, familyID, assetRefs); err != nil {
+		return nil, err
+	}
+	images := make([]ModelImage, 0, len(assetRefs))
+	var totalBytes int
+	for _, assetID := range assetRefs {
+		content, err := s.imageAssets.Read(ctx, assetID)
+		if err != nil {
+			return nil, appErrors.Internal(err)
+		}
+		totalBytes += len(content)
+		if totalBytes > 20<<20 {
+			return nil, appErrors.InvalidParam("图片总大小超出限制")
+		}
+		images = append(images, ModelImage{AssetID: assetID, Content: content})
+	}
+	return images, nil
+}
+
+func (s *Service) loadHealthContext(ctx context.Context, session Session, messages []ContextMessage) (ContextSnapshot, error) {
+	queryBefore := s.now().UTC()
 	var recentTurns []ContextTurn
+	var err error
 	if contextRepository, ok := s.repository.(contextTurnRepository); ok {
 		recentTurns, err = contextRepository.ListContextTurns(ctx, session.ID, ContextTurnLimit)
 		if err != nil {
 			return ContextSnapshot{}, appErrors.Internal(err)
 		}
 	}
-	value := ContextSnapshot{Version: DefaultContextVersion, CapturedAt: s.now().UTC(), Pet: PetContext{ID: pet.ID, Name: pet.Name}, RecentTurns: recentTurns, Messages: messages, Sources: []ContextSource{{Name: "pet_base", Version: "pet-base-v1", ItemCount: 1}, {Name: "ask_messages", Version: "ask-messages-v1", ItemCount: len(messages)}}}
-	if profileRepository, ok := s.pets.(petProfileReader); ok {
-		if profile, profileErr := profileRepository.GetProfile(ctx, session.FamilyID, session.PetID); profileErr == nil {
-			value.Sources = append(value.Sources, ContextSource{Name: "pet_profile", Version: "pet-profile-v1", ItemCount: 1})
-			value.Pet.Breed = profile.Breed
-			value.Pet.Gender = profile.Gender
-			value.Pet.Sterilized = profile.Sterilized
-			if profile.Birthday != nil {
-				value.Pet.Birthday = *profile.Birthday
+	value := ContextSnapshot{Version: DefaultContextVersion, CapturedAt: queryBefore, RecentTurns: recentTurns, Messages: messages, Sources: []ContextSource{{Name: "ask_messages", Version: "ask-messages-v1", Status: "available", ItemCount: len(messages)}}}
+	petIDs := make([]string, 0, len(session.Pets))
+	for _, sessionPet := range session.Pets {
+		petIDs = append(petIDs, sessionPet.PetID)
+	}
+	if len(petIDs) == 0 && session.PetID != "" {
+		petIDs = append(petIDs, session.PetID)
+	}
+	for _, petID := range petIDs {
+		pet, petErr := s.pets.Get(ctx, session.FamilyID, petID)
+		if petErr != nil {
+			if errors.Is(petErr, petapp.ErrNotFound) {
+				value.Sources = append(value.Sources, ContextSource{Name: "pet_base:" + petID, Version: "pet-base-v1", Status: "absent"})
+				continue
 			}
+			value.Sources = append(value.Sources, ContextSource{Name: "pet_base:" + petID, Version: "pet-base-v1", Status: "failed"})
+			continue
+		}
+		petContext := PetContext{ID: pet.ID, Name: pet.Name}
+		value.Sources = append(value.Sources, ContextSource{Name: "pet_base:" + petID, Version: "pet-base-v1", Status: "available", ItemCount: 1})
+		if profileRepository, ok := s.pets.(petProfileReader); ok {
+			profile, profileErr := profileRepository.GetProfile(ctx, session.FamilyID, petID)
+			status := "available"
+			if errors.Is(profileErr, petapp.ErrNotFound) {
+				status = "absent"
+			} else if profileErr != nil {
+				status = "failed"
+			} else {
+				petContext.Breed = profile.Breed
+				petContext.Gender = profile.Gender
+				petContext.Sterilized = profile.Sterilized
+				if profile.Birthday != nil {
+					petContext.Birthday = *profile.Birthday
+				}
+			}
+			value.Sources = append(value.Sources, ContextSource{Name: "pet_profile:" + petID, Version: "pet-profile-v1", Status: status, ItemCount: boolCount(profileErr == nil)})
+		}
+		if healthRepository, ok := s.pets.(petHealthReader); ok {
+			health, healthErr := healthRepository.GetHealth(ctx, session.FamilyID, petID)
+			status := "available"
+			if errors.Is(healthErr, petapp.ErrNotFound) {
+				status = "absent"
+			} else if healthErr != nil {
+				status = "failed"
+			} else {
+				petContext.HealthStatus = health.Status
+				petContext.Allergies = health.Allergies
+				petContext.LongTermMedication = health.LongTermMedication
+			}
+			value.Sources = append(value.Sources, ContextSource{Name: "pet_health:" + petID, Version: "pet-health-v1", Status: status, ItemCount: boolCount(healthErr == nil)})
+		}
+		value.Pets = append(value.Pets, petContext)
+		if s.calendar != nil {
+			recentRecords, recordErr := s.calendar.ListRecentRecords(ctx, session.FamilyID, petID, queryBefore.AddDate(0, 0, -90), queryBefore, ContextTurnLimit)
+			status := "available"
+			if recordErr != nil {
+				status = "failed"
+			} else {
+				value.RecentRecords = append(value.RecentRecords, recentRecords...)
+				for _, event := range normalizeContextEvents(nil, recentRecords) {
+					event.Summary = pet.Name + "：" + event.Summary
+					value.Events = append(value.Events, event)
+				}
+				if len(recentRecords) >= ContextTurnLimit {
+					status = "partial"
+				}
+			}
+			value.Sources = append(value.Sources, ContextSource{Name: "calendar_records:" + petID, Version: "calendar-records-v1", Status: status, ItemCount: len(recentRecords), Truncated: len(recentRecords) >= ContextTurnLimit})
 		}
 	}
-	if healthRepository, ok := s.pets.(petHealthReader); ok {
-		if health, healthErr := healthRepository.GetHealth(ctx, session.FamilyID, session.PetID); healthErr == nil {
-			value.Sources = append(value.Sources, ContextSource{Name: "pet_health", Version: "pet-health-v1", ItemCount: 1})
-			value.Pet.HealthStatus = health.Status
-			value.Pet.Allergies = health.Allergies
-			value.Pet.LongTermMedication = health.LongTermMedication
-		}
-	}
-	if s.calendar != nil {
-		recentRecords, recordErr := s.calendar.ListRecentRecords(ctx, session.FamilyID, session.PetID, s.now().UTC().AddDate(0, 0, -90), ContextTurnLimit)
-		if recordErr == nil {
-			value.RecentRecords = recentRecords
-			value.Sources = append(value.Sources, ContextSource{Name: "calendar_records", Version: "calendar-records-v1", ItemCount: len(recentRecords), Truncated: len(recentRecords) >= ContextTurnLimit})
-		}
+	if len(value.Pets) > 0 {
+		value.Pet = value.Pets[0]
 	}
 	if _, ok := s.repository.(contextTurnRepository); ok {
 		value.Sources = append(value.Sources, ContextSource{Name: "ask_turns", Version: "ask-turns-v1", ItemCount: len(recentTurns), Truncated: len(recentTurns) >= ContextTurnLimit})
 	}
-	value.Events = normalizeContextEvents(recentTurns, value.RecentRecords)
+	value.Events = append(normalizeContextEvents(recentTurns, nil), value.Events...)
 	return compactContextSnapshot(value, ContextMaxChars), nil
+}
+
+func boolCount(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 func providerFailureDecision(errorCode string) RunDecision {
@@ -725,6 +924,8 @@ func providerFailureMessage(errorCode string) string {
 		return "AI 服务返回了无法识别的错误，请检查服务端日志。"
 	case "executor_failed":
 		return "问问执行器运行失败，请检查服务端日志。"
+	case "budget_exhausted":
+		return "本次问问已达到调用预算，请新建问题后继续。"
 	case "worker_attempts_exhausted":
 		return "多次调用 AI 服务仍未成功，请稍后重试。"
 	default:
@@ -744,12 +945,12 @@ func (s *Service) appendProgressEvent(ctx context.Context, session Session, run 
 	return s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "run.progress", Data: string(data), CreatedAt: s.now().UTC()})
 }
 
-func (s *Service) appendAssistantDelta(ctx context.Context, session Session, run Run, delta string) (Event, error) {
+func (s *Service) appendAssistantDelta(ctx context.Context, session Session, run Run, messageID, delta string) (Event, error) {
 	id, err := newID()
 	if err != nil {
 		return Event{}, err
 	}
-	data, err := json.Marshal(map[string]string{"delta": delta})
+	data, err := json.Marshal(map[string]string{"message_id": messageID, "delta": delta})
 	if err != nil {
 		return Event{}, err
 	}
@@ -757,6 +958,10 @@ func (s *Service) appendAssistantDelta(ctx context.Context, session Session, run
 }
 
 func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID, input string, expectedVersion int, idempotencyKey string) (ExecutionResult, error) {
+	return s.ReplyWithAssets(ctx, familyID, userID, sessionID, runID, input, nil, expectedVersion, idempotencyKey)
+}
+
+func (s *Service) ReplyWithAssets(ctx context.Context, familyID, userID, sessionID, runID, input string, assetRefs []string, expectedVersion int, idempotencyKey string) (ExecutionResult, error) {
 	familyID = strings.TrimSpace(familyID)
 	userID = strings.TrimSpace(userID)
 	sessionID = strings.TrimSpace(sessionID)
@@ -769,7 +974,7 @@ func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID,
 	if sessionID == "" || runID == "" || expectedVersion < 1 {
 		return ExecutionResult{}, appErrors.InvalidParam("问问参数无效")
 	}
-	if input == "" {
+	if input == "" && len(assetRefs) == 0 {
 		return ExecutionResult{}, appErrors.InvalidParam("回答内容不能为空")
 	}
 	if len([]rune(input)) > MaxInputLength {
@@ -778,11 +983,14 @@ func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID,
 	if err := validateIdempotencyKey(idempotencyKey); err != nil {
 		return ExecutionResult{}, err
 	}
-	hash := idempotencyHash(familyID, sessionID, runID, input, strconv.Itoa(expectedVersion))
+	if err := s.validateAssetRefs(ctx, familyID, assetRefs); err != nil {
+		return ExecutionResult{}, err
+	}
+	hash := idempotencyHash(append([]string{familyID, sessionID, runID, input, strconv.Itoa(expectedVersion)}, assetRefs...)...)
 	if result, found, err := s.replayExecution(ctx, userID, replyRunOperation, idempotencyKey, hash); err != nil || found {
 		return result, err
 	}
-	session, err := s.repository.GetSession(ctx, familyID, sessionID)
+	session, err := s.repository.GetSessionForUser(ctx, familyID, sessionID, userID)
 	if err != nil {
 		if errors.Is(err, ErrSessionNotFound) {
 			return ExecutionResult{}, appErrors.NotFound("问问会话不存在")
@@ -836,21 +1044,29 @@ func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID,
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
-	event := Event{ID: eventID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Sequence: nextSequence(events), Type: "run.queued", Data: `{}`, CreatedAt: now}
-	message := Message{ID: messageID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Role: "user", Content: input, CreatedAt: now}
+	turnID, err := newID()
+	if err != nil {
+		return ExecutionResult{}, appErrors.Internal(err)
+	}
+	turn := Turn{ID: turnID, SessionID: session.ID, TurnIndex: session.TurnCount, Status: TurnReceived, Input: input, AssetRefs: assetRefs, SelectedRunID: run.ID, CreatedAt: now}
+	event := Event{ID: eventID, SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Sequence: nextSequence(events), Type: "run.queued", Data: `{}`, CreatedAt: now}
+	message := Message{ID: messageID, SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, Role: "user", Content: input, CreatedAt: now}
 	previousRun := run
+	previousSession := session
+	run.TurnID = turn.ID
 	run.Status = RunQueued
 	run.RiskLevel = RiskUnknown
 	run.RowVersion++
 	run.ClarificationCount++
+	run.InputRevision++
 	run.CompletedAt = nil
 	run.ErrorCode = ""
 	run.LeaseOwner = ""
 	run.LeaseExpiresAt = nil
-	run.AttemptCount = 0
 	run.NextAttemptAt = nil
 	session.Status = SessionActive
 	session.RiskLevel = RiskUnknown
+	session.TurnCount++
 	session.UpdatedAt = now
 	session.CompletedAt = nil
 	result := ExecutionResult{Session: session, Run: run, Events: []Event{event}}
@@ -858,8 +1074,8 @@ func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID,
 	if err != nil {
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
-	idempotency := IdempotencyRecord{ID: idempotencyID, FamilyID: familyID, UserID: userID, Operation: replyRunOperation, IdempotencyKey: idempotencyKey, RequestHash: hash, ResponseData: string(responseData), SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, CreatedAt: now}
-	if err := s.repository.ResumeRun(ctx, previousRun, now, event, message, idempotency); err != nil {
+	idempotency := IdempotencyRecord{ID: idempotencyID, FamilyID: familyID, UserID: userID, Operation: replyRunOperation, IdempotencyKey: idempotencyKey, RequestHash: hash, ResponseData: string(responseData), SessionID: session.ID, TurnID: turn.ID, RunID: run.ID, CreatedAt: now}
+	if err := s.repository.ResumeRun(ctx, previousSession, turn, previousRun, now, event, message, idempotency); err != nil {
 		if errors.Is(err, ErrRunStateConflict) {
 			if replay, found, replayErr := s.replayExecution(ctx, userID, replyRunOperation, idempotencyKey, hash); replayErr != nil || found {
 				return replay, replayErr

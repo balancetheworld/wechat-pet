@@ -46,6 +46,30 @@
   line-height: 1.55;
 }
 
+.ask-markdown {
+  display: block;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.ask-markdown p {
+  margin: 0 0 12rpx;
+}
+
+.ask-markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.ask-markdown ol,
+.ask-markdown ul {
+  margin: 8rpx 0 12rpx;
+  padding-left: 36rpx;
+}
+
+.ask-markdown li {
+  margin-bottom: 6rpx;
+}
+
 .ask-result {
   width: 100%;
   box-sizing: border-box;
@@ -171,6 +195,64 @@
   background: rgba(255, 247, 247, 0.92);
 }
 
+.ask-answer-group,
+.ask-answer-coverage {
+  padding: 14rpx 0;
+  border-top: 1rpx solid rgba(224, 213, 197, 0.72);
+}
+
+.ask-answer-group:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.ask-answer-subjects,
+.ask-answer-evidence,
+.ask-answer-risk {
+  display: block;
+  color: var(--muted);
+  font-size: 23rpx;
+}
+
+.ask-copy-result {
+  width: 100%;
+}
+
+.ask-copy-button {
+  width: fit-content;
+  min-height: 52rpx;
+  margin: 14rpx 0 0 auto;
+  padding: 0 16rpx;
+  color: var(--primary-deep);
+  border: 1rpx solid rgba(127, 165, 214, 0.38);
+  border-radius: 8rpx;
+  background: rgba(255, 254, 251, 0.76);
+  font-size: 22rpx;
+  line-height: 50rpx;
+}
+
+.ask-copy-button::after {
+  border: 0;
+}
+
+.ask-error-report {
+  display: block;
+  margin-top: 14rpx;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 22rpx;
+  line-height: 1.5;
+}
+
+.ask-answer-segment + .ask-answer-segment,
+.ask-answer-risk {
+  margin-top: 8rpx;
+}
+
+.ask-answer-evidence {
+  margin-top: 4rpx;
+}
+
 .ask-risk-level {
   margin-bottom: 8rpx;
   color: var(--danger);
@@ -197,4 +279,30 @@
   margin-top: 10rpx;
   font-size: 25rpx;
   line-height: 1.5;
+}
+.ask-answer-groups,
+.ask-answer-group,
+.ask-answer-segment,
+.ask-answer-risk {
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+}
+
+.ask-answer-group {
+  padding: 14rpx 0;
+  border-bottom: 1rpx solid rgba(127, 165, 214, 0.2);
+}
+
+.ask-answer-subjects,
+.ask-answer-evidence {
+  color: #4A6489;
+  font-size: 22rpx;
+}
+
+.ask-answer-risk {
+  padding: 10rpx;
+  color: #7B4C3D;
+  border-radius: 8rpx;
+  background: rgba(255, 239, 225, 0.7);
 }

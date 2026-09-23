@@ -19,6 +19,8 @@ var ErrTaskItemNotFound = errors.New("ask task item not found")
 // ErrTaskItemConflict：任务项版本冲突（并发更新）。
 var ErrTaskItemConflict = errors.New("ask task item conflict")
 
+var taskItemJSONMarshal = json.Marshal
+
 // CreateTaskItems 批量创建任务项（事务内插入）。任一插入失败整体回滚。
 func (r *SQLRepository) CreateTaskItems(ctx context.Context, items []TaskItem) error {
 	if len(items) == 0 {
@@ -62,10 +64,22 @@ func (r *SQLRepository) UpdateTaskItem(ctx context.Context, item TaskItem) error
 	if item.TaskItemID == "" {
 		return errors.New("task item id is required")
 	}
-	sourceTurnIDs := marshalTaskItemJSON(item.SourceTurnIDs)
-	subjects := marshalTaskItemJSON(item.Subjects)
-	missingFields := marshalTaskItemJSON(item.MissingFields)
-	resultRef := marshalTaskItemJSON(item.ResultRef)
+	sourceTurnIDs, err := marshalTaskItemJSON(item.SourceTurnIDs)
+	if err != nil {
+		return err
+	}
+	subjects, err := marshalTaskItemJSON(item.Subjects)
+	if err != nil {
+		return err
+	}
+	missingFields, err := marshalTaskItemJSON(item.MissingFields)
+	if err != nil {
+		return err
+	}
+	resultRef, err := marshalTaskItemJSON(item.ResultRef)
+	if err != nil {
+		return err
+	}
 	result, err := r.db.ExecContext(ctx, r.query("UPDATE ask_task_items SET goal = ?, subjects = ?, outcome = ?, missing_fields = ?, incomplete_reason = ?, result_ref = ?, supersedes = ?, superseded_by = ?, withdrawn_reason = ?, source_turn_ids = ?, item_revision = item_revision + 1, updated_at = ? WHERE id = ? AND item_revision = ? AND deleted_at IS NULL"), item.Goal, subjects, item.Outcome, missingFields, item.IncompleteReason, resultRef, item.Supersedes, item.SupersededBy, item.WithdrawnReason, sourceTurnIDs, time.Now().UTC(), item.TaskItemID, item.ItemRevision)
 	if err != nil {
 		return err
@@ -89,15 +103,27 @@ func (r *SQLRepository) UpdateTaskItem(ctx context.Context, item TaskItem) error
 }
 
 func (r *SQLRepository) insertTaskItem(ctx context.Context, tx *sql.Tx, item TaskItem) error {
-	sourceTurnIDs := marshalTaskItemJSON(item.SourceTurnIDs)
-	subjects := marshalTaskItemJSON(item.Subjects)
-	missingFields := marshalTaskItemJSON(item.MissingFields)
-	resultRef := marshalTaskItemJSON(item.ResultRef)
+	sourceTurnIDs, err := marshalTaskItemJSON(item.SourceTurnIDs)
+	if err != nil {
+		return err
+	}
+	subjects, err := marshalTaskItemJSON(item.Subjects)
+	if err != nil {
+		return err
+	}
+	missingFields, err := marshalTaskItemJSON(item.MissingFields)
+	if err != nil {
+		return err
+	}
+	resultRef, err := marshalTaskItemJSON(item.ResultRef)
+	if err != nil {
+		return err
+	}
 	revision := item.ItemRevision
 	if revision <= 0 {
 		revision = 1
 	}
-	_, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_task_items (id, run_id, origin_turn_id, item_revision, goal, source_turn_ids, subjects, outcome, missing_fields, incomplete_reason, result_ref, supersedes, superseded_by, withdrawn_reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), item.TaskItemID, item.RunID, item.OriginTurnID, revision, item.Goal, sourceTurnIDs, subjects, item.Outcome, missingFields, item.IncompleteReason, resultRef, item.Supersedes, item.SupersededBy, item.WithdrawnReason, time.Now().UTC(), time.Now().UTC())
+	_, err = tx.ExecContext(ctx, r.query("INSERT INTO ask_task_items (id, run_id, origin_turn_id, item_revision, goal, source_turn_ids, subjects, outcome, missing_fields, incomplete_reason, result_ref, supersedes, superseded_by, withdrawn_reason, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), item.TaskItemID, item.RunID, item.OriginTurnID, revision, item.Goal, sourceTurnIDs, subjects, item.Outcome, missingFields, item.IncompleteReason, resultRef, item.Supersedes, item.SupersededBy, item.WithdrawnReason, time.Now().UTC(), time.Now().UTC())
 	return err
 }
 
@@ -119,15 +145,15 @@ func scanTaskItem(scanner taskItemScanner) (TaskItem, error) {
 }
 
 // marshalTaskItemJSON 序列化一个字段组；nil 返回空串（不落 'null'）。
-func marshalTaskItemJSON(v any) string {
+func marshalTaskItemJSON(v any) (string, error) {
 	if v == nil {
-		return ""
+		return "", nil
 	}
-	data, err := json.Marshal(v)
+	data, err := taskItemJSONMarshal(v)
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return string(data)
+	return string(data), nil
 }
 
 func unmarshalTaskItemStringSlice(s string) []string {

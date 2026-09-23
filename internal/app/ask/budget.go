@@ -35,7 +35,8 @@ type BudgetLimits struct {
 	MaxTokens int
 	// MaxCostMicros 是费用上限（百万分之一元）。一期免费不设硬上限，
 	// 但用量仍记录供对账。
-	MaxCostMicros int64
+	MaxCostMicros     int64
+	MaxDurationMillis int64
 	// MaxConcurrency 是并发许可上限。
 	MaxConcurrency int
 }
@@ -43,11 +44,12 @@ type BudgetLimits struct {
 // BudgetAmount 是预算的计量单位，用于用量与预留。Concurrency 仅用于预留，
 // 本地调用结束即释放，不结算为用量。
 type BudgetAmount struct {
-	ModelCalls  int
-	ToolCalls   int
-	Tokens      int
-	CostMicros  int64
-	Concurrency int
+	ModelCalls     int
+	ToolCalls      int
+	Tokens         int
+	CostMicros     int64
+	DurationMillis int64
+	Concurrency    int
 }
 
 // BudgetLedger 是预算账本的持久化状态。
@@ -95,7 +97,7 @@ var (
 
 // validateBudgetAmount 校验预留/用量各维度非负，任何负值都视为非法请求。
 func validateBudgetAmount(amount BudgetAmount) error {
-	if amount.ModelCalls < 0 || amount.ToolCalls < 0 || amount.Tokens < 0 || amount.CostMicros < 0 || amount.Concurrency < 0 {
+	if amount.ModelCalls < 0 || amount.ToolCalls < 0 || amount.Tokens < 0 || amount.CostMicros < 0 || amount.DurationMillis < 0 || amount.Concurrency < 0 {
 		return errors.New("ask budget amount cannot be negative")
 	}
 	return nil
@@ -116,6 +118,9 @@ func exceedsBudget(limits BudgetLimits, used, reserved, amount BudgetAmount) boo
 	if limits.MaxCostMicros > 0 && used.CostMicros+reserved.CostMicros+amount.CostMicros > limits.MaxCostMicros {
 		return true
 	}
+	if limits.MaxDurationMillis > 0 && used.DurationMillis+reserved.DurationMillis+amount.DurationMillis > limits.MaxDurationMillis {
+		return true
+	}
 	if limits.MaxConcurrency > 0 && reserved.Concurrency+amount.Concurrency > limits.MaxConcurrency {
 		return true
 	}
@@ -128,12 +133,15 @@ func DefaultBudgetLimits(scope BudgetScope) BudgetLimits {
 	switch scope {
 	case BudgetRun:
 		// 9.3：模型恢复累计最多 2 次；8 次覆盖正常决策 + 追问 + 摘要 + 重试的保守上界。
+		// MaxTokens 依据实测：一次带受控指令 + 工具目录 + 参考数据的调用实际消耗约 4k~5k token，
+		// 8 次调用需要留出足够余量，否则第二步就会因剩余额度放不下必需块而失败。
 		return BudgetLimits{
-			MaxModelCalls:  8,
-			MaxToolCalls:   20,
-			MaxTokens:      12000,
-			MaxCostMicros:  0, // 一期免费，不设硬上限，用量单独对账
-			MaxConcurrency: 1, // 一期单 Worker 串行
+			MaxModelCalls:     8,
+			MaxToolCalls:      20,
+			MaxTokens:         48000,
+			MaxCostMicros:     0, // 一期免费，不设硬上限，用量单独对账
+			MaxDurationMillis: 120000,
+			MaxConcurrency:    1, // 一期单 Worker 串行
 		}
 	case BudgetOperationExecute:
 		// 9.3：已确认业务变更至多一次有效提交。

@@ -1,8 +1,14 @@
-import type { AskAnalysisResult, AskAssistantResult, AskDeltaResult, AskEvent, AskFactResult, AskFailedResult, AskFamilyPetsResult, AskProgressResult, AskQuestionResult, AskRiskResult } from '../../types/ask'
-import { Text, View } from '@tarojs/components'
-import { useEffect, useState } from 'react'
+import type { AskAnalysisResult, AskAnswerGroup, AskAssistantResult, AskDeltaResult, AskEvent, AskFactResult, AskFailedResult, AskFamilyPetsResult, AskProgressResult, AskQuestionResult, AskRiskResult, AskTaskCoverage } from '../../types/ask'
+import { Button, RichText, Text, View } from '@tarojs/components'
+import Taro from '@tarojs/taro'
+import { micromark } from 'micromark'
+import { useCallback, useEffect, useState } from 'react'
+import { assistantPreviewText } from '../../hooks/ask-reducer'
 import { askFailureTitle } from './ask-failure'
+import { askErrorReport } from './ask-report'
 import './ask-event.scss'
+
+const emptyEvents: AskEvent[] = []
 
 const factLabels: Record<AskFactResult['fact_type'], string> = {
   bath: '洗澡记录',
@@ -100,50 +106,125 @@ function ProgressResult({ data }: { data: AskProgressResult }) {
   )
 }
 
-function DeltaResult({ data }: { data: AskDeltaResult }) {
-  const characters = Array.from(data.delta)
+function DeltaResult({ delta, onDone }: { delta: string, onDone?: () => void }) {
+  const characters = Array.from(delta)
   const characterCount = characters.length
   const [visibleCount, setVisibleCount] = useState(0)
 
   useEffect(() => {
     if (visibleCount >= characterCount) {
+      onDone?.()
       return undefined
     }
     const timer = setInterval(() => {
-      setVisibleCount(value => Math.min(value + 1, characterCount))
+      setVisibleCount(value => value >= characterCount ? value : Math.min(value + Math.ceil((characterCount - value) / 10), characterCount))
     }, 45)
     return () => clearInterval(timer)
-  }, [characterCount, visibleCount])
+  }, [characterCount, onDone, visibleCount])
 
-  return <Text className="ask-delta">{characters.slice(0, visibleCount).join('')}</Text>
+  return (
+    <View className="ask-copy-result">
+      <RichText className="ask-markdown ask-delta" nodes={micromark(characters.slice(0, visibleCount).join(''))} />
+      <Button className="ask-copy-button" onClick={() => void copyText(delta)} aria-label="复制回答">复制</Button>
+    </View>
+  )
 }
 
-export default function AskEventView({ event }: { event: AskEvent }) {
+function AssistantGroups({ groups, coverage, answer }: { groups: AskAnswerGroup[], coverage: AskTaskCoverage[], answer: string }) {
+  if (!groups.length) {
+    return <DeltaResult delta={answer} />
+  }
+  return (
+    <View className="ask-answer-groups">
+      {groups.map(group => (
+        <View className="ask-answer-group" key={group.group_key}>
+          <View className="ask-answer-subjects">
+            {group.subjects.map(subject => <Text key={subject.subject_key}>{subject.kind === 'pet' ? `宠物 ${subject.pet_id}` : subject.description}</Text>)}
+          </View>
+          {(group.segments ?? []).map(segment => (
+            <View className="ask-answer-segment" key={segment.segment_key}>
+              <RichText className="ask-markdown" nodes={micromark(segment.text)} />
+              {!!segment.evidence_refs?.length && <Text className="ask-answer-evidence">{segment.evidence_refs.map(ref => ref.source_type).join('、')}</Text>}
+            </View>
+          ))}
+          {(group.risks ?? []).map(risk => (
+            <View className="ask-answer-risk" key={`${risk.group_key}-${risk.subject_key}`}>
+              <Text>{`风险：${risk.level}`}</Text>
+              {!!risk.uncertainty && <Text>{risk.uncertainty}</Text>}
+              {!!risk.evidence?.length && <Text className="ask-answer-evidence">{risk.evidence.map(ref => ref.source_type).join('、')}</Text>}
+            </View>
+          ))}
+        </View>
+      ))}
+      {coverage.filter(item => item.incomplete_reason).map(item => (
+        <View className="ask-answer-coverage" key={item.task_key}>
+          <Text>{`未完成：${item.incomplete_reason}`}</Text>
+        </View>
+      ))}
+    </View>
+  )
+}
+
+function AssistantResult({ data, preview }: { data: AskAssistantResult, preview: string }) {
+  const [previewing, setPreviewing] = useState(preview !== '')
+  const handlePreviewDone = useCallback(() => setPreviewing(false), [])
+  if (previewing) {
+    return <DeltaResult delta={preview} onDone={handlePreviewDone} />
+  }
+  return <AssistantGroups groups={data.groups ?? []} coverage={data.coverage ?? []} answer={data.answer} />
+}
+
+async function copyText(value: string) {
+  try {
+    await Taro.setClipboardData({ data: value })
+  }
+  catch {
+    await Taro.showToast({ title: '复制失败，请重试', icon: 'none' })
+  }
+}
+
+export default function AskEventView({ event, input = '', events = emptyEvents, live = false }: { event: AskEvent, input?: string, events?: AskEvent[], live?: boolean }) {
   if (event.type === 'run.progress') {
     return <ProgressResult data={event.data as AskProgressResult} />
   }
   if (event.type === 'assistant.delta') {
-    return <DeltaResult data={event.data as AskDeltaResult} />
+    return <DeltaResult delta={(event.data as AskDeltaResult).delta} />
   }
   if (event.type === 'fact.completed') {
-    return <FactResult data={event.data as AskFactResult} />
+    const data = event.data as AskFactResult
+    const content = data.items.map(item => `${item.pet_name}：${item.found ? `${formatOccurredAt(item.occurred_at)} ${item.content}` : '暂无记录'}`).join('\n')
+    return (
+      <View className="ask-copy-result">
+        <FactResult data={data} />
+        <Button className="ask-copy-button" onClick={() => void copyText(content)} aria-label="复制回答">复制</Button>
+      </View>
+    )
   }
   if (event.type === 'family.pets.completed') {
-    return <FamilyPetsResult data={event.data as AskFamilyPetsResult} />
+    const data = event.data as AskFamilyPetsResult
+    return (
+      <View className="ask-copy-result">
+        <FamilyPetsResult data={data} />
+        <Button className="ask-copy-button" onClick={() => void copyText(`家里的宠物（${data.count}只）：${data.pets.map(pet => pet.pet_name).join('、')}`)} aria-label="复制回答">复制</Button>
+      </View>
+    )
   }
   if (event.type === 'assistant.question') {
     const data = event.data as AskQuestionResult
     return (
       <View className="ask-message ask-message--assistant">
-        <Text>{data.question}</Text>
+        <RichText className="ask-markdown" nodes={micromark(data.question)} />
+        <Button className="ask-copy-button" onClick={() => void copyText(data.question)} aria-label="复制回答">复制</Button>
       </View>
     )
   }
   if (event.type === 'assistant.completed') {
     const data = event.data as AskAssistantResult
+    const preview = live && data.groups?.length ? assistantPreviewText(events, event.run_id) : ''
     return (
       <View className="ask-message ask-message--assistant">
-        <DeltaResult data={{ delta: data.answer }} />
+        <AssistantResult data={data} preview={preview} />
+        <Button className="ask-copy-button" onClick={() => void copyText(data.answer)} aria-label="复制回答">复制</Button>
       </View>
     )
   }
@@ -154,18 +235,30 @@ export default function AskEventView({ event }: { event: AskEvent }) {
         <Text className="ask-risk-level">需要立即处理</Text>
         <Text className="ask-result-title">{data.message}</Text>
         <Text className="ask-risk-action">{data.action}</Text>
+        <Button className="ask-copy-button" onClick={() => void copyText(`${data.message}\n${data.action}`)} aria-label="复制回答">复制</Button>
       </View>
     )
   }
   if (event.type === 'run.completed') {
-    return <AnalysisResult data={event.data as AskAnalysisResult} />
+    const data = event.data as AskAnalysisResult
+    const content = [data.current_assessment, ...data.observations, ...data.possible_causes, ...data.home_actions, ...data.escalation_conditions].join('\n')
+    return (
+      <View className="ask-copy-result">
+        <AnalysisResult data={data} />
+        <Button className="ask-copy-button" onClick={() => void copyText(content)} aria-label="复制回答">复制</Button>
+      </View>
+    )
   }
   if (event.type === 'run.failed') {
     const data = event.data as AskFailedResult
+    const message = data.message || `错误代码：${data.error_code || 'unknown'}，服务端未返回错误详情。`
+    const report = TARO_APP_DEBUG ? askErrorReport(input, events.filter(value => value.sequence <= event.sequence), `${data.error_code || 'unknown'}：${message}`, `run_id=${event.run_id}`) : `${askFailureTitle(data.error_code)}：${message}`
     return (
       <View className="ask-result ask-result--failed">
         <Text className="ask-result-title">{askFailureTitle(data.error_code)}</Text>
-        <Text>{data.message || `错误代码：${data.error_code || 'unknown'}，服务端未返回错误详情。`}</Text>
+        <Text>{message}</Text>
+        {TARO_APP_DEBUG && <Text className="ask-error-report">{report}</Text>}
+        <Button className="ask-copy-button" onClick={() => void copyText(report)} aria-label="复制错误报告">复制错误报告</Button>
       </View>
     )
   }

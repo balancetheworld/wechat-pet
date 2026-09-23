@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"net"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 	"github.com/openai/openai-go/responses"
@@ -77,7 +79,17 @@ func (p *OpenAIProvider) Complete(ctx context.Context, request Request) (result 
 	}
 	response, err := p.client.Responses.New(ctx, params)
 	if err != nil {
-		return Response{}, classifyProviderError(ctx, err)
+		classified := classifyProviderError(ctx, err)
+		fallback, ok := strictDisabledParams(params)
+		if !ok || ProviderErrorCode(classified) != ErrProviderRequestInvalid {
+			return Response{}, classified
+		}
+		retried, retryErr := p.client.Responses.New(ctx, fallback)
+		if retryErr != nil {
+			return Response{}, classifyProviderError(ctx, retryErr)
+		}
+		observation.StrictFallback = true
+		response = retried
 	}
 	if response.Status == responses.ResponseStatusFailed {
 		return Response{}, responseFailedError(response.Error)
@@ -186,26 +198,37 @@ func (p *OpenAIProvider) buildParams(request Request) (responses.ResponseNewPara
 		Model: p.model,
 		Store: openai.Bool(false),
 	}
+	recordArrayProtocol := request.ResponseProtocol == askapp.RecordArrayV1
+	if request.ResponseSchema != nil {
+		schema, err := responseSchemaMap(request.ResponseSchema)
+		if err != nil {
+			return responses.ResponseNewParams{}, err
+		}
+		topLevelArray := isTopLevelArray(schema)
+		recordArrayProtocol = recordArrayProtocol || topLevelArray
+		format := responses.ResponseFormatTextConfigParamOfJSONSchema("pet_ask", schema)
+		// 真实验证（文档 12.2、docs/t3-provider-verification.md）：strict 要求根节点为 object、
+		// 所有 properties 进入 required、additionalProperties 为 false。顶层数组无法满足，只能非 strict；
+		// 其余 object schema 保留 strict，Provider 拒绝时由 Complete 回退一次。
+		format.OfJSONSchema.Strict = openai.Bool(!topLevelArray)
+		params.Text = responses.ResponseTextConfigParam{Format: format}
+	}
 	input, instructions := buildInput(request)
+	if recordArrayProtocol && len(request.Tools) > 0 {
+		toolCatalog, err := json.Marshal(request.Tools)
+		if err != nil {
+			return responses.ResponseNewParams{}, err
+		}
+		instructions = strings.TrimSpace(strings.Join([]string{instructions, "【可用工具】\n仅在 record_array_v1 的 call 记录中提出工具调用，不要使用原生工具调用。\n" + string(toolCatalog)}, "\n\n"))
+	}
 	if instructions != "" {
 		params.Instructions = openai.String(instructions)
 	}
 	if input.OfString.Valid() || len(input.OfInputItemList) > 0 {
 		params.Input = input
 	}
-	if len(request.Tools) > 0 {
+	if len(request.Tools) > 0 && !recordArrayProtocol {
 		params.Tools = buildTools(request.Tools)
-	}
-	if request.ResponseSchema != nil {
-		schema, err := responseSchemaMap(request.ResponseSchema)
-		if err != nil {
-			return responses.ResponseNewParams{}, err
-		}
-		format := responses.ResponseFormatTextConfigParamOfJSONSchema("pet_ask", schema)
-		// 真实验证（文档 12.2）：strict 要求根节点为 object，顶层数组（record_array_v1）
-		// 会被 Provider 以 400 拒绝。顶层数组降级为非 strict，其余 object 保留 strict 收益。
-		format.OfJSONSchema.Strict = openai.Bool(!isTopLevelArray(schema))
-		params.Text = responses.ResponseTextConfigParam{Format: format}
 	}
 	if request.MaxOutputTokens > 0 {
 		params.MaxOutputTokens = openai.Int(int64(request.MaxOutputTokens))
@@ -288,6 +311,17 @@ func buildTools(specs []ToolSpec) []responses.ToolUnionParam {
 func isTopLevelArray(schema map[string]any) bool {
 	t, _ := schema["type"].(string)
 	return t == "array"
+}
+
+// strictDisabledParams 返回关闭结构化输出 strict 的参数副本；未启用 strict 时 ok 为 false。
+func strictDisabledParams(params responses.ResponseNewParams) (responses.ResponseNewParams, bool) {
+	if params.Text.Format.OfJSONSchema == nil || !params.Text.Format.OfJSONSchema.Strict.Value {
+		return params, false
+	}
+	format := *params.Text.Format.OfJSONSchema
+	format.Strict = openai.Bool(false)
+	params.Text.Format.OfJSONSchema = &format
+	return params, true
 }
 
 // hasOptionalProperties 报告参数 Schema 是否存在未列入 required 的可选属性。

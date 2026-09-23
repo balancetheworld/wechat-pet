@@ -21,7 +21,7 @@ type budgetQuerier interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-const budgetColumns = "id, scope, scope_id, max_model_calls, max_tool_calls, max_tokens, max_cost_micros, max_concurrency, model_calls_used, tool_calls_used, tokens_used, cost_used_micros, model_calls_reserved, tool_calls_reserved, tokens_reserved, cost_reserved_micros, concurrency_reserved, created_at, updated_at"
+const budgetColumns = "id, scope, scope_id, max_model_calls, max_tool_calls, max_tokens, max_cost_micros, max_duration_millis, max_concurrency, model_calls_used, tool_calls_used, tokens_used, cost_used_micros, duration_used_millis, model_calls_reserved, tool_calls_reserved, tokens_reserved, cost_reserved_micros, duration_reserved_millis, concurrency_reserved, created_at, updated_at"
 
 // EnsureBudget 幂等建立预算账本；账本已存在时不覆盖限额。
 func (r *SQLRepository) EnsureBudget(ctx context.Context, scope BudgetScope, scopeID string, limits BudgetLimits) error {
@@ -34,10 +34,10 @@ func (r *SQLRepository) EnsureBudget(ctx context.Context, scope BudgetScope, sco
 	}
 	now := time.Now().UTC()
 	if r.isPostgres() {
-		_, err = r.db.ExecContext(ctx, "INSERT INTO ask_budgets (id, scope, scope_id, max_model_calls, max_tool_calls, max_tokens, max_cost_micros, max_concurrency, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9) ON CONFLICT (scope, scope_id) DO NOTHING", id, scope, scopeID, limits.MaxModelCalls, limits.MaxToolCalls, limits.MaxTokens, limits.MaxCostMicros, limits.MaxConcurrency, now)
+		_, err = r.db.ExecContext(ctx, "INSERT INTO ask_budgets (id, scope, scope_id, max_model_calls, max_tool_calls, max_tokens, max_cost_micros, max_duration_millis, max_concurrency, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $10) ON CONFLICT (scope, scope_id) DO NOTHING", id, scope, scopeID, limits.MaxModelCalls, limits.MaxToolCalls, limits.MaxTokens, limits.MaxCostMicros, limits.MaxDurationMillis, limits.MaxConcurrency, now)
 		return err
 	}
-	_, err = r.db.ExecContext(ctx, "INSERT OR IGNORE INTO ask_budgets (id, scope, scope_id, max_model_calls, max_tool_calls, max_tokens, max_cost_micros, max_concurrency, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, scope, scopeID, limits.MaxModelCalls, limits.MaxToolCalls, limits.MaxTokens, limits.MaxCostMicros, limits.MaxConcurrency, now, now)
+	_, err = r.db.ExecContext(ctx, "INSERT OR IGNORE INTO ask_budgets (id, scope, scope_id, max_model_calls, max_tool_calls, max_tokens, max_cost_micros, max_duration_millis, max_concurrency, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", id, scope, scopeID, limits.MaxModelCalls, limits.MaxToolCalls, limits.MaxTokens, limits.MaxCostMicros, limits.MaxDurationMillis, limits.MaxConcurrency, now, now)
 	return err
 }
 
@@ -75,6 +75,7 @@ func (r *SQLRepository) ReserveBudget(ctx context.Context, scope BudgetScope, sc
 		tool_calls_reserved = tool_calls_reserved + ?,
 		tokens_reserved = tokens_reserved + ?,
 		cost_reserved_micros = cost_reserved_micros + ?,
+		duration_reserved_millis = duration_reserved_millis + ?,
 		concurrency_reserved = concurrency_reserved + ?,
 		updated_at = ?
 		WHERE id = ?
@@ -82,10 +83,11 @@ func (r *SQLRepository) ReserveBudget(ctx context.Context, scope BudgetScope, sc
 		  AND (max_tool_calls <= 0 OR tool_calls_used + tool_calls_reserved + ? <= max_tool_calls)
 		  AND (max_tokens <= 0 OR tokens_used + tokens_reserved + ? <= max_tokens)
 		  AND (max_cost_micros <= 0 OR cost_used_micros + cost_reserved_micros + ? <= max_cost_micros)
+		  AND (max_duration_millis <= 0 OR duration_used_millis + duration_reserved_millis + ? <= max_duration_millis)
 		  AND (max_concurrency <= 0 OR concurrency_reserved + ? <= max_concurrency)`),
-		amount.ModelCalls, amount.ToolCalls, amount.Tokens, amount.CostMicros, amount.Concurrency, now,
+		amount.ModelCalls, amount.ToolCalls, amount.Tokens, amount.CostMicros, amount.DurationMillis, amount.Concurrency, now,
 		ledger.ID,
-		amount.ModelCalls, amount.ToolCalls, amount.Tokens, amount.CostMicros, amount.Concurrency)
+		amount.ModelCalls, amount.ToolCalls, amount.Tokens, amount.CostMicros, amount.DurationMillis, amount.Concurrency)
 	if err != nil {
 		return BudgetReservation{}, err
 	}
@@ -101,7 +103,7 @@ func (r *SQLRepository) ReserveBudget(ctx context.Context, scope BudgetScope, sc
 	if err != nil {
 		return BudgetReservation{}, err
 	}
-	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_reservations (id, budget_id, model_calls, tool_calls, tokens, cost_micros, concurrency, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"), reservationID, ledger.ID, amount.ModelCalls, amount.ToolCalls, amount.Tokens, amount.CostMicros, amount.Concurrency, ReservationReserved, now); err != nil {
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_reservations (id, budget_id, model_calls, tool_calls, tokens, cost_micros, duration_millis, concurrency, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), reservationID, ledger.ID, amount.ModelCalls, amount.ToolCalls, amount.Tokens, amount.CostMicros, amount.DurationMillis, amount.Concurrency, ReservationReserved, now); err != nil {
 		return BudgetReservation{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -139,15 +141,17 @@ func (r *SQLRepository) SettleBudget(ctx context.Context, reservationID string, 
 		tool_calls_reserved = tool_calls_reserved - ?,
 		tokens_reserved = tokens_reserved - ?,
 		cost_reserved_micros = cost_reserved_micros - ?,
+		duration_reserved_millis = duration_reserved_millis - ?,
 		concurrency_reserved = concurrency_reserved - ?,
 		model_calls_used = model_calls_used + ?,
 		tool_calls_used = tool_calls_used + ?,
 		tokens_used = tokens_used + ?,
 		cost_used_micros = cost_used_micros + ?,
+		duration_used_millis = duration_used_millis + ?,
 		updated_at = ?
 		WHERE id = ?`),
-		reservation.Amount.ModelCalls, reservation.Amount.ToolCalls, reservation.Amount.Tokens, reservation.Amount.CostMicros, reservation.Amount.Concurrency,
-		actual.ModelCalls, actual.ToolCalls, actual.Tokens, actual.CostMicros,
+		reservation.Amount.ModelCalls, reservation.Amount.ToolCalls, reservation.Amount.Tokens, reservation.Amount.CostMicros, reservation.Amount.DurationMillis, reservation.Amount.Concurrency,
+		actual.ModelCalls, actual.ToolCalls, actual.Tokens, actual.CostMicros, actual.DurationMillis,
 		now, reservation.BudgetID)
 	if err != nil {
 		return err
@@ -199,10 +203,11 @@ func (r *SQLRepository) ReleaseBudget(ctx context.Context, reservationID string)
 		tool_calls_reserved = tool_calls_reserved - ?,
 		tokens_reserved = tokens_reserved - ?,
 		cost_reserved_micros = cost_reserved_micros - ?,
+		duration_reserved_millis = duration_reserved_millis - ?,
 		concurrency_reserved = concurrency_reserved - ?,
 		updated_at = ?
 		WHERE id = ?`),
-		reservation.Amount.ModelCalls, reservation.Amount.ToolCalls, reservation.Amount.Tokens, reservation.Amount.CostMicros, reservation.Amount.Concurrency,
+		reservation.Amount.ModelCalls, reservation.Amount.ToolCalls, reservation.Amount.Tokens, reservation.Amount.CostMicros, reservation.Amount.DurationMillis, reservation.Amount.Concurrency,
 		now, reservation.BudgetID)
 	if err != nil {
 		return err
@@ -234,14 +239,14 @@ func (r *SQLRepository) getBudgetTx(ctx context.Context, querier budgetQuerier, 
 }
 
 func (r *SQLRepository) getReservationTx(ctx context.Context, tx *sql.Tx, reservationID string, forUpdate bool) (BudgetReservation, error) {
-	query := "SELECT id, budget_id, model_calls, tool_calls, tokens, cost_micros, concurrency, status, created_at, settled_at, released_at FROM ask_reservations WHERE id = ?"
+	query := "SELECT id, budget_id, model_calls, tool_calls, tokens, cost_micros, duration_millis, concurrency, status, created_at, settled_at, released_at FROM ask_reservations WHERE id = ?"
 	if forUpdate && r.isPostgres() {
 		query += " FOR UPDATE"
 	}
 	row := tx.QueryRowContext(ctx, r.query(query), reservationID)
 	var value BudgetReservation
 	var settledAt, releasedAt sql.NullTime
-	err := row.Scan(&value.ID, &value.BudgetID, &value.Amount.ModelCalls, &value.Amount.ToolCalls, &value.Amount.Tokens, &value.Amount.CostMicros, &value.Amount.Concurrency, &value.Status, &value.CreatedAt, &settledAt, &releasedAt)
+	err := row.Scan(&value.ID, &value.BudgetID, &value.Amount.ModelCalls, &value.Amount.ToolCalls, &value.Amount.Tokens, &value.Amount.CostMicros, &value.Amount.DurationMillis, &value.Amount.Concurrency, &value.Status, &value.CreatedAt, &settledAt, &releasedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return BudgetReservation{}, ErrReservationNotFound
 	}
@@ -259,7 +264,7 @@ func (r *SQLRepository) getReservationTx(ctx context.Context, tx *sql.Tx, reserv
 
 func scanBudget(row *sql.Row) (BudgetLedger, error) {
 	var value BudgetLedger
-	err := row.Scan(&value.ID, &value.Scope, &value.ScopeID, &value.Limits.MaxModelCalls, &value.Limits.MaxToolCalls, &value.Limits.MaxTokens, &value.Limits.MaxCostMicros, &value.Limits.MaxConcurrency, &value.Used.ModelCalls, &value.Used.ToolCalls, &value.Used.Tokens, &value.Used.CostMicros, &value.Reserved.ModelCalls, &value.Reserved.ToolCalls, &value.Reserved.Tokens, &value.Reserved.CostMicros, &value.Reserved.Concurrency, &value.CreatedAt, &value.UpdatedAt)
+	err := row.Scan(&value.ID, &value.Scope, &value.ScopeID, &value.Limits.MaxModelCalls, &value.Limits.MaxToolCalls, &value.Limits.MaxTokens, &value.Limits.MaxCostMicros, &value.Limits.MaxDurationMillis, &value.Limits.MaxConcurrency, &value.Used.ModelCalls, &value.Used.ToolCalls, &value.Used.Tokens, &value.Used.CostMicros, &value.Used.DurationMillis, &value.Reserved.ModelCalls, &value.Reserved.ToolCalls, &value.Reserved.Tokens, &value.Reserved.CostMicros, &value.Reserved.DurationMillis, &value.Reserved.Concurrency, &value.CreatedAt, &value.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return BudgetLedger{}, ErrBudgetNotFound
 	}

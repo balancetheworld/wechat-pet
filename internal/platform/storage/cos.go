@@ -51,6 +51,23 @@ func (s *COSStorage) Upload(ctx context.Context, key string, content io.Reader, 
 	return nil
 }
 
+func (s *COSStorage) Read(ctx context.Context, key string) ([]byte, error) {
+	cleanKey, err := safeKey(key)
+	if err != nil {
+		return nil, err
+	}
+	response, err := s.client.Object.Get(ctx, cleanKey, nil)
+	if err != nil {
+		return nil, fmt.Errorf("read COS object: %w", err)
+	}
+	defer response.Body.Close()
+	value, err := io.ReadAll(response.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read COS object body: %w", err)
+	}
+	return value, nil
+}
+
 func (s *COSStorage) Delete(ctx context.Context, key string) error {
 	cleanKey, err := safeKey(key)
 	if err != nil {

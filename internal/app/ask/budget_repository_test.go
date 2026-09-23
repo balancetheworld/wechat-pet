@@ -106,6 +106,32 @@ func TestSettleBudgetReleasesOverReserved(t *testing.T) {
 	}
 }
 
+func TestDurationBudgetSettlesAndRejectsExceeded(t *testing.T) {
+	repository := newBudgetTestRepository(t)
+	ctx := context.Background()
+
+	if err := repository.EnsureBudget(ctx, BudgetRun, "run-1", BudgetLimits{MaxDurationMillis: 10}); err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := repository.ReserveBudget(ctx, BudgetRun, "run-1", BudgetAmount{DurationMillis: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SettleBudget(ctx, reservation.ID, BudgetAmount{DurationMillis: 7}); err != nil {
+		t.Fatal(err)
+	}
+	ledger, err := repository.GetBudget(ctx, BudgetRun, "run-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ledger.Used.DurationMillis != 7 || ledger.Reserved.DurationMillis != 0 {
+		t.Fatalf("duration budget = used %d reserved %d, want used 7 reserved 0", ledger.Used.DurationMillis, ledger.Reserved.DurationMillis)
+	}
+	if _, err := repository.ReserveBudget(ctx, BudgetRun, "run-1", BudgetAmount{DurationMillis: 4}); !errors.Is(err, ErrBudgetExceeded) {
+		t.Fatalf("error = %v, want %v", err, ErrBudgetExceeded)
+	}
+}
+
 func TestSettleBudgetIsNotIdempotent(t *testing.T) {
 	repository := newBudgetTestRepository(t)
 	ctx := context.Background()

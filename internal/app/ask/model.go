@@ -92,6 +92,7 @@ type Turn struct {
 	InputSequence int
 	Status        TurnStatus
 	Input         string
+	AssetRefs     []string
 	SelectedRunID string
 	SupersededBy  *string
 	CreatedAt     time.Time
@@ -125,6 +126,7 @@ type ContextMessage struct {
 type ContextSource struct {
 	Name      string
 	Version   string
+	Status    string
 	ItemCount int
 	Truncated bool
 }
@@ -132,6 +134,8 @@ type ContextSource struct {
 type ContextEvent struct {
 	Tag        string
 	Source     string
+	SourceID   string
+	Version    string
 	Summary    string
 	OccurredAt time.Time
 }
@@ -141,6 +145,7 @@ type ContextSnapshot struct {
 	CapturedAt    time.Time
 	CharCount     int
 	Pet           PetContext
+	Pets          []PetContext
 	RecentTurns   []ContextTurn
 	Messages      []ContextMessage
 	RecentRecords []calendarapp.ContextRecord

@@ -115,6 +115,18 @@ func TestResolvePetScopesToFamily(t *testing.T) {
 	}
 }
 
+func TestResolvePetReturnsSourceVersionWriteFailure(t *testing.T) {
+	db := newBusinessReadTestDB(t)
+	insertPetForTest(t, db, "pet-1", "family-1", "旺仔")
+	repository := newBusinessReadRepo(t, db)
+	if _, err := db.Exec("DROP TABLE ask_source_versions"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.ResolvePet(context.Background(), "family-1", "旺仔"); err == nil {
+		t.Fatal("source version write failure should be returned")
+	}
+}
+
 func TestResolvePetAmbiguousAndNone(t *testing.T) {
 	db := newBusinessReadTestDB(t)
 	insertPetForTest(t, db, "pet-1", "family-1", "旺仔")

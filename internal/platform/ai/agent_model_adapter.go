@@ -2,10 +2,12 @@ package ai
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	askapp "github.com/balancetheworld/wechat-pet/internal/app/ask"
 )
@@ -16,39 +18,152 @@ import (
 type AgentModelAdapter struct {
 	provider Provider
 	profile  Profile
-	seq      int
+	attempts askapp.AttemptRepository
 }
 
 // NewAgentModelAdapter 构造决策循环模型端口。profile 固定本次 Run 的 Provider/Model/参数。
-func NewAgentModelAdapter(provider Provider, profile Profile) *AgentModelAdapter {
-	return &AgentModelAdapter{provider: provider, profile: profile}
+func NewAgentModelAdapter(provider Provider, profile Profile, attempts ...askapp.AttemptRepository) *AgentModelAdapter {
+	adapter := &AgentModelAdapter{provider: provider, profile: profile}
+	if len(attempts) > 0 {
+		adapter.attempts = attempts[0]
+	}
+	return adapter
 }
 
 // Step 发起一次 agent_step 决策（文档 4.1）。每次调用分配新的 attempt 身份，
 // 满足「同一 Attempt 至多发出一次请求」。
-func (a *AgentModelAdapter) Step(ctx context.Context, input askapp.StepInput) ([]askapp.ProtocolRecord, error) {
-	a.seq++
-	attemptID := fmt.Sprintf("attempt-%d", a.seq)
+func (a *AgentModelAdapter) Step(ctx context.Context, input askapp.StepInput) (askapp.ModelStepResult, error) {
+	attemptID, err := newAttemptID()
+	if err != nil {
+		return askapp.ModelStepResult{}, err
+	}
 	request := Request{
-		SchemaVersion:   "request_v1",
-		AttemptID:       attemptID,
-		Purpose:         PurposeAgentStep,
-		ProviderID:      a.profile.ProviderID,
-		Model:           a.profile.Model,
-		ProfileVersion:  a.profile.Version,
-		AdapterVersion:  a.profile.AdapterVersion,
-		Capabilities:    a.profile.Capabilities,
-		Messages:        blocksToMessages(input.Blocks),
-		Tools:           toolsToSpecs(input.Tools),
-		ResponseSchema:  askapp.RecordArraySchema(),
-		Parameters:      a.profile.Parameters,
-		MaxOutputTokens: maxOutputTokens(a.profile),
+		SchemaVersion:    "request_v1",
+		AttemptID:        attemptID,
+		Purpose:          PurposeAgentStep,
+		ProviderID:       a.profile.ProviderID,
+		Model:            a.profile.Model,
+		ProfileVersion:   a.profile.Version,
+		AdapterVersion:   a.profile.AdapterVersion,
+		Capabilities:     a.profile.Capabilities,
+		Messages:         blocksToMessages(input.Blocks),
+		Tools:            toolsToSpecs(input.Tools),
+		ResponseSchema:   askapp.RecordArraySchema(),
+		ResponseProtocol: askapp.RecordArrayV1,
+		Parameters:       a.profile.Parameters,
+		MaxOutputTokens:  maxOutputTokens(a.profile),
+	}
+	for _, image := range input.Images {
+		request.Images = append(request.Images, ImageRef{AssetID: image.AssetID, Version: "controlled-jpeg-v1"})
+		request.ImageContent = append(request.ImageContent, image.Content)
+	}
+	if a.attempts != nil {
+		if input.SessionID == "" || input.RunID == "" {
+			return askapp.ModelStepResult{}, fmt.Errorf("agent_model: session_id and run_id are required for persisted attempts")
+		}
+		snapshot, marshalErr := marshalAttemptInput(request, input.Budget)
+		if marshalErr != nil {
+			return askapp.ModelStepResult{}, fmt.Errorf("agent_model: marshal attempt input: %w", marshalErr)
+		}
+		now := time.Now().UTC()
+		attempt := askapp.Attempt{ID: attemptID, SessionID: input.SessionID, RunID: input.RunID, Purpose: string(PurposeAgentStep), InputSnapshot: string(snapshot), StartedAt: now}
+		if err := a.attempts.CreateAttempt(ctx, attempt); err != nil {
+			return askapp.ModelStepResult{}, fmt.Errorf("agent_model: create attempt: %w", err)
+		}
+		if err := a.attempts.TransitionAttempt(ctx, attemptID, askapp.AttemptQueued, askapp.AttemptRunning, "", "", "", now); err != nil {
+			return askapp.ModelStepResult{}, fmt.Errorf("agent_model: start attempt: %w", err)
+		}
 	}
 	response, err := a.provider.Complete(ctx, request)
 	if err != nil {
-		return nil, toExecutorError(err)
+		executorErr := toExecutorError(err)
+		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, Response{}); transitionErr != nil {
+			return askapp.ModelStepResult{}, transitionErr
+		}
+		return askapp.ModelStepResult{}, executorErr
 	}
-	return parseRecordArray(response.Text)
+	result := modelStepResult(response)
+	records, err := parseRecordArray(response.Text)
+	if err != nil {
+		executorErr := askapp.NewExecutorError(ErrProviderOutputInvalid, false, 0, err)
+		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, response); transitionErr != nil {
+			return result, transitionErr
+		}
+		return result, executorErr
+	}
+	result.Records = records
+	if err := a.finishAttempt(ctx, attemptID, askapp.AttemptSucceeded, nil, response); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (a *AgentModelAdapter) finishAttempt(ctx context.Context, attemptID string, status askapp.AttemptStatus, stepErr error, response Response) error {
+	if a.attempts == nil {
+		return nil
+	}
+	errorCode := ""
+	if stepErr != nil {
+		errorCode, _ = askapp.ExecutorErrorDetails(stepErr)
+	}
+	usage, err := json.Marshal(response.Usage.Normalize())
+	if err != nil {
+		return fmt.Errorf("agent_model: marshal attempt usage: %w", err)
+	}
+	if err := a.attempts.TransitionAttempt(ctx, attemptID, askapp.AttemptRunning, status, errorCode, response.ProviderRequestID, string(usage), time.Now().UTC()); err != nil {
+		return fmt.Errorf("agent_model: finish attempt: %w", err)
+	}
+	return nil
+}
+
+type attemptInputSnapshot struct {
+	SchemaVersion    string                     `json:"schema_version"`
+	AttemptID        string                     `json:"attempt_id"`
+	Purpose          Purpose                    `json:"purpose"`
+	ProviderID       string                     `json:"provider_id"`
+	Model            string                     `json:"model"`
+	ProfileVersion   string                     `json:"profile_version"`
+	AdapterVersion   string                     `json:"adapter_version"`
+	Capabilities     Capabilities               `json:"capabilities"`
+	Messages         []Message                  `json:"messages"`
+	Images           []ImageRef                 `json:"images"`
+	Tools            []ToolSpec                 `json:"tools"`
+	ResponseProtocol string                     `json:"response_protocol"`
+	ResponseSchema   any                        `json:"response_schema"`
+	Parameters       []Parameter                `json:"parameters"`
+	MaxOutputTokens  int                        `json:"max_output_tokens"`
+	TimeoutMillis    int64                      `json:"timeout_millis"`
+	Deadline         time.Time                  `json:"deadline"`
+	Budget           askapp.ModelBudgetSnapshot `json:"budget"`
+}
+
+func marshalAttemptInput(request Request, budget askapp.ModelBudgetSnapshot) ([]byte, error) {
+	return json.Marshal(attemptInputSnapshot{
+		SchemaVersion: request.SchemaVersion, AttemptID: request.AttemptID, Purpose: request.Purpose, ProviderID: request.ProviderID,
+		Model: request.Model, ProfileVersion: request.ProfileVersion, AdapterVersion: request.AdapterVersion,
+		Capabilities: request.Capabilities, Messages: request.Messages, Images: request.Images, Tools: request.Tools,
+		ResponseProtocol: request.ResponseProtocol, ResponseSchema: request.ResponseSchema, Parameters: request.Parameters,
+		MaxOutputTokens: request.MaxOutputTokens, TimeoutMillis: request.Timeout.Milliseconds(), Deadline: request.Deadline,
+		Budget: budget,
+	})
+}
+
+func modelStepResult(response Response) askapp.ModelStepResult {
+	usage := response.Usage.Normalize()
+	return askapp.ModelStepResult{
+		ProviderRequestID: response.ProviderRequestID,
+		Usage:             askapp.ModelUsage{InputTokens: int(usage.InputTokens), OutputTokens: int(usage.OutputTokens), TotalTokens: int(usage.TotalTokens), Complete: usage.Complete},
+	}
+}
+
+func newAttemptID() (string, error) {
+	var value [16]byte
+	if _, err := rand.Read(value[:]); err != nil {
+		return "", fmt.Errorf("agent_model: generate attempt id: %w", err)
+	}
+	value[6] = (value[6] & 0x0f) | 0x40
+	value[8] = (value[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]), nil
 }
 
 // toExecutorError 把 Provider 层稳定错误映射为 ask 层可识别的执行错误（文档 4.1、9）。
@@ -96,10 +211,18 @@ func blocksToMessages(blocks []askapp.ContextBlock) []Message {
 		messages = append(messages, Message{Role: "system", Content: joined})
 	}
 	var body []string
-	body = append(body, reference...)
-	body = append(body, history...)
-	body = append(body, current...)
-	body = append(body, toolInteractions...)
+	if len(reference) > 0 {
+		body = append(body, "【参考资料】\n"+strings.Join(reference, "\n\n"))
+	}
+	if len(history) > 0 {
+		body = append(body, "【历史对话】\n"+strings.Join(history, "\n\n"))
+	}
+	if len(current) > 0 {
+		body = append(body, "【当前问题】\n"+strings.Join(current, "\n\n"))
+	}
+	if len(toolInteractions) > 0 {
+		body = append(body, "【工具结果】\n"+strings.Join(toolInteractions, "\n\n"))
+	}
 	if joined := strings.TrimSpace(strings.Join(body, "\n\n")); joined != "" {
 		messages = append(messages, Message{Role: "user", Content: joined})
 	}

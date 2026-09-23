@@ -41,8 +41,8 @@ func assertParamNames(t *testing.T, tool Tool, want ...string) {
 
 func TestDefaultToolsAreValid(t *testing.T) {
 	tools := DefaultTools()
-	if len(tools) != 5 {
-		t.Fatalf("DefaultTools() = %d tools, want 5", len(tools))
+	if len(tools) != 14 {
+		t.Fatalf("DefaultTools() = %d tools, want 14", len(tools))
 	}
 	catalog, err := NewCatalog(tools, nil, DefaultToolVersion, nil)
 	if err != nil {
@@ -58,11 +58,18 @@ func TestDefaultToolsAreValid(t *testing.T) {
 		if err := tool.Validate(); err != nil {
 			t.Fatalf("tool %q invalid: %v", tool.Name, err)
 		}
-		if !IsReadOnly(tool.ActionType) {
-			t.Fatalf("tool %q should be read-only, action = %q", tool.Name, tool.ActionType)
+		if IsReadOnly(tool.ActionType) {
+			if tool.RequiresConfirmation {
+				t.Fatalf("read-only tool %q should not require confirmation", tool.Name)
+			}
+			continue
 		}
-		if tool.RequiresConfirmation {
-			t.Fatalf("tool %q should not require confirmation", tool.Name)
+		// 写入准备工具只形成待确认预览，必须声明需要用户确认且使用新身份幂等策略。
+		if !tool.RequiresConfirmation {
+			t.Fatalf("write preparation tool %q must require confirmation", tool.Name)
+		}
+		if tool.IdempotencyPolicy != IdempotencyNewIdentity {
+			t.Fatalf("write preparation tool %q idempotency = %q, want %q", tool.Name, tool.IdempotencyPolicy, IdempotencyNewIdentity)
 		}
 		if len(tool.Parameters) == 0 || !json.Valid(tool.Parameters) {
 			t.Fatalf("tool %q parameters must be valid JSON Schema", tool.Name)
@@ -96,11 +103,20 @@ func TestDefaultToolsMatchBusinessReadPorts(t *testing.T) {
 		action   ActionType
 		resource ResourceType
 	}{
-		"resolve_pet":            {ActionResolve, ResourcePet},
-		"read_pet_profile":       {ActionRead, ResourcePetProfile},
-		"search_health_records":  {ActionSearch, ResourceHealthRecord},
-		"aggregate_health_records": {ActionAggregate, ResourceHealthRecord},
-		"read_health_record":     {ActionRead, ResourceHealthRecord},
+		"list_family_pets":           {ActionRead, ResourcePet},
+		"resolve_pet":                {ActionResolve, ResourcePet},
+		"read_pet_profile":           {ActionRead, ResourcePetProfile},
+		"search_health_records":      {ActionSearch, ResourceHealthRecord},
+		"aggregate_health_records":   {ActionAggregate, ResourceHealthRecord},
+		"read_health_record":         {ActionRead, ResourceHealthRecord},
+		"create_calendar_record":     {ActionPrepareCreate, ResourceHealthRecord},
+		"update_calendar_record":     {ActionPrepareUpdate, ResourceHealthRecord},
+		"update_pet_profile":         {ActionPrepareUpdate, ResourcePetProfile},
+		"complete_calendar_reminder": {ActionPrepareUpdate, ResourceHealthRecord},
+		"list_calendar_records":      {ActionRead, ResourceHealthRecord},
+		"list_reminders":             {ActionRead, ResourceHealthRecord},
+		"update_pet_health":          {ActionPrepareUpdate, ResourcePetProfile},
+		"create_pet":                 {ActionPrepareCreate, ResourcePet},
 	}
 	if len(tools) != len(expect) {
 		t.Fatalf("tool count = %d, expect %d", len(tools), len(expect))

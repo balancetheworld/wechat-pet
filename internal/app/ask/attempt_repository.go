@@ -21,7 +21,7 @@ type AttemptRepository interface {
 	CreateAttempt(context.Context, Attempt) error
 	GetAttempt(context.Context, string) (Attempt, error)
 	ListAttempts(context.Context, string) ([]Attempt, error)
-	TransitionAttempt(context.Context, string, AttemptStatus, AttemptStatus, string, time.Time) error
+	TransitionAttempt(context.Context, string, AttemptStatus, AttemptStatus, string, string, string, time.Time) error
 }
 
 // CreateAttempt 持久化一次新的模型请求。Sequence 为空时按 Run 内最大值 +1 分配；
@@ -33,15 +33,28 @@ func (r *SQLRepository) CreateAttempt(ctx context.Context, attempt Attempt) erro
 	if attempt.StartedAt.IsZero() {
 		attempt.StartedAt = time.Now().UTC()
 	}
-	sequence := attempt.Sequence
-	if sequence <= 0 {
-		if err := r.db.QueryRowContext(ctx, r.query("SELECT COALESCE(MAX(sequence), 0) + 1 FROM ask_attempts WHERE run_id = ?"), attempt.RunID).Scan(&sequence); err != nil {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if r.isPostgres() {
+		var locked any
+		if err := tx.QueryRowContext(ctx, r.query("SELECT pg_advisory_xact_lock(hashtext(?))"), attempt.RunID).Scan(&locked); err != nil {
 			return err
 		}
 	}
-	_, err := r.db.ExecContext(ctx, r.query("INSERT INTO ask_attempts (id, session_id, run_id, sequence, status, purpose, input_snapshot, request_id, error_code, usage, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
-		attempt.ID, attempt.SessionID, attempt.RunID, sequence, AttemptQueued, attempt.Purpose, attempt.InputSnapshot, attempt.RequestID, "", "", attempt.StartedAt, attempt.CompletedAt)
-	return err
+	sequence := attempt.Sequence
+	if sequence <= 0 {
+		if err := tx.QueryRowContext(ctx, r.query("SELECT COALESCE(MAX(sequence), 0) + 1 FROM ask_attempts WHERE run_id = ?"), attempt.RunID).Scan(&sequence); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_attempts (id, session_id, run_id, sequence, status, purpose, input_snapshot, request_id, error_code, usage, started_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"),
+		attempt.ID, attempt.SessionID, attempt.RunID, sequence, AttemptQueued, attempt.Purpose, attempt.InputSnapshot, attempt.RequestID, "", "", attempt.StartedAt, attempt.CompletedAt); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // GetAttempt 按 id 读取一次模型请求记录。
@@ -77,16 +90,16 @@ func (r *SQLRepository) ListAttempts(ctx context.Context, runID string) ([]Attem
 
 // TransitionAttempt 按 3.3 状态机条件更新 Attempt 状态。终态（succeeded/failed/canceled/unknown）
 // 写入 completed_at；非法转移返回 ErrInvalidAttemptTransition，状态不符返回 ErrAttemptStateConflict。
-func (r *SQLRepository) TransitionAttempt(ctx context.Context, attemptID string, from, to AttemptStatus, errorCode string, at time.Time) error {
+func (r *SQLRepository) TransitionAttempt(ctx context.Context, attemptID string, from, to AttemptStatus, errorCode, requestID, usage string, at time.Time) error {
 	if !CanTransitionAttempt(from, to) {
 		return ErrInvalidAttemptTransition
 	}
 	var result sql.Result
 	var err error
 	if isAttemptTerminal(to) {
-		result, err = r.db.ExecContext(ctx, r.query("UPDATE ask_attempts SET status = ?, error_code = ?, completed_at = ? WHERE id = ? AND status = ?"), to, errorCode, at, attemptID, from)
+		result, err = r.db.ExecContext(ctx, r.query("UPDATE ask_attempts SET status = ?, error_code = ?, request_id = ?, usage = ?, completed_at = ? WHERE id = ? AND status = ?"), to, errorCode, requestID, usage, at, attemptID, from)
 	} else {
-		result, err = r.db.ExecContext(ctx, r.query("UPDATE ask_attempts SET status = ?, error_code = ? WHERE id = ? AND status = ?"), to, errorCode, attemptID, from)
+		result, err = r.db.ExecContext(ctx, r.query("UPDATE ask_attempts SET status = ?, error_code = ?, request_id = ?, usage = ? WHERE id = ? AND status = ?"), to, errorCode, requestID, usage, attemptID, from)
 	}
 	if err != nil {
 		return err

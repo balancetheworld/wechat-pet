@@ -14,19 +14,25 @@ import (
 type fakeBusinessRead struct {
 	mu sync.Mutex
 
-	resolveCalls  int
-	readCalls     int
-	searchCalls   int
+	resolveCalls   int
+	readCalls      int
+	searchCalls    int
 	aggregateCalls int
 
-	resolveOutcome  PetResolveOutcome
-	resolveErr      error
-	readOutcome     HealthRecordOutcome
-	readErr         error
-	searchOutcome   HealthRecordSearchOutcome
-	searchErr       error
-	aggregateOutcome HealthRecordAggregateOutcome
-	aggregateErr    error
+	resolveOutcome     PetResolveOutcome
+	resolveErr         error
+	listOutcome        PetListOutcome
+	listErr            error
+	listRecordsOutcome CalendarRecordListOutcome
+	listRecordsErr     error
+	remindersOutcome   ReminderListOutcome
+	remindersErr       error
+	readOutcome        HealthRecordOutcome
+	readErr            error
+	searchOutcome      HealthRecordSearchOutcome
+	searchErr          error
+	aggregateOutcome   HealthRecordAggregateOutcome
+	aggregateErr       error
 }
 
 func (f *fakeBusinessRead) ResolvePet(context.Context, string, string) (PetResolveOutcome, error) {
@@ -38,6 +44,24 @@ func (f *fakeBusinessRead) ResolvePet(context.Context, string, string) (PetResol
 
 func (f *fakeBusinessRead) ReadPetProfile(context.Context, string, string) (PetProfileOutcome, error) {
 	return PetProfileOutcome{}, nil
+}
+
+func (f *fakeBusinessRead) ListCalendarRecords(context.Context, string, time.Time, time.Time, int) (CalendarRecordListOutcome, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.listRecordsOutcome, f.listRecordsErr
+}
+
+func (f *fakeBusinessRead) ListReminders(context.Context, string, string, int) (ReminderListOutcome, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.remindersOutcome, f.remindersErr
+}
+
+func (f *fakeBusinessRead) ListFamilyPets(context.Context, string) (PetListOutcome, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.listOutcome, f.listErr
 }
 
 func (f *fakeBusinessRead) SearchHealthRecords(context.Context, string, string, HealthRecordSearchQuery) (HealthRecordSearchOutcome, error) {
@@ -187,6 +211,38 @@ func TestExecuteBatchServiceErrorSeparatedFromEmpty(t *testing.T) {
 	}
 	if r.Error.Category != ToolErrServiceError || !r.Error.Retryable {
 		t.Fatalf("error should be retryable service_error, got %+v", r.Error)
+	}
+}
+
+func TestExecuteBatchPropagatesDependencyFailure(t *testing.T) {
+	catalog := adapterTestCatalog(t)
+	business := &fakeBusinessRead{resolveErr: errors.New("resolver down")}
+	adapter := newTestAdapter(catalog, business)
+	batch := ToolBatch{BatchID: "b1", RunID: "r1", AttemptID: "a1", Calls: []ToolCall{
+		{ToolCallID: "c1", CallIndex: 0, ToolName: "resolve_pet", ToolVersion: "v1", Arguments: json.RawMessage(`{"query":"旺仔"}`)},
+		{ToolCallID: "c2", CallIndex: 1, ToolName: "search_records", ToolVersion: "v1", Arguments: json.RawMessage(`{"pet_id":"pet-1"}`), DependsOn: []string{"c1"}},
+	}}
+	results, err := adapter.ExecuteBatch(context.Background(), batch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results[0].Status != ToolResultError || results[1].Status != ToolResultNotExecuted || results[1].Error == nil || results[1].Error.Category != ToolErrPrecondition {
+		t.Fatalf("results = %+v", results)
+	}
+	resolve, _, search, _ := business.counts()
+	if resolve != 1 || search != 0 {
+		t.Fatalf("resolve=%d search=%d, want 1 and 0", resolve, search)
+	}
+}
+
+func TestValidateBatchRejectsDependencyCycle(t *testing.T) {
+	catalog := adapterTestCatalog(t)
+	batch := ToolBatch{Calls: []ToolCall{
+		{ToolCallID: "c1", CallIndex: 0, ToolName: "resolve_pet", ToolVersion: "v1", Arguments: json.RawMessage(`{"query":"旺仔"}`), DependsOn: []string{"c2"}},
+		{ToolCallID: "c2", CallIndex: 1, ToolName: "search_records", ToolVersion: "v1", Arguments: json.RawMessage(`{"pet_id":"pet-1"}`), DependsOn: []string{"c1"}},
+	}}
+	if err := ValidateBatch(batch, catalog, Filter{}); err == nil {
+		t.Fatal("dependency cycle should fail validation")
 	}
 }
 

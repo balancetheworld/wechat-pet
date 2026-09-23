@@ -233,7 +233,7 @@ Provider 流式结果在完整结构化输出通过安全校验后，会按安�
   "run_id": "run-id",
   "sequence": 4,
   "type": "assistant.delta",
-  "data": {"delta": "目前需要密切观察"},
+  "data": {"message_id": "message-id", "delta": "目前需要密切观察"},
   "created_at": "2026-09-08T00:00:00Z"
 }
 ```

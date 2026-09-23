@@ -16,13 +16,14 @@ type OpenAIConfig struct {
 
 // OpenAIObservation 是 Provider 单次调用的可观测结果（v2，文档 11.4）。
 type OpenAIObservation struct {
-	Operation    string
-	Model        string
-	Duration     time.Duration
-	InputTokens  int64
-	OutputTokens int64
-	TotalTokens  int64
-	Status       string
-	ErrorCode    string
-	Retryable    bool
+	Operation      string
+	Model          string
+	Duration       time.Duration
+	InputTokens    int64
+	OutputTokens   int64
+	TotalTokens    int64
+	Status         string
+	ErrorCode      string
+	Retryable      bool
+	StrictFallback bool
 }

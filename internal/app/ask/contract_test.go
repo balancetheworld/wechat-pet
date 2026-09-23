@@ -119,13 +119,22 @@ func TestGetSessionRejectsWrongFamily(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = service.GetSession(context.Background(), "family-2", created.Session.ID)
+	_, err = service.GetSession(context.Background(), "family-2", created.Session.ID, "user-1")
 	var appErr *appErrors.AppError
 	if !errors.As(err, &appErr) {
 		t.Fatalf("error = %v, want AppError", err)
 	}
 	if appErr.HTTPStatus != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404 (不泄露目标存在性)", appErr.HTTPStatus)
+	}
+
+	// 同家庭另一用户访问他人会话：同样返回 404，不泄露存在性（越权访问修复）。
+	_, err = service.GetSession(context.Background(), "family-1", created.Session.ID, "user-2")
+	if !errors.As(err, &appErr) {
+		t.Fatalf("error = %v, want AppError", err)
+	}
+	if appErr.HTTPStatus != http.StatusNotFound {
+		t.Fatalf("cross-user status = %d, want 404 (不泄露目标存在性)", appErr.HTTPStatus)
 	}
 }
 

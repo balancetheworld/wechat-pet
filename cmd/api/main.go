@@ -131,14 +131,18 @@ func main() {
 		os.Exit(1)
 	}
 	providerConfig := aiplatform.OpenAIConfig{APIKey: cfg.AIAPIKey, BaseURL: cfg.AIBaseURL, Model: cfg.AIModel, Timeout: time.Duration(cfg.AITimeoutSeconds) * time.Second, Observer: func(observation aiplatform.OpenAIObservation) {
-		logger.Info("ask ai provider", "provider", cfg.AIProvider, "operation", observation.Operation, "model", observation.Model, "duration_ms", observation.Duration.Milliseconds(), "input_tokens", observation.InputTokens, "output_tokens", observation.OutputTokens, "total_tokens", observation.TotalTokens, "status", observation.Status, "error_code", observation.ErrorCode, "retryable", observation.Retryable)
+		logger.Info("ask ai provider", "provider", cfg.AIProvider, "operation", observation.Operation, "model", observation.Model, "duration_ms", observation.Duration.Milliseconds(), "input_tokens", observation.InputTokens, "output_tokens", observation.OutputTokens, "total_tokens", observation.TotalTokens, "status", observation.Status, "error_code", observation.ErrorCode, "retryable", observation.Retryable, "strict_fallback", observation.StrictFallback)
 	}}
 	askService, err := askapp.NewService(askRepository, petRepository)
 	if err != nil {
 		logger.Error("create ask service", "error", err)
 		os.Exit(1)
 	}
+	if cfg.AppEnv == "development" {
+		askService.SetDebugLogger(logger)
+	}
 	askService.SetCalendarRepository(calendarRepository)
+	askService.SetCalendarWriter(calendarService)
 	// v2 工具目录与业务读取端口（不依赖 AI 启用，供决策循环工具执行使用）。
 	askCatalog, err := askapp.DefaultCatalog(askapp.DefaultToolVersion)
 	if err != nil {
@@ -147,6 +151,7 @@ func main() {
 	}
 	askService.SetToolCatalog(askCatalog)
 	askService.SetBusinessReadRepository(askapp.NewBusinessReadRepository(petRepository, calendarRepository, askRepository))
+	askService.SetImageAssetReader(fileService)
 	// v2 决策循环模型端口（依赖 AI 启用）。
 	if cfg.AIEnabled {
 		askProvider, providerErr := aiplatform.NewOpenAIProvider(providerConfig)
@@ -171,7 +176,7 @@ func main() {
 			},
 			Parameters: []aiplatform.Parameter{{Name: "max_output_tokens", Value: 4096, Required: true}},
 		}
-		askService.SetAgentModel(aiplatform.NewAgentModelAdapter(askProvider, askProfile))
+		askService.SetAgentModel(aiplatform.NewAgentModelAdapter(askProvider, askProfile, askRepository))
 	}
 	askWorker, err := askapp.NewRunWorker(askService, askRepository, askapp.RunWorkerConfig{
 		QueueSize:        100,

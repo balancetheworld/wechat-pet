@@ -220,13 +220,13 @@ func TestValidateResponseStructuralErrors(t *testing.T) {
 			t.Fatalf("expected missing end error, got %v", err)
 		}
 	})
-	t.Run("missing coverage", func(t *testing.T) {
+	t.Run("missing coverage is derived later", func(t *testing.T) {
 		records := []ProtocolRecord{
 			{Type: RecordHeader, Header: &HeaderRecord{Type: RecordHeader, SchemaVersion: RecordArrayV1, Action: ActionFinalAnswer, TaskUpdates: []TaskUpdate{}}},
 			{Type: RecordEnd},
 		}
-		if _, err := ValidateResponse(records); err == nil || !strings.Contains(err.Error(), "missing coverage") {
-			t.Fatalf("expected missing coverage error, got %v", err)
+		if _, err := ValidateResponse(records); err != nil {
+			t.Fatalf("missing coverage should not fail structural validation, got %v", err)
 		}
 	})
 	t.Run("coverage not before end", func(t *testing.T) {
@@ -240,6 +240,18 @@ func TestValidateResponseStructuralErrors(t *testing.T) {
 			t.Fatal("expected coverage/end ordering error")
 		}
 	})
+}
+
+func TestValidateResponseRejectsDuplicateTaskUpdates(t *testing.T) {
+	records := []ProtocolRecord{
+		{Type: RecordHeader, Header: &HeaderRecord{Type: RecordHeader, SchemaVersion: RecordArrayV1, Action: ActionRequestInput, TaskUpdates: []TaskUpdate{{TaskKey: "t1", Goal: "确认宠物"}, {TaskKey: "t1", Goal: "确认症状"}}}},
+		{Type: RecordQuestion, Question: &QuestionRecord{Type: RecordQuestion, QuestionKey: "q1", TaskKeys: []string{"t1"}, Text: "请补充信息", MissingFields: []MissingField{{TaskKey: "t1", Field: "pet_id", Necessity: "blocking"}}}},
+		{Type: RecordCoverage, Coverage: &CoverageRecord{Type: RecordCoverage, Tasks: []TaskCoverage{{TaskKey: "t1", QuestionKeys: []string{"q1"}}}}},
+		{Type: RecordEnd},
+	}
+	if _, err := ValidateResponse(records); err == nil || !strings.Contains(err.Error(), "duplicate task_key") {
+		t.Fatalf("expected duplicate task_key error, got %v", err)
+	}
 }
 
 func TestValidateResponseDuplicateKeys(t *testing.T) {
@@ -315,6 +327,18 @@ func TestValidateResponseSegmentValidation(t *testing.T) {
 		}
 		if _, err := ValidateResponse(records); err == nil || !strings.Contains(err.Error(), "not allowed") {
 			t.Fatalf("expected field-not-allowed error, got %v", err)
+		}
+	})
+	t.Run("business fact requires evidence", func(t *testing.T) {
+		records := []ProtocolRecord{
+			{Type: RecordHeader, Header: &HeaderRecord{Type: RecordHeader, SchemaVersion: RecordArrayV1, Action: ActionFinalAnswer, TaskUpdates: []TaskUpdate{{TaskKey: "t1", Goal: "查记录"}}}},
+			{Type: RecordGroup, Group: &GroupRecord{Type: RecordGroup, GroupKey: "g1", TaskKeys: []string{"t1"}, AnswerKind: AnswerFact, Subjects: []AnswerSubject{{SubjectKey: "s1", Kind: SubjectPet, PetID: "p1"}}, Scope: ScopeFull}},
+			{Type: RecordSegment, Segment: &SegmentRecord{Type: RecordSegment, SegmentKey: "s1", GroupKey: "g1", SubjectKeys: []string{"s1"}, Field: "result", Text: "没有记录", BasisKind: BasisBusinessFact}},
+			{Type: RecordCoverage, Coverage: &CoverageRecord{Type: RecordCoverage, Tasks: []TaskCoverage{{TaskKey: "t1", AnswerGroupKeys: []string{"g1"}}}}},
+			{Type: RecordEnd},
+		}
+		if _, err := ValidateResponse(records); err == nil || !strings.Contains(err.Error(), "evidence_refs") {
+			t.Fatalf("expected evidence_refs error, got %v", err)
 		}
 	})
 }

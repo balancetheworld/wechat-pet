@@ -1,8 +1,13 @@
 package ask
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"testing"
+
+	_ "github.com/mattn/go-sqlite3"
 )
 
 func TestTaskItemJSONRoundTrip(t *testing.T) {
@@ -21,14 +26,26 @@ func TestTaskItemJSONRoundTrip(t *testing.T) {
 		MissingFields: []MissingField{
 			{TaskKey: "task-1", SubjectKey: "u-1", Field: "pet_identity", Necessity: string(NecessityBlocking)},
 		},
-		ResultRef: &TaskResultRef{Kind: ResultRefToolResult, RefID: "tool-1", Version: "v1"},
+		ResultRef:  &TaskResultRef{Kind: ResultRefToolResult, RefID: "tool-1", Version: "v1"},
 		Supersedes: "task-0",
 	}
 
-	sourceTurnIDs := marshalTaskItemJSON(item.SourceTurnIDs)
-	subjects := marshalTaskItemJSON(item.Subjects)
-	missingFields := marshalTaskItemJSON(item.MissingFields)
-	resultRef := marshalTaskItemJSON(item.ResultRef)
+	sourceTurnIDs, err := marshalTaskItemJSON(item.SourceTurnIDs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	subjects, err := marshalTaskItemJSON(item.Subjects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missingFields, err := marshalTaskItemJSON(item.MissingFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resultRef, err := marshalTaskItemJSON(item.ResultRef)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if got := unmarshalTaskItemStringSlice(sourceTurnIDs); len(got) != 2 || got[0] != "turn-1" {
 		t.Fatalf("source_turn_ids round trip failed: %v", got)
@@ -49,7 +66,7 @@ func TestTaskItemJSONRoundTrip(t *testing.T) {
 
 func TestTaskItemJSONNilHandling(t *testing.T) {
 	// nil 字段组序列化为空串，反序列化不报错。
-	if got := marshalTaskItemJSON(nil); got != "" {
+	if got, err := marshalTaskItemJSON(nil); err != nil || got != "" {
 		t.Fatalf("nil should marshal to empty, got %q", got)
 	}
 	if got := unmarshalTaskItemStringSlice(""); got != nil {
@@ -65,6 +82,80 @@ func TestTaskItemJSONNilHandling(t *testing.T) {
 	// 合法空数组保留为空数组（区别于 nil）。
 	if got := unmarshalTaskItemStringSlice("[]"); got == nil || len(got) != 0 {
 		t.Fatalf("empty array should unmarshal to empty slice, got %v", got)
+	}
+}
+
+func TestMarshalTaskItemJSONReturnsError(t *testing.T) {
+	if _, err := marshalTaskItemJSON(make(chan int)); err == nil {
+		t.Fatal("unserializable value should return an error")
+	}
+}
+
+func TestCreateTaskItemsRollsBackWhenJSONSerializationFails(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := taskItemJSONMarshal
+	calls := 0
+	taskItemJSONMarshal = func(v any) ([]byte, error) {
+		calls++
+		if calls == 5 {
+			return nil, errors.New("serialize failed")
+		}
+		return original(v)
+	}
+	t.Cleanup(func() { taskItemJSONMarshal = original })
+	items := []TaskItem{
+		{TaskItemID: "task-1", RunID: "run-1", OriginTurnID: "turn-1", Goal: "目标一", SourceTurnIDs: []string{"turn-1"}, Subjects: []AnswerSubject{}, MissingFields: []MissingField{}, ResultRef: &TaskResultRef{}},
+		{TaskItemID: "task-2", RunID: "run-1", OriginTurnID: "turn-1", Goal: "目标二", SourceTurnIDs: []string{"turn-1"}, Subjects: []AnswerSubject{}, MissingFields: []MissingField{}, ResultRef: &TaskResultRef{}},
+	}
+	if err := repository.CreateTaskItems(context.Background(), items); err == nil {
+		t.Fatal("CreateTaskItems should return serialization error")
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM ask_task_items").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("serialization failure left partial rows: %d", count)
+	}
+}
+
+func TestUpdateTaskItemDoesNotWriteWhenJSONSerializationFails(t *testing.T) {
+	db, err := sql.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	createAskSchema(t, db)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := TaskItem{TaskItemID: "task-1", RunID: "run-1", OriginTurnID: "turn-1", Goal: "原目标", SourceTurnIDs: []string{"turn-1"}, Subjects: []AnswerSubject{}, MissingFields: []MissingField{}, ResultRef: &TaskResultRef{}}
+	if err := repository.CreateTaskItems(context.Background(), []TaskItem{item}); err != nil {
+		t.Fatal(err)
+	}
+	original := taskItemJSONMarshal
+	taskItemJSONMarshal = func(any) ([]byte, error) { return nil, errors.New("serialize failed") }
+	t.Cleanup(func() { taskItemJSONMarshal = original })
+	item.Goal = "新目标"
+	if err := repository.UpdateTaskItem(context.Background(), item); err == nil {
+		t.Fatal("UpdateTaskItem should return serialization error")
+	}
+	items, err := repository.ListTaskItems(context.Background(), item.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Goal != "原目标" {
+		t.Fatalf("serialization failure wrote update: %+v", items)
 	}
 }
 

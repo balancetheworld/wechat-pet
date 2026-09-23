@@ -139,12 +139,13 @@ type CallRecord struct {
 	ToolName       string          `json:"tool_name"`
 	CatalogVersion string          `json:"catalog_version"`
 	Arguments      json.RawMessage `json:"arguments"`
+	DependsOn      []string        `json:"depends_on,omitempty"`
 }
 
 // CoverageRecord：coverage 记录，模型提出的覆盖关系（文档 8.4）。
 type CoverageRecord struct {
-	Type  RecordType      `json:"type"`
-	Tasks []TaskCoverage  `json:"tasks"`
+	Type  RecordType     `json:"type"`
+	Tasks []TaskCoverage `json:"tasks"`
 }
 
 // TaskCoverage：单个有效任务项的覆盖关系（文档 8.4、2.3.2）。
@@ -233,6 +234,24 @@ func (p *RecordArrayParser) Feed(chunk string) ([]ProtocolRecord, error) {
 // Closed 报告数组是否已闭合（收到 ']'）。
 func (p *RecordArrayParser) Closed() bool { return p.closed }
 
+// normalizeCallArguments 归一化 call 记录的 arguments。
+// 协议正文（strict 结构化输出）使用 JSON 字符串承载工具参数，需转义内部引号；
+// 非 strict 回退时模型可能直接给出对象，两种形式都接受并统一为 JSON 对象字节。
+func normalizeCallArguments(raw json.RawMessage) (json.RawMessage, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return nil, nil
+	}
+	if trimmed[0] != '"' {
+		return json.RawMessage(trimmed), nil
+	}
+	var value string
+	if err := json.Unmarshal(trimmed, &value); err != nil {
+		return nil, fmt.Errorf("arguments string is invalid: %w", err)
+	}
+	return json.RawMessage(bytes.TrimSpace([]byte(value))), nil
+}
+
 // ValidateResponse 校验一次完整响应：先冻结 header 动作，再按动作校验记录集合
 // （文档 8.4）。返回冻结的动作与首个结构化错误。
 func ValidateResponse(records []ProtocolRecord) (ResponseAction, error) {
@@ -248,6 +267,9 @@ func ValidateResponse(records []ProtocolRecord) (ResponseAction, error) {
 	}
 	if !header.Action.Valid() {
 		return "", fmt.Errorf("record_array: invalid action %q", header.Action)
+	}
+	if err := validateTaskUpdates(header.TaskUpdates); err != nil {
+		return header.Action, err
 	}
 
 	seenHeader := 0
@@ -329,7 +351,9 @@ func ValidateResponse(records []ProtocolRecord) (ResponseAction, error) {
 		return header.Action, fmt.Errorf("record_array: missing end")
 	}
 	if seenCoverage == 0 {
-		return header.Action, fmt.Errorf("record_array: missing coverage")
+		// coverage 缺失不是协议错误：模型经常在 call_tools 时漏写，
+		// 由 DecideStep 依据任务项、调用、追问与回答组推导出等价覆盖关系。
+		return header.Action, nil
 	}
 	switch header.Action {
 	case ActionCallTools:
@@ -428,6 +452,9 @@ func validateSegment(s *SegmentRecord, groups map[string]*GroupRecord, keys map[
 	if !s.BasisKind.Valid() {
 		return fmt.Errorf("record_array: segment %q has invalid basis_kind %q", s.SegmentKey, s.BasisKind)
 	}
+	if s.BasisKind == BasisBusinessFact && len(s.EvidenceRefs) == 0 {
+		return fmt.Errorf("record_array: business_fact segment %q requires evidence_refs", s.SegmentKey)
+	}
 	if !allowedFieldForKind(g.AnswerKind, s.Field) {
 		return fmt.Errorf("record_array: segment %q field %q not allowed for answer_kind %q", s.SegmentKey, s.Field, g.AnswerKind)
 	}
@@ -435,6 +462,23 @@ func validateSegment(s *SegmentRecord, groups map[string]*GroupRecord, keys map[
 		if !groupHasSubject(g, sk) {
 			return fmt.Errorf("record_array: segment %q references unknown subject %q", s.SegmentKey, sk)
 		}
+	}
+	return nil
+}
+
+func validateTaskUpdates(updates []TaskUpdate) error {
+	seen := make(map[string]struct{}, len(updates))
+	for _, update := range updates {
+		if update.TaskKey == "" {
+			return fmt.Errorf("record_array: task update has empty task_key")
+		}
+		if update.Goal == "" {
+			return fmt.Errorf("record_array: task update %q has empty goal", update.TaskKey)
+		}
+		if _, ok := seen[update.TaskKey]; ok {
+			return fmt.Errorf("record_array: duplicate task_key %q in task_updates", update.TaskKey)
+		}
+		seen[update.TaskKey] = struct{}{}
 	}
 	return nil
 }
@@ -479,9 +523,7 @@ func validateCall(c *CallRecord) error {
 	if err := json.Unmarshal(c.Arguments, &args); err != nil {
 		return fmt.Errorf("record_array: call %q arguments must be a JSON object", c.CallKey)
 	}
-	if len(args) == 0 {
-		return fmt.Errorf("record_array: call %q has empty arguments", c.CallKey)
-	}
+	// 空对象 {} 是合法参数：无参数工具（例如 list_family_pets）只能给出空集合。
 	return nil
 }
 
@@ -557,6 +599,11 @@ func decodeRecord(raw []byte) (ProtocolRecord, error) {
 		if err := decodeStrict(raw, &c); err != nil {
 			return rec, fmt.Errorf("record_array: invalid call: %w", err)
 		}
+		arguments, err := normalizeCallArguments(c.Arguments)
+		if err != nil {
+			return rec, fmt.Errorf("record_array: invalid call: %w", err)
+		}
+		c.Arguments = arguments
 		rec.Call = &c
 	case RecordCoverage:
 		c := CoverageRecord{}

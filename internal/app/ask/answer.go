@@ -136,13 +136,13 @@ func requiredFieldForKind(kind AnswerKind) (field string, ok bool) {
 // AnswerGroup 是从响应记录组装出的回答组（文档 8.5）。
 // Segments 按 field 组织，Risk 为每组每对象至多一条的模型风险建议。
 type AnswerGroup struct {
-	GroupKey   string
-	TaskKeys   []string
-	AnswerKind AnswerKind
-	Subjects   []AnswerSubject
-	Scope      AnswerScope
-	Segments   []SegmentRecord
-	Risks      []RiskRecord
+	GroupKey   string          `json:"group_key"`
+	TaskKeys   []string        `json:"task_keys"`
+	AnswerKind AnswerKind      `json:"answer_kind"`
+	Subjects   []AnswerSubject `json:"subjects"`
+	Scope      AnswerScope     `json:"scope"`
+	Segments   []SegmentRecord `json:"segments"`
+	Risks      []RiskRecord    `json:"risks"`
 }
 
 // hasField 报告该组是否已有某 field 的非空段。
@@ -171,6 +171,11 @@ func ValidateAnswerGroup(g AnswerGroup) error {
 	}
 	if len(g.Subjects) == 0 {
 		return fmt.Errorf("answer: group %q has empty subjects", g.GroupKey)
+	}
+	for _, segment := range g.Segments {
+		if segment.BasisKind == BasisBusinessFact && len(segment.EvidenceRefs) == 0 {
+			return fmt.Errorf("answer: business_fact segment %q requires evidence_refs", segment.SegmentKey)
+		}
 	}
 	if req, ok := requiredFieldForKind(g.AnswerKind); ok && !g.hasField(req) {
 		return fmt.Errorf("answer: group %q of kind %q requires field %q", g.GroupKey, g.AnswerKind, req)

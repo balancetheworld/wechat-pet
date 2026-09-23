@@ -1,6 +1,8 @@
-export type AskSessionStatus = 'active' | 'completed' | 'escalated' | 'canceled'
+export type AskSessionStatus = 'active' | 'closed'
 
-export type AskRunStatus = 'queued' | 'running' | 'waiting_input' | 'completed' | 'escalated' | 'failed' | 'canceled' | 'interrupted'
+export type AskTurnStatus = 'received' | 'attached' | 'superseded'
+
+export type AskRunStatus = 'queued' | 'running' | 'waiting_input' | 'canceling' | 'completed' | 'failed' | 'canceled' | 'interrupted'
 
 export type AskRiskLevel = 'unknown' | 'green' | 'yellow' | 'red'
 
@@ -69,8 +71,61 @@ export interface AskQuestionResult {
   question: string
 }
 
+export interface AskAnswerSubject {
+  subject_key: string
+  kind: 'pet' | 'unresolved'
+  pet_id?: string
+  description?: string
+  source_turn_ids?: string[]
+}
+
+export interface AskAnswerGroup {
+  group_key: string
+  task_keys: string[]
+  answer_kind: 'casual' | 'fact' | 'health'
+  subjects: AskAnswerSubject[]
+  scope: 'full' | 'limited' | 'declined' | 'unavailable'
+  segments: AskAnswerSegment[]
+  risks: AskAnswerRisk[] | null
+}
+
+export interface AskEvidenceRef {
+  source_type: string
+  source_id: string
+  version?: string
+  position?: string
+}
+
+export interface AskAnswerSegment {
+  segment_key: string
+  group_key: string
+  subject_keys: string[]
+  field: string
+  text: string
+  basis_kind: 'user_statement' | 'image_observation' | 'business_fact' | 'general_knowledge' | 'speculation'
+  evidence_refs?: AskEvidenceRef[] | null
+}
+
+export interface AskAnswerRisk {
+  group_key: string
+  subject_key: string
+  level: AskRiskLevel
+  evidence?: AskEvidenceRef[] | null
+  uncertainty?: string
+}
+
+export interface AskTaskCoverage {
+  task_key: string
+  answer_group_keys: string[]
+  question_keys: string[]
+  operation_ids: string[]
+  incomplete_reason?: string
+}
+
 export interface AskAssistantResult {
   answer: string
+  groups: AskAnswerGroup[]
+  coverage?: AskTaskCoverage[]
   intent: 'casual_chat' | 'pet_fact' | 'unsupported'
 }
 
@@ -99,6 +154,7 @@ export interface AskProgressResult {
 }
 
 export interface AskDeltaResult {
+  message_id: string
   delta: string
 }
 
@@ -123,7 +179,7 @@ export interface AskSnapshotTurn {
     id: string
     session_id: string
     turn_index: number
-    status: AskRunStatus
+    status: AskTurnStatus
     input: string
     selected_run_id: string
     created_at: string
@@ -160,9 +216,28 @@ export interface AskSnapshot {
 
 export interface CreateAskSessionRequest {
   input: string
+  asset_refs?: string[]
 }
 
 export interface ReplyAskRunRequest {
   input: string
   expected_version: number
+  asset_refs?: string[]
+}
+
+export type AskOperationStatus = 'pending' | 'confirmed' | 'executing' | 'succeeded' | 'failed' | 'unknown' | 'abandoned' | 'withdrawn' | 'expired'
+
+export interface AskOperation {
+  id: string
+  session_id: string
+  run_id: string
+  status: AskOperationStatus
+  preview: string
+  target: string
+  result: string
+  version: number
+  confirmed_at: string | null
+  expires_at: string | null
+  created_at: string
+  updated_at: string
 }

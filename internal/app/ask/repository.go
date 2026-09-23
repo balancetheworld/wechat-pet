@@ -20,6 +20,8 @@ var (
 	ErrIdempotencyNotFound  = errors.New("ask idempotency key not found")
 	ErrIdempotencyConflict  = errors.New("ask idempotency key conflict")
 	ErrRunLeaseLost         = errors.New("ask run lease lost")
+	ErrOperationNotFound    = errors.New("ask operation not found")
+	ErrOperationConflict    = errors.New("ask operation state conflict")
 )
 
 type RunLeaseRepository interface {
@@ -33,6 +35,7 @@ type Repository interface {
 	CreateSessionRun(context.Context, Session, Turn, Run, Event) error
 	CreateSessionRunIdempotent(context.Context, Session, []SessionPet, Turn, Run, Event, Message, IdempotencyRecord) error
 	GetSession(context.Context, string, string) (Session, error)
+	GetSessionForUser(context.Context, string, string, string) (Session, error)
 	GetRun(context.Context, string, string) (Run, error)
 	GetTurn(context.Context, string, string) (Turn, error)
 	GetIdempotency(context.Context, string, string, string) (IdempotencyRecord, error)
@@ -45,7 +48,7 @@ type Repository interface {
 	CreateFollowUpTurnRunWithMessageIdempotent(context.Context, Session, Turn, Run, Event, Message, IdempotencyRecord) error
 	TransitionRun(context.Context, string, int, RunStatus, RunStatus, RiskLevel, string, time.Time, Event, Message) error
 	AppendRunEvent(context.Context, Event) (Event, error)
-	ResumeRun(context.Context, Run, time.Time, Event, Message, IdempotencyRecord) error
+	ResumeRun(context.Context, Session, Turn, Run, time.Time, Event, Message, IdempotencyRecord) error
 	ListEvents(context.Context, string, string, int) ([]Event, error)
 	CreateTaskItems(context.Context, []TaskItem) error
 	ListTaskItems(context.Context, string) ([]TaskItem, error)
@@ -70,7 +73,10 @@ func (r *SQLRepository) CreateSessionRun(ctx context.Context, session Session, t
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_sessions (id, family_id, pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), session.ID, session.FamilyID, session.PetID, session.CreatedBy, session.Status, session.RiskLevel, session.TurnCount, session.PromptVersion, session.RuleVersion, session.KnowledgeVersion, session.CreatedAt, session.UpdatedAt, session.CompletedAt); err != nil {
+	if err := r.closeCurrentSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_sessions (id, family_id, pet_id, resolved_pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), session.ID, session.FamilyID, session.PetID, session.PetID, session.CreatedBy, session.Status, session.RiskLevel, session.TurnCount, session.PromptVersion, session.RuleVersion, session.KnowledgeVersion, session.CreatedAt, session.UpdatedAt, session.CompletedAt); err != nil {
 		return err
 	}
 	if err := r.createTurnRun(ctx, tx, turn, run); err != nil {
@@ -88,7 +94,10 @@ func (r *SQLRepository) CreateSessionRunWithPets(ctx context.Context, session Se
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_sessions (id, family_id, pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), session.ID, session.FamilyID, session.PetID, session.CreatedBy, session.Status, session.RiskLevel, session.TurnCount, session.PromptVersion, session.RuleVersion, session.KnowledgeVersion, session.CreatedAt, session.UpdatedAt, session.CompletedAt); err != nil {
+	if err := r.closeCurrentSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_sessions (id, family_id, pet_id, resolved_pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), session.ID, session.FamilyID, legacyPetID(session, pets), nullablePetID(session.PetID), session.CreatedBy, session.Status, session.RiskLevel, session.TurnCount, session.PromptVersion, session.RuleVersion, session.KnowledgeVersion, session.CreatedAt, session.UpdatedAt, session.CompletedAt); err != nil {
 		return err
 	}
 	for _, pet := range pets {
@@ -111,7 +120,10 @@ func (r *SQLRepository) CreateSessionRunIdempotent(ctx context.Context, session 
 		return err
 	}
 	defer tx.Rollback()
-	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_sessions (id, family_id, pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), session.ID, session.FamilyID, session.PetID, session.CreatedBy, session.Status, session.RiskLevel, session.TurnCount, session.PromptVersion, session.RuleVersion, session.KnowledgeVersion, session.CreatedAt, session.UpdatedAt, session.CompletedAt); err != nil {
+	if err := r.closeCurrentSession(ctx, tx, session); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_sessions (id, family_id, pet_id, resolved_pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), session.ID, session.FamilyID, legacyPetID(session, pets), nullablePetID(session.PetID), session.CreatedBy, session.Status, session.RiskLevel, session.TurnCount, session.PromptVersion, session.RuleVersion, session.KnowledgeVersion, session.CreatedAt, session.UpdatedAt, session.CompletedAt); err != nil {
 		return err
 	}
 	for _, pet := range pets {
@@ -134,14 +146,55 @@ func (r *SQLRepository) CreateSessionRunIdempotent(ctx context.Context, session 
 	return tx.Commit()
 }
 
+func (r *SQLRepository) closeCurrentSession(ctx context.Context, tx *sql.Tx, session Session) error {
+	_, err := tx.ExecContext(ctx, r.query("UPDATE ask_sessions SET status = ?, updated_at = ?, completed_at = ? WHERE family_id = ? AND created_by = ? AND status = ? AND deleted_at IS NULL"), SessionClosed, session.CreatedAt, session.CreatedAt, session.FamilyID, session.CreatedBy, SessionActive)
+	return err
+}
+
 func petRecordID(sessionID string, sortOrder int) string {
 	return sessionID + "-pet-" + strconv.Itoa(sortOrder)
+}
+
+func legacyPetID(session Session, pets []SessionPet) string {
+	if session.PetID != "" {
+		return session.PetID
+	}
+	if len(pets) > 0 {
+		return pets[0].PetID
+	}
+	return ""
+}
+
+func nullablePetID(petID string) any {
+	if petID == "" {
+		return nil
+	}
+	return petID
 }
 
 func (r *SQLRepository) GetSession(ctx context.Context, familyID, sessionID string) (Session, error) {
 	var value Session
 	var completedAt sql.NullTime
-	err := r.db.QueryRowContext(ctx, r.query("SELECT id, family_id, pet_id, created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at FROM ask_sessions WHERE id = ? AND family_id = ?"), sessionID, familyID).Scan(&value.ID, &value.FamilyID, &value.PetID, &value.CreatedBy, &value.Status, &value.RiskLevel, &value.TurnCount, &value.PromptVersion, &value.RuleVersion, &value.KnowledgeVersion, &value.CreatedAt, &value.UpdatedAt, &completedAt)
+	err := r.db.QueryRowContext(ctx, r.query("SELECT id, family_id, COALESCE(resolved_pet_id, ''), created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at FROM ask_sessions WHERE id = ? AND family_id = ?"), sessionID, familyID).Scan(&value.ID, &value.FamilyID, &value.PetID, &value.CreatedBy, &value.Status, &value.RiskLevel, &value.TurnCount, &value.PromptVersion, &value.RuleVersion, &value.KnowledgeVersion, &value.CreatedAt, &value.UpdatedAt, &completedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, ErrSessionNotFound
+	}
+	if err != nil {
+		return Session{}, err
+	}
+	if completedAt.Valid {
+		value.CompletedAt = &completedAt.Time
+	}
+	return value, nil
+}
+
+// GetSessionForUser 按 familyID + sessionID + userID 读取会话，并校验 created_by == userID。
+// 越权（created_by 不匹配）与会话不存在统一返回 ErrSessionNotFound，不泄露资源存在性。
+// 仅供用户触发的读写入口使用；后台执行（worker processRun）不传用户身份，走 GetSession。
+func (r *SQLRepository) GetSessionForUser(ctx context.Context, familyID, sessionID, userID string) (Session, error) {
+	var value Session
+	var completedAt sql.NullTime
+	err := r.db.QueryRowContext(ctx, r.query("SELECT id, family_id, COALESCE(resolved_pet_id, ''), created_by, status, risk_level, turn_count, prompt_version, rule_version, knowledge_version, created_at, updated_at, completed_at FROM ask_sessions WHERE id = ? AND family_id = ? AND created_by = ?"), sessionID, familyID, userID).Scan(&value.ID, &value.FamilyID, &value.PetID, &value.CreatedBy, &value.Status, &value.RiskLevel, &value.TurnCount, &value.PromptVersion, &value.RuleVersion, &value.KnowledgeVersion, &value.CreatedAt, &value.UpdatedAt, &completedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrSessionNotFound
 	}
@@ -414,21 +467,23 @@ func (r *SQLRepository) appendRunEventTx(ctx context.Context, tx *sql.Tx, sessio
 }
 
 func (r *SQLRepository) GetSnapshotTurns(ctx context.Context, sessionID string) ([]SnapshotTurn, error) {
-	rows, err := r.db.QueryContext(ctx, r.query("SELECT t.id, t.session_id, t.turn_index, t.status, t.input, t.selected_run_id, t.created_at, r.id, r.session_id, r.turn_id, r.origin_turn_id, r.run_index, r.row_version, r.clarification_count, r.status, r.risk_level, r.input_revision, r.execution_epoch, r.termination_reason, r.checkpoint, r.rule_version, r.prompt_version, r.created_at, r.started_at, r.completed_at, r.error_code, r.lease_owner, r.lease_expires_at, r.attempt_count, r.next_attempt_at FROM ask_turns t INNER JOIN ask_runs r ON r.turn_id = t.id WHERE t.session_id = ? ORDER BY t.turn_index, r.run_index"), sessionID)
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT t.id, t.session_id, t.turn_index, t.status, t.input, t.asset_refs, t.selected_run_id, t.created_at, r.id, r.session_id, r.turn_id, r.origin_turn_id, r.run_index, r.row_version, r.clarification_count, r.status, r.risk_level, r.input_revision, r.execution_epoch, r.termination_reason, r.checkpoint, r.rule_version, r.prompt_version, r.created_at, r.started_at, r.completed_at, r.error_code, r.lease_owner, r.lease_expires_at, r.attempt_count, r.next_attempt_at FROM ask_turns t INNER JOIN ask_runs r ON r.id = t.selected_run_id WHERE t.session_id = ? ORDER BY t.turn_index, r.run_index"), sessionID)
 	if err != nil {
 		return nil, err
 	}
 	result := make([]SnapshotTurn, 0)
-	runIndexes := make(map[string]struct{ turnIndex, runIndex int })
+	runIndexes := make(map[string][]struct{ turnIndex, runIndex int })
 	turnIndexes := make(map[string]int)
 	for rows.Next() {
 		var value SnapshotTurn
 		var run SnapshotRun
+		var assetRefs string
 		var startedAt, completedAt, leaseExpiresAt, nextAttemptAt sql.NullTime
-		if err := rows.Scan(&value.Turn.ID, &value.Turn.SessionID, &value.Turn.TurnIndex, &value.Turn.Status, &value.Turn.Input, &value.Turn.SelectedRunID, &value.Turn.CreatedAt, &run.Run.ID, &run.Run.SessionID, &run.Run.TurnID, &run.Run.OriginTurnID, &run.Run.RunIndex, &run.Run.RowVersion, &run.Run.ClarificationCount, &run.Run.Status, &run.Run.RiskLevel, &run.Run.InputRevision, &run.Run.ExecutionEpoch, &run.Run.TerminationReason, &run.Run.Checkpoint, &run.Run.RuleVersion, &run.Run.PromptVersion, &run.Run.CreatedAt, &startedAt, &completedAt, &run.Run.ErrorCode, &run.Run.LeaseOwner, &leaseExpiresAt, &run.Run.AttemptCount, &nextAttemptAt); err != nil {
+		if err := rows.Scan(&value.Turn.ID, &value.Turn.SessionID, &value.Turn.TurnIndex, &value.Turn.Status, &value.Turn.Input, &assetRefs, &value.Turn.SelectedRunID, &value.Turn.CreatedAt, &run.Run.ID, &run.Run.SessionID, &run.Run.TurnID, &run.Run.OriginTurnID, &run.Run.RunIndex, &run.Run.RowVersion, &run.Run.ClarificationCount, &run.Run.Status, &run.Run.RiskLevel, &run.Run.InputRevision, &run.Run.ExecutionEpoch, &run.Run.TerminationReason, &run.Run.Checkpoint, &run.Run.RuleVersion, &run.Run.PromptVersion, &run.Run.CreatedAt, &startedAt, &completedAt, &run.Run.ErrorCode, &run.Run.LeaseOwner, &leaseExpiresAt, &run.Run.AttemptCount, &nextAttemptAt); err != nil {
 			rows.Close()
 			return nil, err
 		}
+		_ = json.Unmarshal([]byte(assetRefs), &value.Turn.AssetRefs)
 		if startedAt.Valid {
 			run.Run.StartedAt = &startedAt.Time
 		}
@@ -452,7 +507,7 @@ func (r *SQLRepository) GetSnapshotTurns(ctx context.Context, sessionID string) 
 		}
 		runIndex := len(result[turnIndex].Runs)
 		result[turnIndex].Runs = append(result[turnIndex].Runs, run)
-		runIndexes[run.Run.ID] = struct{ turnIndex, runIndex int }{turnIndex: turnIndex, runIndex: runIndex}
+		runIndexes[run.Run.ID] = append(runIndexes[run.Run.ID], struct{ turnIndex, runIndex int }{turnIndex: turnIndex, runIndex: runIndex})
 		if run.Run.ID == value.Turn.SelectedRunID {
 			result[turnIndex].Run = run.Run
 		}
@@ -474,10 +529,15 @@ func (r *SQLRepository) GetSnapshotTurns(ctx context.Context, sessionID string) 
 		if err := eventRows.Scan(&value.ID, &value.SessionID, &value.TurnID, &value.RunID, &value.Sequence, &value.Type, &value.Data, &value.CreatedAt); err != nil {
 			return nil, err
 		}
-		if index, ok := runIndexes[value.RunID]; ok {
-			result[index.turnIndex].Runs[index.runIndex].Events = append(result[index.turnIndex].Runs[index.runIndex].Events, value)
-			if result[index.turnIndex].Runs[index.runIndex].Run.ID == result[index.turnIndex].Turn.SelectedRunID {
-				result[index.turnIndex].Events = append(result[index.turnIndex].Events, value)
+		if indexes, ok := runIndexes[value.RunID]; ok {
+			for _, index := range indexes {
+				if result[index.turnIndex].Turn.ID != value.TurnID {
+					continue
+				}
+				result[index.turnIndex].Runs[index.runIndex].Events = append(result[index.turnIndex].Runs[index.runIndex].Events, value)
+				if result[index.turnIndex].Runs[index.runIndex].Run.ID == result[index.turnIndex].Turn.SelectedRunID {
+					result[index.turnIndex].Events = append(result[index.turnIndex].Events, value)
+				}
 			}
 		}
 	}
@@ -494,10 +554,15 @@ func (r *SQLRepository) GetSnapshotTurns(ctx context.Context, sessionID string) 
 		if err := messageRows.Scan(&value.ID, &value.SessionID, &value.TurnID, &value.RunID, &value.Role, &value.Content, &value.CreatedAt); err != nil {
 			return nil, err
 		}
-		if index, ok := runIndexes[value.RunID]; ok {
-			result[index.turnIndex].Runs[index.runIndex].Messages = append(result[index.turnIndex].Runs[index.runIndex].Messages, value)
-			if result[index.turnIndex].Runs[index.runIndex].Run.ID == result[index.turnIndex].Turn.SelectedRunID {
-				result[index.turnIndex].Messages = append(result[index.turnIndex].Messages, value)
+		if indexes, ok := runIndexes[value.RunID]; ok {
+			for _, index := range indexes {
+				if result[index.turnIndex].Turn.ID != value.TurnID {
+					continue
+				}
+				result[index.turnIndex].Runs[index.runIndex].Messages = append(result[index.turnIndex].Runs[index.runIndex].Messages, value)
+				if result[index.turnIndex].Runs[index.runIndex].Run.ID == result[index.turnIndex].Turn.SelectedRunID {
+					result[index.turnIndex].Messages = append(result[index.turnIndex].Messages, value)
+				}
 			}
 		}
 	}
@@ -509,13 +574,15 @@ func (r *SQLRepository) GetSnapshotTurns(ctx context.Context, sessionID string) 
 
 func (r *SQLRepository) GetTurn(ctx context.Context, sessionID, turnID string) (Turn, error) {
 	var value Turn
-	err := r.db.QueryRowContext(ctx, r.query("SELECT id, session_id, turn_index, status, input, selected_run_id, created_at FROM ask_turns WHERE id = ? AND session_id = ?"), turnID, sessionID).Scan(&value.ID, &value.SessionID, &value.TurnIndex, &value.Status, &value.Input, &value.SelectedRunID, &value.CreatedAt)
+	var assetRefs string
+	err := r.db.QueryRowContext(ctx, r.query("SELECT id, session_id, turn_index, status, input, asset_refs, selected_run_id, created_at FROM ask_turns WHERE id = ? AND session_id = ?"), turnID, sessionID).Scan(&value.ID, &value.SessionID, &value.TurnIndex, &value.Status, &value.Input, &assetRefs, &value.SelectedRunID, &value.CreatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Turn{}, ErrTurnNotFound
 	}
 	if err != nil {
 		return Turn{}, err
 	}
+	_ = json.Unmarshal([]byte(assetRefs), &value.AssetRefs)
 	return value, nil
 }
 
@@ -646,7 +713,11 @@ func (r *SQLRepository) createFollowUpTurnRun(ctx context.Context, session Sessi
 }
 
 func (r *SQLRepository) createTurnRun(ctx context.Context, tx *sql.Tx, turn Turn, run Run) error {
-	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_turns (id, session_id, turn_index, status, input, selected_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)"), turn.ID, turn.SessionID, turn.TurnIndex, turn.Status, turn.Input, turn.SelectedRunID, turn.CreatedAt); err != nil {
+	assetRefs, err := json.Marshal(turn.AssetRefs)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_turns (id, session_id, turn_index, status, input, asset_refs, selected_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"), turn.ID, turn.SessionID, turn.TurnIndex, turn.Status, turn.Input, string(assetRefs), turn.SelectedRunID, turn.CreatedAt); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_runs (id, session_id, turn_id, run_index, status, risk_level, rule_version, prompt_version, created_at, started_at, completed_at, error_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), run.ID, run.SessionID, run.TurnID, run.RunIndex, run.Status, run.RiskLevel, run.RuleVersion, run.PromptVersion, run.CreatedAt, run.StartedAt, run.CompletedAt, run.ErrorCode); err != nil {
@@ -723,13 +794,13 @@ func (r *SQLRepository) AppendRunEvent(ctx context.Context, value Event) (Event,
 	return value, nil
 }
 
-func (r *SQLRepository) ResumeRun(ctx context.Context, run Run, at time.Time, event Event, message Message, idempotency IdempotencyRecord) error {
+func (r *SQLRepository) CreateRetryRun(ctx context.Context, original Run, retry Run, event Event) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer tx.Rollback()
-	result, err := tx.ExecContext(ctx, r.query("UPDATE ask_runs SET status = ?, risk_level = ?, row_version = row_version + 1, clarification_count = clarification_count + 1, completed_at = NULL, error_code = '', lease_owner = '', lease_expires_at = NULL, attempt_count = 0, next_attempt_at = NULL WHERE id = ? AND status = ? AND row_version = ?"), RunQueued, RiskUnknown, run.ID, RunWaitingInput, run.RowVersion)
+	result, err := tx.ExecContext(ctx, r.query("UPDATE ask_turns SET selected_run_id = ? WHERE id = ? AND selected_run_id = ?"), retry.ID, original.TurnID, original.ID)
 	if err != nil {
 		return err
 	}
@@ -740,8 +811,123 @@ func (r *SQLRepository) ResumeRun(ctx context.Context, run Run, at time.Time, ev
 	if affected == 0 {
 		return ErrRunStateConflict
 	}
-	if _, err := tx.ExecContext(ctx, r.query("UPDATE ask_sessions SET status = ?, risk_level = ?, updated_at = ?, completed_at = NULL WHERE id = ?"), SessionActive, RiskUnknown, at, run.SessionID); err != nil {
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_runs (id, session_id, turn_id, origin_turn_id, run_index, status, risk_level, rule_version, prompt_version, created_at, error_code) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '')"), retry.ID, retry.SessionID, retry.TurnID, retry.OriginTurnID, retry.RunIndex, retry.Status, retry.RiskLevel, retry.RuleVersion, retry.PromptVersion, retry.CreatedAt); err != nil {
 		return err
+	}
+	if err := r.appendEvent(ctx, tx, event); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *SQLRepository) CreateOperation(ctx context.Context, value Operation) error {
+	_, err := r.db.ExecContext(ctx, r.query("INSERT INTO ask_operations (id, session_id, run_id, created_by, status, preview, target, payload, result, version, expires_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"), value.ID, value.SessionID, value.RunID, value.CreatedBy, value.Status, value.Preview, value.Target, value.Payload, value.Result, value.Version, value.ExpiresAt, value.CreatedAt, value.UpdatedAt)
+	return err
+}
+
+func (r *SQLRepository) GetOperation(ctx context.Context, sessionID, operationID string) (Operation, error) {
+	var value Operation
+	var confirmedAt, expiresAt, verifyUntil sql.NullTime
+	err := r.db.QueryRowContext(ctx, r.query("SELECT id, session_id, run_id, created_by, status, preview, target, payload, result, version, confirmed_at, expires_at, verify_until, verify_count, created_at, updated_at FROM ask_operations WHERE id = ? AND session_id = ? AND deleted_at IS NULL"), operationID, sessionID).Scan(&value.ID, &value.SessionID, &value.RunID, &value.CreatedBy, &value.Status, &value.Preview, &value.Target, &value.Payload, &value.Result, &value.Version, &confirmedAt, &expiresAt, &verifyUntil, &value.VerifyCount, &value.CreatedAt, &value.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Operation{}, ErrOperationNotFound
+	}
+	if err != nil {
+		return Operation{}, err
+	}
+	if confirmedAt.Valid {
+		value.ConfirmedAt = &confirmedAt.Time
+	}
+	if expiresAt.Valid {
+		value.ExpiresAt = &expiresAt.Time
+	}
+	if verifyUntil.Valid {
+		value.VerifyUntil = &verifyUntil.Time
+	}
+	return value, nil
+}
+
+func (r *SQLRepository) ListOperations(ctx context.Context, sessionID string) ([]Operation, error) {
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT id FROM ask_operations WHERE session_id = ? AND deleted_at IS NULL ORDER BY created_at DESC"), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	result := make([]Operation, 0, len(ids))
+	for _, id := range ids {
+		value, err := r.GetOperation(ctx, sessionID, id)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, nil
+}
+
+func (r *SQLRepository) TransitionOperation(ctx context.Context, operationID string, expectedVersion int, from, to OperationStatus, at time.Time, expiresAt *time.Time, resultValue string) error {
+	confirmedAt := any(nil)
+	if to == OperationConfirmed {
+		confirmedAt = at
+	}
+	result, err := r.db.ExecContext(ctx, r.query("UPDATE ask_operations SET status = ?, version = version + 1, confirmed_at = COALESCE(confirmed_at, ?), expires_at = ?, result = ?, updated_at = ? WHERE id = ? AND status = ? AND version = ?"), to, confirmedAt, expiresAt, resultValue, at, operationID, from, expectedVersion)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrOperationConflict
+	}
+	return nil
+}
+
+func (r *SQLRepository) ResumeRun(ctx context.Context, session Session, turn Turn, run Run, at time.Time, event Event, message Message, idempotency IdempotencyRecord) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	assetRefs, err := json.Marshal(turn.AssetRefs)
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.query("INSERT INTO ask_turns (id, session_id, turn_index, status, input, asset_refs, selected_run_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"), turn.ID, turn.SessionID, turn.TurnIndex, turn.Status, turn.Input, string(assetRefs), turn.SelectedRunID, turn.CreatedAt); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.query("UPDATE ask_runs SET turn_id = ?, status = ?, risk_level = ?, row_version = row_version + 1, clarification_count = clarification_count + 1, input_revision = input_revision + 1, completed_at = NULL, error_code = '', lease_owner = '', lease_expires_at = NULL, next_attempt_at = NULL WHERE id = ? AND status = ? AND row_version = ?"), turn.ID, RunQueued, RiskUnknown, run.ID, RunWaitingInput, run.RowVersion)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrRunStateConflict
+	}
+	result, err = tx.ExecContext(ctx, r.query("UPDATE ask_sessions SET status = ?, risk_level = ?, turn_count = turn_count + 1, updated_at = ?, completed_at = NULL WHERE id = ? AND turn_count = ?"), SessionActive, RiskUnknown, at, run.SessionID, session.TurnCount)
+	if err != nil {
+		return err
+	}
+	affected, err = result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrSessionStateConflict
 	}
 	if err := r.appendMessage(ctx, tx, message); err != nil {
 		return err

@@ -31,6 +31,7 @@ func contextAuditData(value ContextSnapshot) string {
 }
 
 func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot {
+	customEvents := len(value.Pets) > 0
 	value.Pet.ID = contextSummary(value.Pet.ID)
 	value.Pet.Name = contextSummary(value.Pet.Name)
 	value.Pet.Breed = contextSummary(value.Pet.Breed)
@@ -39,6 +40,16 @@ func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot
 	value.Pet.HealthStatus = contextSummary(value.Pet.HealthStatus)
 	value.Pet.Allergies = contextSummary(value.Pet.Allergies)
 	value.Pet.LongTermMedication = contextSummary(value.Pet.LongTermMedication)
+	for index := range value.Pets {
+		value.Pets[index].ID = contextSummary(value.Pets[index].ID)
+		value.Pets[index].Name = contextSummary(value.Pets[index].Name)
+		value.Pets[index].Breed = contextSummary(value.Pets[index].Breed)
+		value.Pets[index].Gender = contextSummary(value.Pets[index].Gender)
+		value.Pets[index].Birthday = contextSummary(value.Pets[index].Birthday)
+		value.Pets[index].HealthStatus = contextSummary(value.Pets[index].HealthStatus)
+		value.Pets[index].Allergies = contextSummary(value.Pets[index].Allergies)
+		value.Pets[index].LongTermMedication = contextSummary(value.Pets[index].LongTermMedication)
+	}
 	for index := range value.RecentTurns {
 		value.RecentTurns[index].Input = contextSummary(value.RecentTurns[index].Input)
 	}
@@ -48,18 +59,24 @@ func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot
 	for index := range value.RecentRecords {
 		value.RecentRecords[index].Content = contextSummary(value.RecentRecords[index].Content)
 	}
-	value.Events = normalizeContextEvents(value.RecentTurns, value.RecentRecords)
+	if !customEvents {
+		value.Events = normalizeContextEvents(value.RecentTurns, value.RecentRecords)
+	}
 	value.CharCount = contextSnapshotChars(value)
 	for value.CharCount > maxChars && len(value.RecentTurns) > 0 {
 		value.RecentTurns = value.RecentTurns[1:]
 		markContextSourceTruncated(&value, "ask_turns")
-		value.Events = normalizeContextEvents(value.RecentTurns, value.RecentRecords)
+		if !customEvents {
+			value.Events = normalizeContextEvents(value.RecentTurns, value.RecentRecords)
+		}
 		value.CharCount = contextSnapshotChars(value)
 	}
 	for value.CharCount > maxChars && len(value.RecentRecords) > 0 {
 		value.RecentRecords = value.RecentRecords[:len(value.RecentRecords)-1]
 		markContextSourceTruncated(&value, "calendar_records")
-		value.Events = normalizeContextEvents(value.RecentTurns, value.RecentRecords)
+		if !customEvents {
+			value.Events = normalizeContextEvents(value.RecentTurns, value.RecentRecords)
+		}
 		value.CharCount = contextSnapshotChars(value)
 	}
 	for value.CharCount > maxChars && len(value.Messages) > 1 {
@@ -72,6 +89,9 @@ func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot
 
 func contextSnapshotChars(value ContextSnapshot) int {
 	result := utf8.RuneCountInString(value.Pet.ID) + utf8.RuneCountInString(value.Pet.Name) + utf8.RuneCountInString(value.Pet.Breed) + utf8.RuneCountInString(value.Pet.Gender) + utf8.RuneCountInString(value.Pet.Birthday) + utf8.RuneCountInString(value.Pet.HealthStatus) + utf8.RuneCountInString(value.Pet.Allergies) + utf8.RuneCountInString(value.Pet.LongTermMedication)
+	for _, pet := range value.Pets {
+		result += utf8.RuneCountInString(pet.ID) + utf8.RuneCountInString(pet.Name) + utf8.RuneCountInString(pet.Breed) + utf8.RuneCountInString(pet.Gender) + utf8.RuneCountInString(pet.Birthday) + utf8.RuneCountInString(pet.HealthStatus) + utf8.RuneCountInString(pet.Allergies) + utf8.RuneCountInString(pet.LongTermMedication)
+	}
 	for _, turn := range value.RecentTurns {
 		result += utf8.RuneCountInString(turn.Input)
 	}
@@ -89,8 +109,9 @@ func contextSnapshotChars(value ContextSnapshot) int {
 
 func markContextSourceTruncated(value *ContextSnapshot, name string) {
 	for index := range value.Sources {
-		if value.Sources[index].Name == name {
+		if value.Sources[index].Name == name || strings.HasPrefix(value.Sources[index].Name, name+":") {
 			value.Sources[index].Truncated = true
+			value.Sources[index].Status = "partial"
 		}
 	}
 }
@@ -107,7 +128,7 @@ func normalizeContextEvents(turns []ContextTurn, records []calendarapp.ContextRe
 		if record.Category == "medical" {
 			tag = "medical_record"
 		}
-		result = append(result, ContextEvent{Tag: tag, Source: "calendar_record", Summary: contextSummary(record.Content), OccurredAt: record.OccurredAt})
+		result = append(result, ContextEvent{Tag: tag, Source: "calendar_record", SourceID: record.ID, Version: "calendar-records-v1", Summary: contextSummary(record.Content), OccurredAt: record.OccurredAt})
 	}
 	return result
 }

@@ -3,6 +3,7 @@ package ask
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -78,13 +79,198 @@ func ValidateBatch(batch ToolBatch, catalog *Catalog, filter Filter) error {
 		}
 		if len(call.Arguments) == 0 || !json.Valid(call.Arguments) {
 			callErrors = append(callErrors, CallValidationError{CallIndex: call.CallIndex, ToolCallID: call.ToolCallID, Reason: "invalid arguments"})
+			continue
 		}
+		if len(tool.Parameters) > 0 {
+			if err := validateToolArguments(call.Arguments, tool.Parameters); err != nil {
+				callErrors = append(callErrors, CallValidationError{CallIndex: call.CallIndex, ToolCallID: call.ToolCallID, Reason: err.Error()})
+			}
+		}
+	}
+	for _, call := range batch.Calls {
+		seenDependencies := make(map[string]struct{}, len(call.DependsOn))
+		for _, dependencyID := range call.DependsOn {
+			switch {
+			case dependencyID == call.ToolCallID:
+				callErrors = append(callErrors, CallValidationError{CallIndex: call.CallIndex, ToolCallID: call.ToolCallID, Reason: "call cannot depend on itself"})
+			case dependencyID == "":
+				callErrors = append(callErrors, CallValidationError{CallIndex: call.CallIndex, ToolCallID: call.ToolCallID, Reason: "empty dependency"})
+			case hasCallID(seenDependencies, dependencyID):
+				callErrors = append(callErrors, CallValidationError{CallIndex: call.CallIndex, ToolCallID: call.ToolCallID, Reason: "duplicate dependency " + dependencyID})
+			default:
+				seenDependencies[dependencyID] = struct{}{}
+				if _, ok := seenCallIDs[dependencyID]; !ok {
+					callErrors = append(callErrors, CallValidationError{CallIndex: call.CallIndex, ToolCallID: call.ToolCallID, Reason: "dependency not found: " + dependencyID})
+				}
+			}
+		}
+	}
+	if len(callErrors) == 0 && hasDependencyCycle(batch.Calls) {
+		callErrors = append(callErrors, CallValidationError{Reason: "dependency cycle"})
 	}
 
 	if len(callErrors) > 0 {
 		return &BatchValidationError{CallErrors: callErrors}
 	}
 	return nil
+}
+
+func hasCallID(values map[string]struct{}, id string) bool {
+	_, ok := values[id]
+	return ok
+}
+
+func hasDependencyCycle(calls []ToolCall) bool {
+	dependencies := make(map[string][]string, len(calls))
+	for _, call := range calls {
+		dependencies[call.ToolCallID] = call.DependsOn
+	}
+	visiting := make(map[string]bool, len(calls))
+	visited := make(map[string]bool, len(calls))
+	var visit func(string) bool
+	visit = func(id string) bool {
+		if visiting[id] {
+			return true
+		}
+		if visited[id] {
+			return false
+		}
+		visiting[id] = true
+		for _, dependencyID := range dependencies[id] {
+			if visit(dependencyID) {
+				return true
+			}
+		}
+		visiting[id] = false
+		visited[id] = true
+		return false
+	}
+	for id := range dependencies {
+		if visit(id) {
+			return true
+		}
+	}
+	return false
+}
+
+type parameterSchema struct {
+	Type                 string                     `json:"type"`
+	Properties           map[string]json.RawMessage `json:"properties"`
+	Required             []string                   `json:"required"`
+	AdditionalProperties *bool                      `json:"additionalProperties"`
+	Items                json.RawMessage            `json:"items"`
+	Enum                 []json.RawMessage          `json:"enum"`
+	Minimum              *float64                   `json:"minimum"`
+	Maximum              *float64                   `json:"maximum"`
+}
+
+func validateToolArguments(arguments, schemaJSON json.RawMessage) error {
+	if len(schemaJSON) == 0 {
+		return fmt.Errorf("tool parameters schema is missing")
+	}
+	if err := validateSchemaValue(arguments, schemaJSON, "arguments"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSchemaValue(valueJSON, schemaJSON json.RawMessage, path string) error {
+	var schema parameterSchema
+	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
+		return fmt.Errorf("%s has invalid schema", path)
+	}
+	var value any
+	if err := json.Unmarshal(valueJSON, &value); err != nil {
+		return fmt.Errorf("%s is invalid JSON", path)
+	}
+	if len(schema.Enum) > 0 && !matchesEnum(value, schema.Enum) {
+		return fmt.Errorf("%s has a value outside enum", path)
+	}
+	switch schema.Type {
+	case "object":
+		object, ok := value.(map[string]any)
+		if !ok {
+			return fmt.Errorf("%s must be an object", path)
+		}
+		for _, name := range schema.Required {
+			if _, exists := object[name]; !exists {
+				return fmt.Errorf("%s.%s is required", path, name)
+			}
+		}
+		for name, raw := range object {
+			property, exists := schema.Properties[name]
+			if !exists {
+				if schema.AdditionalProperties != nil && !*schema.AdditionalProperties {
+					return fmt.Errorf("%s.%s is not allowed", path, name)
+				}
+				continue
+			}
+			value, err := json.Marshal(raw)
+			if err != nil {
+				return fmt.Errorf("%s.%s is invalid", path, name)
+			}
+			if err := validateSchemaValue(value, property, path+"."+name); err != nil {
+				return err
+			}
+		}
+	case "array":
+		values, ok := value.([]any)
+		if !ok {
+			return fmt.Errorf("%s must be an array", path)
+		}
+		for index, item := range values {
+			raw, err := json.Marshal(item)
+			if err != nil {
+				return fmt.Errorf("%s[%d] is invalid", path, index)
+			}
+			if err := validateSchemaValue(raw, schema.Items, fmt.Sprintf("%s[%d]", path, index)); err != nil {
+				return err
+			}
+		}
+	case "string":
+		if _, ok := value.(string); !ok {
+			return fmt.Errorf("%s must be a string", path)
+		}
+	case "integer":
+		number, ok := value.(float64)
+		if !ok || math.Trunc(number) != number {
+			return fmt.Errorf("%s must be an integer", path)
+		}
+		if schema.Minimum != nil && number < *schema.Minimum {
+			return fmt.Errorf("%s is below minimum", path)
+		}
+		if schema.Maximum != nil && number > *schema.Maximum {
+			return fmt.Errorf("%s is above maximum", path)
+		}
+	case "number":
+		number, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("%s must be a number", path)
+		}
+		if schema.Minimum != nil && number < *schema.Minimum {
+			return fmt.Errorf("%s is below minimum", path)
+		}
+		if schema.Maximum != nil && number > *schema.Maximum {
+			return fmt.Errorf("%s is above maximum", path)
+		}
+	case "boolean":
+		if _, ok := value.(bool); !ok {
+			return fmt.Errorf("%s must be a boolean", path)
+		}
+	default:
+		return fmt.Errorf("%s has unsupported schema type %q", path, schema.Type)
+	}
+	return nil
+}
+
+func matchesEnum(value any, values []json.RawMessage) bool {
+	for _, raw := range values {
+		var candidate any
+		if json.Unmarshal(raw, &candidate) == nil && fmt.Sprint(candidate) == fmt.Sprint(value) {
+			return true
+		}
+	}
+	return false
 }
 
 // referencesCall 判断调用是否依赖目标调用（以真实数据表达依赖）。

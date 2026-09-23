@@ -17,64 +17,111 @@ var ErrHealthRecordNotFound = errors.New("ask health record not found")
 // ReadSource：业务读取结果的来源与时效（对应 7.3「来源与时效」）。
 // 读取时间不等于事实发生时间；Version 用于跨 Run 复用前的失效核验。
 type ReadSource struct {
-	SourceType string    // pet / health_record / record
-	SourceID   string    // family_id / pet_id / record_id
-	Version    string    // 集合版本
-	ReadAt     time.Time // 实际读取时间
+	SourceType string    `json:"source_type"` // pet / health_record / record
+	SourceID   string    `json:"source_id"`   // family_id / pet_id / record_id
+	Version    string    `json:"version"`     // 集合版本
+	ReadAt     time.Time `json:"read_at"`     // 实际读取时间
 }
 
 // HealthRecordItem：单条健康记录（业务读取视角）。MediaAssetIDs 只保留资产
 // 身份，不携带临时访问链接。
 type HealthRecordItem struct {
-	ID                string
-	Category          string
-	MedicalType       string
-	CustomMedicalType string
-	Content           string
-	OccurredAt        time.Time
-	MediaAssetIDs     []string
+	ID                string    `json:"id"`
+	Category          string    `json:"category"`
+	MedicalType       string    `json:"medical_type"`
+	CustomMedicalType string    `json:"custom_medical_type"`
+	Content           string    `json:"content"`
+	OccurredAt        time.Time `json:"occurred_at"`
+	MediaAssetIDs     []string  `json:"media_asset_ids"`
 }
 
 // PetResolveOutcome：宠物消歧结果。Status 复用 pet_resolver 的 none/resolved/ambiguous。
 type PetResolveOutcome struct {
-	Status    PetResolveStatus
-	Resolved  []petapp.Pet
-	Ambiguous []PetCandidate
-	Source    ReadSource
+	Status    PetResolveStatus `json:"status"`
+	Resolved  []petapp.Pet     `json:"resolved,omitempty"`
+	Ambiguous []PetCandidate   `json:"ambiguous,omitempty"`
+	Source    ReadSource       `json:"source"`
 }
 
 // PetProfileOutcome：宠物档案读取结果。
 type PetProfileOutcome struct {
-	Profile petapp.PetProfile
-	Health  petapp.PetHealth
-	Source  ReadSource
+	Profile petapp.PetProfile `json:"profile"`
+	Health  petapp.PetHealth  `json:"health"`
+	Source  ReadSource        `json:"source"`
 }
 
 // HealthRecordSearchOutcome：健康记录检索结果。
 type HealthRecordSearchOutcome struct {
-	Records    []HealthRecordItem
-	HasMore    bool
-	NextCursor string
-	Source     ReadSource
+	Records    []HealthRecordItem `json:"records"`
+	HasMore    bool               `json:"has_more"`
+	NextCursor string             `json:"next_cursor,omitempty"`
+	Source     ReadSource         `json:"source"`
 }
 
 // HealthRecordAggregateOutcome：健康记录聚合结果。严格区分记录条数与发生次数，
 // 未知次数保留 UnknownRecords 范围，不冒充精确统计。
 type HealthRecordAggregateOutcome struct {
-	RecordCount     int
-	OccurrenceCount int
-	OccurrenceKnown bool
-	UnknownRecords  int
-	LatestAt        time.Time
-	CoveredStartAt  time.Time
-	CoveredEndAt    time.Time
-	Source          ReadSource
+	RecordCount     int        `json:"record_count"`
+	OccurrenceCount int        `json:"occurrence_count"`
+	OccurrenceKnown bool       `json:"occurrence_known"`
+	UnknownRecords  int        `json:"unknown_records"`
+	LatestAt        *time.Time `json:"latest_at,omitempty"`
+	CoveredStartAt  *time.Time `json:"covered_start_at,omitempty"`
+	CoveredEndAt    *time.Time `json:"covered_end_at,omitempty"`
+	Source          ReadSource `json:"source"`
 }
 
 // HealthRecordOutcome：单条记录读取结果。
 type HealthRecordOutcome struct {
-	Record HealthRecordItem
-	Source ReadSource
+	Record HealthRecordItem `json:"record"`
+	Source ReadSource       `json:"source"`
+}
+
+// PetListItem：家庭宠物列表项（业务读取视角）。
+type PetListItem struct {
+	PetID string `json:"pet_id"`
+	Name  string `json:"name"`
+}
+
+// PetListOutcome：家庭宠物列表。用于「有几只宠物/都有谁」这类问题，
+// 让模型先拿到合法 pet_id，而不是靠猜名字去解析。
+type PetListOutcome struct {
+	Pets   []PetListItem `json:"pets"`
+	Source ReadSource    `json:"source"`
+}
+
+// CalendarRecordListItem：家庭日程条目（业务读取视角）。
+type CalendarRecordListItem struct {
+	RecordID    string    `json:"record_id"`
+	PetID       string    `json:"pet_id"`
+	PetName     string    `json:"pet_name"`
+	Category    string    `json:"category"`
+	MedicalType string    `json:"medical_type,omitempty"`
+	Content     string    `json:"content"`
+	OccurredAt  time.Time `json:"occurred_at"`
+}
+
+// CalendarRecordListOutcome：家庭日程列表（跨宠物、按时间倒序）。
+type CalendarRecordListOutcome struct {
+	Records []CalendarRecordListItem `json:"records"`
+	Source  ReadSource               `json:"source"`
+}
+
+// ReminderListItem：家庭待办提醒条目（业务读取视角）。
+type ReminderListItem struct {
+	ReminderID   string `json:"reminder_id"`
+	PetID        string `json:"pet_id"`
+	PetName      string `json:"pet_name"`
+	ReminderDate string `json:"reminder_date"`
+	Category     string `json:"category"`
+	MedicalType  string `json:"medical_type,omitempty"`
+	Content      string `json:"content"`
+}
+
+// ReminderListOutcome：家庭待办提醒列表（跨宠物、按提醒日期升序）。
+type ReminderListOutcome struct {
+	Reminders []ReminderListItem `json:"reminders"`
+	Source    ReadSource         `json:"source"`
 }
 
 // HealthRecordSearchQuery：健康记录检索条件（ask 层契约，与数据层解耦）。
@@ -100,6 +147,9 @@ type HealthRecordAggregateQuery struct {
 // 不直接触碰 pet / calendar 数据层。候选仅来自授权范围（familyID）。
 type BusinessReadRepository interface {
 	ResolvePet(context.Context, string, string) (PetResolveOutcome, error)
+	ListFamilyPets(context.Context, string) (PetListOutcome, error)
+	ListCalendarRecords(context.Context, string, time.Time, time.Time, int) (CalendarRecordListOutcome, error)
+	ListReminders(context.Context, string, string, int) (ReminderListOutcome, error)
 	ReadPetProfile(context.Context, string, string) (PetProfileOutcome, error)
 	SearchHealthRecords(context.Context, string, string, HealthRecordSearchQuery) (HealthRecordSearchOutcome, error)
 	AggregateHealthRecords(context.Context, string, string, HealthRecordAggregateQuery) (HealthRecordAggregateOutcome, error)
