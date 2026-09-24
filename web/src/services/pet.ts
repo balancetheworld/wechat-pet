@@ -42,6 +42,15 @@ export function getPetProfile(petID: string) {
   })
 }
 
+/* 更新宠物主表字段 (后端允许 name/avatar_asset_id/cover_asset_id/breed/gender/sterilized/birthday/home_date) */
+export function updatePetProfile(petID: string, data: Record<string, unknown>) {
+  return request<PetProfile>({
+    path: `/api/v1/pets/${encodeURIComponent(petID)}/profile`,
+    method: 'PATCH',
+    data,
+  })
+}
+
 export function getPetResource<T>(petID: string, resource: string) {
   return request<T>({
     path: `/api/v1/pets/${encodeURIComponent(petID)}/${resource}`,
@@ -54,6 +63,14 @@ export function updatePetResource(petID: string, resource: string, resourceID: s
     path: `/api/v1/pets/${encodeURIComponent(petID)}/${resource}/${encodeURIComponent(resourceID)}`,
     method: 'PATCH',
     data,
+  })
+}
+
+/* 删除档案资源条目 (如 weights): 后端为通用 DELETE /pets/:id/:resource/:resource_id (硬删除) */
+export function deletePetResource(petID: string, resource: string, resourceID: string) {
+  return request<unknown>({
+    path: `/api/v1/pets/${encodeURIComponent(petID)}/${resource}/${encodeURIComponent(resourceID)}`,
+    method: 'DELETE',
   })
 }
 

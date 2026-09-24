@@ -367,6 +367,14 @@
   border-radius: 16rpx;
   background: linear-gradient(160deg, rgba(127, 165, 214, 0.55), rgba(91, 132, 190, 0.35));
   box-shadow: 0 6rpx 18rpx rgba(74, 100, 137, 0.18);
+  overflow: hidden;
+}
+
+/* 身份信息页照片: 显式尺寸填满方框 (border 内侧 218x298, 同上避免百分比尺寸 bug) */
+.identity-photo-img {
+  display: block;
+  width: 218rpx !important;
+  height: 298rpx !important;
 }
 
 .identity-photo-char {
@@ -1337,9 +1345,33 @@
   background: rgba(255, 255, 255, 0.5);
   text-align: left;
   line-height: 1.2;
+  position: relative !important;
 }
 
 .pet-switcher-item::after { display: none; }
+
+/* 每行右上角删除小叉 (纯叉, 无圆圈底) */
+.pet-switcher-delete {
+  position: absolute !important;
+  top: 4rpx !important;
+  right: 8rpx !important;
+  width: 48rpx !important;
+  height: 48rpx !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.pet-switcher-delete-x {
+  color: #A8A096;
+  font-size: 30rpx;
+  line-height: 1;
+}
 
 .pet-switcher-item-avatar {
   display: flex;
@@ -1378,12 +1410,17 @@
   color: #8A8278;
 }
 
-.pet-switcher-check {
-  flex-shrink: 0;
-  font-style: normal;
-  font-size: 32rpx;
-  color: #5B84BE;
-  font-weight: 700;
+.pet-switcher-check { display: none; }
+
+/* 弹层圆圈头像: 显式尺寸 (weapp webview 对圆角容器内百分比尺寸解析不稳, 参考 09-23 头像溢出修复) */
+.pet-switcher-item-avatar {
+  overflow: hidden;
+}
+
+.pet-switcher-item-avatar-img {
+  display: block;
+  width: 72rpx !important;
+  height: 72rpx !important;
 }
 
 .pet-switcher-item.active {
@@ -1688,3 +1725,232 @@
   color: #FFFEFB;
 }
 
+
+/* ===== 证件收藏页: 每行两张证件卡, 名称紧贴卡片上沿, 卡内左图右时间+说明 ===== */
+.cert-grid {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-top: 8rpx;
+}
+
+.cert-cell {
+  width: 100%;
+  margin-bottom: 20rpx;
+}
+
+/* 名称: 紧贴卡片上沿 */
+.cert-name {
+  display: block;
+  margin: 0 0 6rpx 4rpx;
+  color: #2A2520;
+  font-size: 24rpx;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.cert-card {
+  display: flex;
+  gap: 12rpx;
+  /* 上下加宽: 内容直接铺在书页上, 上下留出呼吸空间 */
+  padding: 44rpx 8rpx !important;
+  border: none !important;
+  border-radius: 14rpx;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* 示例卡: 边框同样透明, 仅保留上下加宽与占位文案 */
+.cert-card--placeholder {
+  padding: 52rpx 8rpx !important;
+  border: none !important;
+  background: transparent !important;
+}
+
+/* 左侧长方形证件图片 (整行卡片: 图片稍大更醒目) */
+.cert-photo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 120rpx;
+  height: 160rpx;
+  flex: 0 0 120rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 10rpx;
+  background: linear-gradient(160deg, rgba(127, 165, 214, 0.5), rgba(91, 132, 190, 0.32));
+  overflow: hidden;
+}
+
+.cert-photo-img {
+  display: block;
+  width: 118rpx !important;
+  height: 158rpx !important;
+}
+
+.cert-photo-char {
+  color: #FFFEFB;
+  font-family: 'Ma Shan Zheng', cursive;
+  font-size: 40rpx;
+  font-weight: 700;
+}
+
+/* 右侧: 时间记录 + 详细说明 */
+.cert-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.cert-time {
+  color: #5B84BE;
+  font-size: 20rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.cert-details {
+  margin-top: 4rpx;
+  color: #6B655C;
+  font-size: 20rpx;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+/* 添加证件入口 */
+.cert-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8rpx;
+  padding: 28rpx 0;
+  border: 2rpx dashed rgba(127, 165, 214, 0.6);
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.cert-add-plus {
+  color: #5B84BE;
+  font-size: 32rpx;
+  font-weight: 700;
+}
+
+.cert-add-text {
+  color: #5B84BE;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+/* ===== 个性说明书: 彩色胶囊标签 (6 色循环, 柔和马卡龙色) ===== */
+.tag-capsule.tag-capsule--c0 {
+  border-color: rgba(127, 165, 214, 0.55) !important;
+  background: rgba(160, 195, 232, 0.28) !important;
+  color: #3D6DA8 !important;
+}
+
+.tag-capsule.tag-capsule--c1 {
+  border-color: rgba(235, 170, 120, 0.55) !important;
+  background: rgba(245, 205, 165, 0.32) !important;
+  color: #B06218 !important;
+}
+
+.tag-capsule.tag-capsule--c2 {
+  border-color: rgba(130, 195, 160, 0.55) !important;
+  background: rgba(165, 220, 190, 0.32) !important;
+  color: #2F7A52 !important;
+}
+
+.tag-capsule.tag-capsule--c3 {
+  border-color: rgba(215, 150, 190, 0.55) !important;
+  background: rgba(235, 190, 220, 0.34) !important;
+  color: #A04585 !important;
+}
+
+.tag-capsule.tag-capsule--c4 {
+  border-color: rgba(230, 190, 110, 0.6) !important;
+  background: rgba(243, 220, 160, 0.4) !important;
+  color: #97700E !important;
+}
+
+.tag-capsule.tag-capsule--c5 {
+  border-color: rgba(150, 170, 230, 0.55) !important;
+  background: rgba(190, 200, 240, 0.32) !important;
+  color: #4D5BB0 !important;
+}
+
+/* ===== 健康资料页: 体重记录 (最近三次) ===== */
+.health-weight {
+  margin-top: 22rpx;
+}
+
+.health-weight .growth-section-title {
+  display: block;
+  margin-bottom: 10rpx;
+}
+
+.weight-card-date {
+  color: #8A8278;
+  font-size: 20rpx;
+}
+
+/* 历史行: 日期 + 最新角标 + 数值 (编辑态可点改, 右侧小叉删除) */
+.weight-row {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  padding: 16rpx 18rpx;
+  margin-bottom: 10rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.66);
+  border-radius: 14rpx;
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.weight-row.editable {
+  border-color: rgba(127, 165, 214, 0.72);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.weight-row-date {
+  color: #2A2520;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.weight-row-badge {
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: rgba(127, 165, 214, 0.28);
+  color: #3D6DA8;
+  font-size: 18rpx;
+  font-weight: 700;
+}
+
+.weight-row-value {
+  margin-left: auto;
+  color: #5B84BE;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+/* 删除小叉: 与宠物切换弹层同款, 纯文字无底色 */
+.weight-row-del {
+  flex: 0 0 auto;
+  width: 44rpx !important;
+  height: 44rpx !important;
+  margin-left: 6rpx;
+  color: #B7AFA3 !important;
+  font-size: 30rpx !important;
+  font-weight: 700 !important;
+  line-height: 44rpx !important;
+  text-align: center;
+}
+
+.weight-empty {
+  display: block;
+  padding: 16rpx 4rpx;
+  color: #8A8278;
+  font-size: 22rpx;
+}

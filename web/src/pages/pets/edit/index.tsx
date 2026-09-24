@@ -2,7 +2,8 @@ import { Button, Image, Input, Picker, Text, View } from '@tarojs/components'
 import Taro, { useRouter } from '@tarojs/taro'
 import { useEffect, useMemo, useState } from 'react'
 import PageBackground from '../../../components/page-background'
-import { createPet, getPet, getPetProfile, updatePet } from '../../../services/pet'
+import { createPet, getPet, getPetProfile, getPets, updatePet, updatePetProfile } from '../../../services/pet'
+import { assetURL, uploadFile } from '../../../services/request'
 import { navigateBack } from '../../../utils/navigation'
 import './index.scss'
 
@@ -72,6 +73,9 @@ export default function PetEdit() {
         setFormName(pet.name)
         if (profile) {
           /* 把后端字段映射到表单字段 (兼容空值, 不强行覆盖默认值) */
+          if (profile.avatar_asset_id) {
+            setFormAvatar(assetURL(profile.avatar_asset_id))
+          }
           if (profile.breed) {
             setFormBreed(profile.breed)
           }
@@ -91,7 +95,8 @@ export default function PetEdit() {
             setFormArrival(profile.home_date)
           }
         }
-        /* 优先用本地缓存的额外数据 (头像/健康状态等) 覆盖, 因为这些字段后端暂未持久化 */
+        /* 优先用本地缓存的额外数据 (头像/健康状态等) 覆盖, 因为这些字段后端暂未持久化
+           头像例外: 后端已有正式资产时不用缓存里的临时路径 (跨会话会失效) */
         try {
           const cache = await Taro.getStorage({ key: `pet-extra-${pet.name}` })
           const data = cache.data as {
@@ -104,7 +109,7 @@ export default function PetEdit() {
             breed?: string
           } | undefined
           if (data) {
-            if (data.avatar) {
+            if (data.avatar && !profile?.avatar_asset_id) {
               setFormAvatar(data.avatar)
             }
             if (data.gender) {
@@ -177,6 +182,32 @@ export default function PetEdit() {
     }
     setSubmitting(true)
     try {
+      /* 重命名检测: 与现有宠物重名(编辑时排除自己)则弹提示终止保存 */
+      const existingPets = await getPets()
+      const duplicated = existingPets.some(pet => pet.name === value && pet.id !== petID)
+      if (duplicated) {
+        setSubmitting(false)
+        await Taro.showModal({ title: '当前名字已使用', content: '这只毛孩子已经有这个名字啦，换一个吧', showCancel: false, confirmText: '好的' })
+        return
+      }
+      /* 头像先上传到资产存储换 asset_id (本地临时路径无法持久化);
+         已是后端资产 URL (编辑模式回填) 则跳过重复上传 */
+      let avatarAssetID = ''
+      if (formAvatar && !formAvatar.includes('/api/v1/uploads/')) {
+        try {
+          const uploaded = await uploadFile<{ asset_id: string }>({
+            path: '/api/v1/assets/upload',
+            filePath: formAvatar,
+            name: 'file',
+            formData: { type: 'pet_avatar' },
+          })
+          avatarAssetID = uploaded.asset_id
+        }
+        catch {
+          await Taro.showToast({ title: '头像上传失败，已保存其他信息', icon: 'none' })
+        }
+      }
+
       // 后端目前只接收 name, 其他字段先本地缓存
       const extraData = {
         avatar: formAvatar,
@@ -205,6 +236,15 @@ export default function PetEdit() {
           birthday: formBirth,
           home_date: formArrival,
         })
+        /* 头像走 profile PATCH 单独保存 (后端 UPDATE 不收 avatar_asset_id) */
+        if (avatarAssetID) {
+          try {
+            await updatePetProfile(petID, { avatar_asset_id: avatarAssetID })
+          }
+          catch {
+            await Taro.showToast({ title: '头像保存失败，已保存其他信息', icon: 'none' })
+          }
+        }
       }
       else {
         await createPet({
@@ -214,6 +254,7 @@ export default function PetEdit() {
           sterilized: formNeutered === 'yes',
           birthday: formBirth,
           home_date: formArrival,
+          ...(avatarAssetID ? { avatar_asset_id: avatarAssetID } : {}),
         })
       }
       await Taro.showToast({ title: isEdit ? '已保存' : '已添加到家庭', icon: 'success' })

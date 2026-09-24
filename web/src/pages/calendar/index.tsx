@@ -2,12 +2,12 @@ import type { CalendarDay, CalendarDayMarker, CalendarMedia, CalendarMonth, Cale
 import type { Pet } from '../../types/pet'
 import { Image, Input, Picker, ScrollView, Text, Textarea, View } from '@tarojs/components'
 import Taro, { useDidShow } from '@tarojs/taro'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { FloatingGuide } from '../../components/floating-guide'
 import PageBackground from '../../components/page-background'
 import { routes } from '../../constants/routes'
-import { completeCalendarReminder, createCalendarRecord, getCalendarDay, getCalendarMonth, uploadCalendarImage } from '../../services/calendar'
-import { getPets } from '../../services/pet'
+import { completeCalendarReminder, createCalendarRecord, deleteCalendarRecord, getCalendarDay, getCalendarMonth, updateCalendarRecord, uploadCalendarImage } from '../../services/calendar'
+import { createPetResource, getPetProfile, getPets } from '../../services/pet'
 import { assetURL, authorizedAssetURL } from '../../services/request'
 import { useAppStore } from '../../stores/app-store'
 import { navigateTo } from '../../utils/navigation'
@@ -66,11 +66,6 @@ function monthDays(month: string) {
 
 function markerFor(markers: CalendarDayMarker[], date: string) {
   return markers.find(marker => marker.date === date)
-}
-
-function timeOf(value: string) {
-  const date = new Date(value)
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function medicalTypeLabel(type: MedicalType | '', customType = '') {
@@ -135,6 +130,18 @@ export default function Calendar() {
   const [uploading, setUploading] = useState(false)
   const [reminderEnabled, setReminderEnabled] = useState(false)
   const [reminders, setReminders] = useState<Array<{ reminderDate: string, repeatType: ReminderRepeatType, repeatIntervalDays: string }>>([])
+  /* 同步到档案(可选): 'birthday' => 生日纪念页, 'growth' => 成长足迹页, 可多选 */
+  const [syncTargets, setSyncTargets] = useState<string[]>([])
+  /* 手动选中的日期要"粘住": 选图等系统界面返回会触发页面 onShow, 不能被 useDidShow 重置回今天 */
+  const datePickedRef = useRef(false)
+  const selectedDateRef = useRef(today)
+  selectedDateRef.current = selectedDate
+  /* 表单打开那一刻锁定的日期: 保存一律落到这个天, 中途页面 onShow 也不会漂移 */
+  const formDateRef = useRef(today)
+  /* "更多"菜单当前展开的记录 ID ('' = 全部收起) */
+  const [moreOpenID, setMoreOpenID] = useState('')
+  /* 编辑模式: 非空时表单为"修改"该条记录 (仅内容可改) */
+  const [editingRecordID, setEditingRecordID] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [completingReminderID, setCompletingReminderID] = useState('')
   const setCalendarFormVisible = useAppStore(state => state.setCalendarFormVisible)
@@ -149,15 +156,15 @@ export default function Calendar() {
     setCalendarDay(data)
   }, [])
 
-  const loadInitialData = useCallback(async () => {
+  const loadInitialData = useCallback(async (targetDate: string) => {
     setLoading(true)
     try {
       const petList = await getPets()
       setPets(petList)
       setSelectedPetID('')
       await Promise.all([
-        getCalendarMonth(monthOf(today)),
-        getCalendarDay(today),
+        getCalendarMonth(monthOf(targetDate)),
+        getCalendarDay(targetDate),
       ]).then(([monthData, dayData]) => {
         setCalendarMonth(monthData)
         setCalendarDay(dayData)
@@ -170,13 +177,15 @@ export default function Calendar() {
     finally {
       setLoading(false)
     }
-  }, [today])
+  }, [])
 
   useDidShow(() => {
-    setSelectedDate(today)
-    setMonth(monthOf(today))
+    /* 手动选过日期则保持, 否则回落到今天 (避免从系统相册等界面返回时把选中天重置) */
+    const target = datePickedRef.current ? selectedDateRef.current : today
+    setSelectedDate(target)
+    setMonth(monthOf(target))
     setCalendarExpanded(false)
-    void loadInitialData()
+    void loadInitialData(target)
     /* 首次登录悬浮猫指引: 引导页建完家庭后带着标记来到日历页, 在此消费并启动第 7 轮 */
     if (Taro.getStorageSync('pet-first-guide') === 'calendar') {
       Taro.removeStorageSync('pet-first-guide')
@@ -194,8 +203,8 @@ export default function Calendar() {
     }
   }, [formVisible, setCalendarFormVisible])
 
-  async function refreshCurrentData() {
-    await Promise.all([loadDay(selectedDate), loadMonth(month)])
+  async function refreshCurrentData(date = selectedDate, targetMonth = month) {
+    await Promise.all([loadDay(date), loadMonth(targetMonth)])
   }
 
   async function handleToggleCalendar() {
@@ -221,6 +230,7 @@ export default function Calendar() {
     setLoading(true)
     try {
       await loadDay(date)
+      datePickedRef.current = true
       setSelectedDate(date)
     }
     catch (error) {
@@ -260,6 +270,7 @@ export default function Calendar() {
       setCalendarMonth(monthData)
       setCalendarDay(dayData)
       setSelectedDate(today)
+      datePickedRef.current = false
       setCalendarExpanded(false)
     }
     catch (error) {
@@ -308,7 +319,49 @@ export default function Calendar() {
     setLocalImagePaths([])
     setReminderEnabled(false)
     setReminders([])
+    /* 同步到档案: 每次打开表单重新勾选 */
+    setSyncTargets([])
+    setEditingRecordID('')
+    /* 锁定表单所属日期: 保存落到打开表单时选中的那天 */
+    formDateRef.current = selectedDate
     setFormVisible(true)
+  }
+
+  /* 修改模式打开表单: 预填当前记录; 分类/宠物锁定, 内容与图片可改 (图片整体替换) */
+  function openEditRecord(record: CalendarDay['records'][number]) {
+    setCategory(record.category)
+    setMedicalType(record.medical_type || 'vaccine')
+    setCustomMedicalType(record.custom_medical_type || '')
+    setRecordPetIDs([record.pet.id])
+    setContent(record.content || '')
+    setMediaAssetIDs(record.media.map(item => item.asset_id))
+    setLocalImagePaths(record.media.map(item => mediaURL(item)))
+    setReminderEnabled(false)
+    setReminders([])
+    setSyncTargets([])
+    setEditingRecordID(record.id)
+    setFormVisible(true)
+  }
+
+  async function handleDeleteRecord(recordID: string) {
+    const result = await Taro.showModal({
+      title: '删除这条记录',
+      content: '删除后这条记录将无法找回哦',
+      confirmText: '确认',
+      cancelText: '取消',
+    })
+    if (!result.confirm) {
+      return
+    }
+    try {
+      await deleteCalendarRecord(recordID)
+      await refreshCurrentData()
+      await Taro.showToast({ title: '已删除', icon: 'success' })
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '删除记录失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
   }
 
   async function handleChooseImage() {
@@ -335,12 +388,48 @@ export default function Calendar() {
     }
   }
 
+  function handleRemoveImage(index: number) {
+    setLocalImagePaths(previous => previous.filter((_, pathIndex) => pathIndex !== index))
+    setMediaAssetIDs(previous => previous.filter((_, assetIndex) => assetIndex !== index))
+  }
+
+  /* 修改模式保存: 后端 PATCH 仅支持内容(与日期), 分类/图片等保持原样 */
+  async function handleUpdateRecord() {
+    if (submitting) {
+      return
+    }
+    setSubmitting(true)
+    try {
+      const formDate = formDateRef.current
+      await updateCalendarRecord(editingRecordID, { content: content.trim() || undefined })
+      setFormVisible(false)
+      setEditingRecordID('')
+      await refreshCurrentData(formDate, monthOf(formDate))
+      await Taro.showToast({ title: '记录已更新', icon: 'success' })
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '更新记录失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setSubmitting(false)
+    }
+  }
+
   async function handleCreateRecord() {
+    if (editingRecordID) {
+      await handleUpdateRecord()
+      return
+    }
     if (!recordPetIDs.length || (category === 'daily' && !content.trim() && mediaAssetIDs.length === 0) || uploading || submitting || (category === 'medical' && medicalType === 'other' && !customMedicalType.trim()) || reminders.some(reminder => reminder.repeatType === 'custom_days' && Number(reminder.repeatIntervalDays) <= 0)) {
       return
     }
     setSubmitting(true)
     try {
+      /* 保存目标日 = 打开表单时选中的那天 (表单打开瞬间锁定, 不受中途页面 onShow 影响) */
+      const formDate = formDateRef.current
+      const occurredAt = dateForRecord(formDate)
+      let syncFailed = false
       for (const petID of recordPetIDs) {
         await createCalendarRecord({
           category,
@@ -349,7 +438,7 @@ export default function Calendar() {
           pet_id: petID,
           content: content.trim() || undefined,
           media_asset_ids: mediaAssetIDs.length ? mediaAssetIDs : undefined,
-          occurred_at: dateForRecord(selectedDate),
+          occurred_at: occurredAt,
           reminders: category === 'medical' && reminderEnabled
             ? reminders.map(reminder => ({
                 reminder_date: reminder.reminderDate,
@@ -360,10 +449,60 @@ export default function Calendar() {
               }))
             : undefined,
         })
+        /* 同步到档案(可选): 勾选后把这条记录同时写进对应章节; 同步失败不影响日历记录本身 */
+        if (syncTargets.length) {
+          try {
+            if (syncTargets.includes('growth')) {
+              await createPetResource(petID, 'growth-events', {
+                type: category === 'medical' ? (medicalTypeLabel(medicalType, customMedicalType.trim()) || '医疗') : '日常',
+                occurred_at: occurredAt,
+                content: content.trim() || '这一天发生了一件值得记录的事',
+              })
+            }
+            if (syncTargets.includes('birthday')) {
+              const year = Number.parseInt(formDate.slice(0, 4), 10)
+              /* 年龄 = 记录日期时的实岁 (按宠物出生日期推算, 无生日则记 0) */
+              let age = 0
+              try {
+                const profile = await getPetProfile(petID)
+                if (profile?.birthday) {
+                  const birthYear = Number.parseInt(profile.birthday.slice(0, 4), 10)
+                  const birthMonth = Number.parseInt(profile.birthday.slice(5, 7), 10)
+                  const birthDay = Number.parseInt(profile.birthday.slice(8, 10), 10)
+                  const recordMonth = Number.parseInt(formDate.slice(5, 7), 10)
+                  const recordDay = Number.parseInt(formDate.slice(8, 10), 10)
+                  const computed = year - birthYear - ((recordMonth < birthMonth) || (recordMonth === birthMonth && recordDay < birthDay) ? 1 : 0)
+                  if (Number.isFinite(computed) && computed >= 0) {
+                    age = computed
+                  }
+                }
+              }
+              catch {}
+              const createdBirthday = await createPetResource(petID, 'birthday-records', {
+                year,
+                age,
+                summary: content.trim() || '这一天是值得纪念的日子',
+              })
+              /* 关联照片: 把日历记录选的图片同步写入 birthday-media, 生日纪念册大图卡才会显示对应照片 */
+              const birthdayRecordID = typeof createdBirthday?.id === 'string' ? createdBirthday.id : ''
+              if (birthdayRecordID && mediaAssetIDs.length) {
+                await Promise.all(mediaAssetIDs.map(assetID => createPetResource(petID, 'birthday-media', {
+                  record_id: birthdayRecordID,
+                  type: 'photo',
+                  asset_id: assetID,
+                })))
+              }
+            }
+          }
+          catch {
+            syncFailed = true
+          }
+        }
       }
       setFormVisible(false)
-      await refreshCurrentData()
-      await Taro.showToast({ title: '记录已保存', icon: 'success' })
+      /* 刷新回表单所属的那一天, 保证保存后视图仍停留在用户选中的天 */
+      await refreshCurrentData(formDate, monthOf(formDate))
+      await Taro.showToast({ title: syncFailed ? '日历已保存，档案同步失败' : '记录已保存', icon: syncFailed ? 'none' : 'success' })
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '保存记录失败'
@@ -499,7 +638,7 @@ export default function Calendar() {
                       <Text className={`cal-record-category ${record.category}`}>{record.category === 'medical' ? '医疗' : '日常'}</Text>
                       {record.medical_type && <Text className="cal-medical-type">{medicalTypeLabel(record.medical_type, record.custom_medical_type)}</Text>}
                       <Text className="cal-record-pet">{record.pet.name}</Text>
-                      {selectedDate === today && <Text className="cal-record-time">{timeOf(record.occurred_at)}</Text>}
+                      <View className="cal-record-more" onClick={() => setMoreOpenID(moreOpenID === record.id ? '' : record.id)}>⋯</View>
                     </View>
                     {record.content && <Text className="cal-record-content">{record.content}</Text>}
                     {media.length > 0 && (
@@ -528,6 +667,32 @@ export default function Calendar() {
                       {record.created_by.nickname}
                     </Text>
                   </View>
+                  {/* 从右上角 ⋯ 延伸出的小列表 */}
+                  {moreOpenID === record.id && (
+                    <>
+                      <View className="cal-more-mask" onClick={() => setMoreOpenID('')} />
+                      <View className="cal-more-menu">
+                        <View
+                          className="cal-more-item"
+                          onClick={() => {
+                            setMoreOpenID('')
+                            openEditRecord(record)
+                          }}
+                        >
+修改
+                        </View>
+                        <View
+                          className="cal-more-item danger"
+                          onClick={() => {
+                            setMoreOpenID('')
+                            void handleDeleteRecord(record.id)
+                          }}
+                        >
+删除
+                        </View>
+                      </View>
+                    </>
+                  )}
                 </View>
               )
             })}
@@ -550,15 +715,31 @@ export default function Calendar() {
           <View className="cal-overlay">
           <View className="cal-sheet">
             <View className="cal-sheet-handle" />
-            <Text className="cal-sheet-title">添加记录</Text>
+            <Text className="cal-sheet-title">{editingRecordID ? '修改记录' : '添加记录'}</Text>
             <Text className="cal-field-label">分类</Text>
             <View className="cal-segments">
-              <View className={`cal-segment${category === 'daily' ? ' selected' : ''}`} onClick={() => setCategory('daily')}>日常</View>
-              <View className={`cal-segment${category === 'medical' ? ' selected medical' : ''}`} onClick={() => setCategory('medical')}>医疗</View>
+              <View className={`cal-segment${category === 'daily' ? ' selected' : ''}${editingRecordID ? ' locked' : ''}`} onClick={editingRecordID ? undefined : () => setCategory('daily')}>日常</View>
+              <View className={`cal-segment${category === 'medical' ? ' selected medical' : ''}${editingRecordID ? ' locked' : ''}`} onClick={editingRecordID ? undefined : () => setCategory('medical')}>医疗</View>
             </View>
+            {!editingRecordID && (
+              <>
+                <Text className="cal-field-label">同步到档案（可选）</Text>
+                <View className="cal-pet-chips">
+                  {[{ key: 'growth', label: '成长足迹页' }, { key: 'birthday', label: '生日纪念页' }].map(target => (
+                    <View
+                      key={target.key}
+                      className={`cal-pet-chip${syncTargets.includes(target.key) ? ' selected' : ''}`}
+                      onClick={() => setSyncTargets(value => value.includes(target.key) ? value.filter(item => item !== target.key) : [...value, target.key])}
+                    >
+{target.label}
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
             <Text className="cal-field-label">宠物</Text>
             <View className="cal-pet-chips">
-              {pets.map(pet => <View key={pet.id} className={`cal-pet-chip${recordPetIDs.includes(pet.id) ? ' selected' : ''}`} onClick={() => setRecordPetIDs(value => value.includes(pet.id) ? value.filter(id => id !== pet.id) : [...value, pet.id])}>{pet.name}</View>)}
+              {pets.map(pet => <View key={pet.id} className={`cal-pet-chip${recordPetIDs.includes(pet.id) ? ' selected' : ''}${editingRecordID ? ' locked' : ''}`} onClick={editingRecordID ? undefined : () => setRecordPetIDs(value => value.includes(pet.id) ? value.filter(id => id !== pet.id) : [...value, pet.id])}>{pet.name}</View>)}
             </View>
             {category === 'medical' && (
               <>
@@ -576,11 +757,25 @@ export default function Calendar() {
               {localImagePaths.length > 0 && (
                 <Text>
                   已选择
-                  {localImagePaths.length}
-                  /9 张
+                  {` ${localImagePaths.length}/9 张`}
                 </Text>
               )}
             </View>
+            {localImagePaths.length > 0 && (
+              <View className="cal-image-thumbs">
+                {localImagePaths.map((path, index) => (
+                  <View className="cal-image-thumb" key={`${path}-${index}`}>
+                    <Image
+                      className="cal-image-thumb-img"
+                      src={path}
+                      mode="aspectFill"
+                      onClick={() => void Taro.previewImage({ urls: localImagePaths, current: path })}
+                    />
+                    <View className="cal-image-thumb-remove" onClick={() => handleRemoveImage(index)}>×</View>
+                  </View>
+                ))}
+              </View>
+            )}
             {category === 'medical' && (
               <View className="cal-reminder-section">
                 <View className="cal-reminder-switch-row">
@@ -615,7 +810,15 @@ export default function Calendar() {
               </View>
             )}
             <View className="cal-sheet-actions">
-              <View className="cal-cancel-button" onClick={() => setFormVisible(false)}>取消</View>
+              <View
+                className="cal-cancel-button"
+                onClick={() => {
+                  setEditingRecordID('')
+                  setFormVisible(false)
+                }}
+              >
+取消
+              </View>
               <View className={`cal-save-button${canSubmit ? '' : ' disabled'}`} onClick={handleCreateRecord}>{submitting ? '保存中' : '保存'}</View>
             </View>
           </View>

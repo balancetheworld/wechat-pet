@@ -22,12 +22,20 @@ export function createCalendarRecord(data: CreateCalendarRecordRequest) {
   })
 }
 
-/* 部分更新日历记录(内容/发生时间): 档案事件编辑后同步日历用 */
-export function updateCalendarRecord(recordID: string, data: { content?: string, occurred_at?: string }) {
+/* 部分更新日历记录(内容/发生时间/图片整体替换): 档案事件编辑后同步日历用 */
+export function updateCalendarRecord(recordID: string, data: { content?: string, occurred_at?: string, media_asset_ids?: string[] }) {
   return request<CalendarRecord>({
     path: `/api/v1/calendar/records/${encodeURIComponent(recordID)}`,
     method: 'PATCH',
     data,
+  })
+}
+
+/* 删除日历记录(后端软删除): 前端二次确认后调用 */
+export function deleteCalendarRecord(recordID: string) {
+  return request<null>({
+    path: `/api/v1/calendar/records/${encodeURIComponent(recordID)}`,
+    method: 'DELETE',
   })
 }
 

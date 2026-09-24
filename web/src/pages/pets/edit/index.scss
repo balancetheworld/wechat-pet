@@ -156,9 +156,11 @@
 }
 
 .avatar-preview {
+  position: relative;
   width: 120rpx;
   height: 120rpx;
   border-radius: 50%;
+  overflow: hidden; /* 裁剪子图片, 防止图片按原尺寸溢出到表单下层 */
   flex-shrink: 0;
   border: 1rpx dashed #C9DDEF;
   background: #F5F9FE center / cover no-repeat;
@@ -171,8 +173,9 @@
 }
 
 .avatar-photo {
-  width: 100%;
-  height: 100%;
+  /* 显式尺寸: 百分比在小圆容器内解析不稳定, 会导致图片按原尺寸撑满整页 */
+  width: 120rpx !important;
+  height: 120rpx !important;
   border-radius: 50%;
   display: block;
 }

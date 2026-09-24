@@ -11,8 +11,8 @@ import passportImage from '../../assets/passport.jpg'
 import { FloatingGuide } from '../../components/floating-guide'
 import { routes } from '../../constants/routes'
 import { createCalendarRecord, updateCalendarRecord, uploadCalendarImage } from '../../services/calendar'
-import { createPetResource, getPetProfile, getPetResource, getPets, updatePetResource } from '../../services/pet'
-import { assetURL } from '../../services/request'
+import { createPetResource, deletePet, deletePetResource, getPetProfile, getPetResource, getPets, updatePetResource } from '../../services/pet'
+import { assetURL, uploadFile } from '../../services/request'
 import { useAppStore } from '../../stores/app-store'
 import { usePetStore } from '../../stores/pet-store'
 import { navigateTo, openPetEdit } from '../../utils/navigation'
@@ -61,10 +61,28 @@ interface GrowthEvent {
   calendar_record_id?: string
 }
 
+interface CertificateItem {
+  id: string
+  type: string
+  name: string
+  number: string
+  occurred_at?: string
+  details?: string
+  asset_id?: string
+}
+
+/* 证件页预显示示例卡: 用户添加任意真实证件后不再显示 */
+const PLACEHOLDER_CERTIFICATE = {
+  name: '狂犬病免疫证明',
+  time: '示例 · 待补充',
+  details: '每年接种一针狂犬疫苗，接种后医院会出具免疫证明，注明疫苗批号与下次接种时间。点击下方"添加证件"录入真实证件后，这张示例卡会自动消失。',
+}
+
 /* 章节（书固定 7 个章节；内容多的章节自动拆成多页） */
 const CHAPTERS = [
   { key: 'cover', name: '封面' },
   { key: 'identity', name: '身份名片' },
+  { key: 'certificates', name: '证件收藏' },
   { key: 'health', name: '健康资料' },
   { key: 'personality', name: '个性说明书' },
   { key: 'birthday', name: '生日纪念册' },
@@ -78,6 +96,7 @@ type ChapterKey = typeof CHAPTERS[number]['key']
 const CHAPTER_EN: Record<ChapterKey, string> = {
   cover: 'COVER',
   identity: 'PROFILE',
+  certificates: 'CERTIFICATES',
   personality: 'PERSONALITY',
   health: 'HEALTH',
   birthday: 'BIRTHDAYS',
@@ -88,6 +107,7 @@ const CHAPTER_EN: Record<ChapterKey, string> = {
 /* 每页可容纳的条数（超出自动开新页） */
 const PERSONALITY_PER_PAGE = 5
 const BIRTHDAY_PER_PAGE = 7
+const CERTIFICATES_PER_PAGE = 3
 const GROWTH_FIRST_PAGE_EVENTS = 2
 const GROWTH_PER_PAGE = 3
 
@@ -103,6 +123,12 @@ const PAGE_PAPER_STYLE: CSSProperties = {
 
 /* 体重数值统一保留两位小数展示 */
 const fmtWeight = (value: number) => Number(value).toFixed(2)
+
+/* 健康资料页体重卡片: 展示最近三条记录 */
+const HEALTH_WEIGHT_PREVIEW = 3
+/* 体重合法区间 (kg), 防止误输 */
+const WEIGHT_MIN_KG = 0.1
+const WEIGHT_MAX_KG = 150
 
 /* 个性说明书初始预置(后端暂无数据时的默认展示, 有数据则以服务端为准) */
 const DEFAULT_PERSONALITY: PersonalityItem[] = [
@@ -230,13 +256,22 @@ export default function Profile() {
   const currentPetId = usePetStore(state => state.currentPetId)
   const setPets = usePetStore(state => state.setPets)
   const setCurrentPetId = usePetStore(state => state.setCurrentPetId)
+  const clearCurrentPet = usePetStore(state => state.clearCurrentPet)
   const [profile, setProfile] = useState<PetProfile | null>(null)
   const [personality, setPersonality] = useState<PersonalityItem[]>([])
   const [questions, setQuestions] = useState<QuestionItem[]>([])
   const [birthdayRecords, setBirthdayRecords] = useState<BirthdayRecord[]>([])
   const [birthdayMedia, setBirthdayMedia] = useState<BirthdayMediaItem[]>([])
+  const [certificates, setCertificates] = useState<CertificateItem[]>([])
   const [weights, setWeights] = useState<WeightRecord[]>([])
   const [growthEvents, setGrowthEvents] = useState<GrowthEvent[]>([])
+  /* 健康资料页: 体重记录表单/编辑态 */
+  const [weightFormVisible, setWeightFormVisible] = useState(false)
+  const [weightFormPetID, setWeightFormPetID] = useState('')
+  const [weightFormValue, setWeightFormValue] = useState('')
+  const [weightFormDate, setWeightFormDate] = useState('')
+  const [weightFormEditingID, setWeightFormEditingID] = useState('')
+  const [weightSubmitting, setWeightSubmitting] = useState(false)
   const [loading, setLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(0)
   const [touchStartX, setTouchStartX] = useState<number | null>(null)
@@ -291,7 +326,7 @@ export default function Profile() {
 
   /* ===== 成长足迹/生日纪念册添加表单打开时, 隐藏底部 tab-bar (与日历页同机制), 避免遮住表单 ===== */
   const setCalendarFormVisible = useAppStore(state => state.setCalendarFormVisible)
-  const anyFormVisible = growthFormVisible || birthdayFormVisible
+  const anyFormVisible = growthFormVisible || birthdayFormVisible || weightFormVisible
 
   useEffect(() => {
     setCalendarFormVisible(anyFormVisible)
@@ -307,6 +342,7 @@ export default function Profile() {
     const list: BookPage[] = []
     const personalityParts = Math.max(1, Math.ceil(questions.length / PERSONALITY_PER_PAGE))
     const birthdayParts = Math.max(1, Math.ceil(birthdayRecords.length / BIRTHDAY_PER_PAGE))
+    const certificateParts = Math.max(1, Math.ceil(certificates.length / CERTIFICATES_PER_PAGE))
     const growthParts = growthEvents.length <= GROWTH_FIRST_PAGE_EVENTS
       ? 1
       : 1 + Math.ceil((growthEvents.length - GROWTH_FIRST_PAGE_EVENTS) / GROWTH_PER_PAGE)
@@ -317,13 +353,14 @@ export default function Profile() {
 
     push('cover', '封面', 1, 1)
     push('identity', '身份名片', 1, 1)
+    for (let i = 1; i <= certificateParts; i++) push('certificates', '证件收藏', i, certificateParts)
     push('health', '健康资料', 1, 1)
     for (let i = 1; i <= personalityParts; i++) push('personality', '个性说明书', i, personalityParts)
     for (let i = 1; i <= birthdayParts; i++) push('birthday', '生日纪念册', i, birthdayParts)
     for (let i = 1; i <= growthParts; i++) push('growth', '成长足迹', i, growthParts)
     push('back', '封底', 1, 1)
     return list
-  }, [questions.length, birthdayRecords.length, growthEvents.length])
+  }, [questions.length, birthdayRecords.length, growthEvents.length, certificates.length])
 
   const pageCount = pages.length
 
@@ -342,13 +379,14 @@ export default function Profile() {
     }
     try {
       const petProfile = await getPetProfile(pet.id)
-      const [personalityItems, questionItems, records, weightItems, eventItems, birthdayMediaItems] = await Promise.all([
+      const [personalityItems, questionItems, records, weightItems, eventItems, birthdayMediaItems, certificateItems] = await Promise.all([
         getPetResource<PersonalityItem[]>(pet.id, 'personality'),
         getPetResource<QuestionItem[]>(pet.id, 'questions'),
         getPetResource<BirthdayRecord[]>(pet.id, 'birthday-records'),
         getPetResource<WeightRecord[]>(pet.id, 'weights'),
         getPetResource<GrowthEvent[]>(pet.id, 'growth-events'),
         getPetResource<BirthdayMediaItem[]>(pet.id, 'birthday-media'),
+        getPetResource<CertificateItem[]>(pet.id, 'certificates'),
       ])
       setProfile(petProfile)
       /* 个性页: 预置标签/问答固定展示在前, 后端已有且不重复的条目追加在后 */
@@ -370,6 +408,7 @@ export default function Profile() {
       /* 生日记录按年份新→旧排序: 最新一年的记录做大图卡, 下方年份行新记录在上 */
       setBirthdayRecords([...records].sort((a, b) => b.year - a.year))
       setBirthdayMedia(Array.isArray(birthdayMediaItems) ? birthdayMediaItems : [])
+      setCertificates(Array.isArray(certificateItems) ? certificateItems : [])
       setWeights(weightItems)
       /* 服务端成长事件 + 本地补充记录 合并展示 */
       const stored = readLocalGrowthEvents(pet.id)
@@ -413,6 +452,35 @@ export default function Profile() {
 
     void load()
   }, [loadProfile, selectedPet, setPets])
+
+  /* ===== 弹层头像: 每只宠物拉一次 profile 取 avatar_asset_id (后端列表接口暂只返回 id/name) ===== */
+  const [petAvatars, setPetAvatars] = useState<Record<string, string>>({})
+  useEffect(() => {
+    let cancelled = false
+    async function loadAvatars() {
+      const entries = await Promise.all(pets.map(async (item) => {
+        try {
+          const itemProfile = await getPetProfile(item.id)
+          return [item.id, itemProfile.avatar_asset_id || ''] as const
+        }
+        catch {
+          return [item.id, ''] as const
+        }
+      }))
+      if (!cancelled) {
+        setPetAvatars(Object.fromEntries(entries))
+      }
+    }
+    if (pets.length > 0) {
+      void loadAvatars()
+    }
+ else {
+      setPetAvatars({})
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [pets])
 
   /* 从宠物表单保存返回时刷新档案: useDidShow 在每次页面显示(含 navigateBack)时触发;
      首次显示跳过, 由上方 useEffect 负责初始加载, 避免重复请求 */
@@ -550,6 +618,48 @@ export default function Profile() {
     /* 切回第 1 页（封面）等待新档案加载 */
     setCurrentPage(0)
   }, [currentPetId, setCurrentPetId])
+
+  /* ===== 删除宠物 (切换弹层每行右上角小叉): 两次确认后调后端 DELETE /pets/:id ===== */
+  async function handleDeletePet(pet: Pet) {
+    const first = await Taro.showModal({
+      title: '删除档案',
+      content: `确定要删除“${pet.name}”的档案吗`,
+      cancelText: '取消',
+      confirmText: '确定',
+    })
+    if (!first.confirm) {
+      return
+    }
+    const second = await Taro.showModal({
+      title: '删除档案',
+      content: `真的要删除“${pet.name}”的档案吗，里面的各项记录都会丢失哦`,
+      cancelText: '取消',
+      confirmText: '确定',
+    })
+    if (!second.confirm) {
+      return
+    }
+    try {
+      await deletePet(pet.id)
+      const rest = pets.filter(item => item.id !== pet.id)
+      setPets(rest)
+      /* 删除的是当前展示中的宠物时: 切到剩余第一只; 一只都不剩则清空当前宠物 */
+      if (currentPetId === pet.id) {
+        if (rest.length > 0) {
+          setCurrentPetId(rest[0].id)
+        }
+ else {
+          clearCurrentPet()
+        }
+        setEditingChapter(null)
+        setCurrentPage(0)
+      }
+      Taro.showToast({ title: '已删除', icon: 'success' })
+    }
+    catch (error) {
+      Taro.showToast({ title: error instanceof Error ? error.message : '删除失败，请重试', icon: 'none' })
+    }
+  }
 
   /* ===== 成长足迹添加事件 ===== */
   function openGrowthForm() {
@@ -702,6 +812,216 @@ export default function Profile() {
     }
   }
 
+  /* ===== 证件收藏: 添加证件表单 (复用 cal-* 弹层样式) ===== */
+  const [certFormVisible, setCertFormVisible] = useState(false)
+  const [certFormPetID, setCertFormPetID] = useState('')
+  const [certFormName, setCertFormName] = useState('')
+  const [certFormDate, setCertFormDate] = useState('')
+  const [certFormDetails, setCertFormDetails] = useState('')
+  const [certFormAssetID, setCertFormAssetID] = useState('')
+  const [certFormUploading, setCertFormUploading] = useState(false)
+  const [certSubmitting, setCertSubmitting] = useState(false)
+
+  function openCertForm() {
+    setCertFormPetID(currentPetId || pets[0]?.id || '')
+    setCertFormName('')
+    setCertFormDate('')
+    setCertFormDetails('')
+    setCertFormAssetID('')
+    setCertFormUploading(false)
+    setCertSubmitting(false)
+    setCertFormVisible(true)
+  }
+
+  function closeCertForm() {
+    setCertFormVisible(false)
+  }
+
+  async function handleCertChooseImage() {
+    try {
+      const result = await Taro.chooseImage({
+        count: 1,
+        sizeType: ['compressed'],
+        sourceType: ['album', 'camera'],
+      })
+      const filePath = result.tempFilePaths?.[0]
+      if (!filePath) {
+        return
+      }
+      setCertFormUploading(true)
+      const uploaded = await uploadFile<{ asset_id: string }>({
+        path: '/api/v1/assets/upload',
+        filePath,
+        name: 'file',
+        formData: { type: 'certificate' },
+      })
+      setCertFormAssetID(uploaded.asset_id)
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '图片上传失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setCertFormUploading(false)
+    }
+  }
+
+  async function handleCreateCertificate() {
+    if (certSubmitting) {
+      return
+    }
+    const petID = certFormPetID
+    if (!petID) {
+      await Taro.showToast({ title: '请选择宠物', icon: 'none' })
+      return
+    }
+    const name = certFormName.trim()
+    if (!name) {
+      await Taro.showToast({ title: '请填写证件名称', icon: 'none' })
+      return
+    }
+    if (certFormUploading) {
+      return
+    }
+    setCertSubmitting(true)
+    try {
+      /* 后端证书资源字段: type/name/number/occurred_at/details/asset_id (POST 需全量携带) */
+      const created = await createPetResource(petID, 'certificates', {
+        type: 'certificate',
+        name,
+        number: '',
+        occurred_at: certFormDate,
+        details: certFormDetails.trim(),
+        asset_id: certFormAssetID,
+      })
+      const recordID = typeof created?.id === 'string' ? created.id : `local-${Date.now()}`
+      setCertificates(previous => [...previous, {
+        id: recordID,
+        type: 'certificate',
+        name,
+        number: '',
+        occurred_at: certFormDate,
+        details: certFormDetails.trim(),
+        asset_id: certFormAssetID,
+      }])
+      Taro.showToast({ title: '已收录证件', icon: 'success' })
+      closeCertForm()
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '保存证件失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setCertSubmitting(false)
+    }
+  }
+
+  /* ===== 健康资料: 体重记录 (通用资源 weights: measured_at + weight) =====
+     - 健康页展示最近三次体重, 最新一条为"当前体重"
+     - 编辑态: 点历史行=修改(预填弹层 PATCH), 行右侧小叉=删除(确认后 DELETE)
+     - 体重记录与档案共用数据源, 成长足迹页的体重卡会同步反映 */
+  function todayString() {
+    const now = new Date()
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+  }
+
+  function openWeightForm() {
+    setWeightFormPetID(currentPetId || pets[0]?.id || '')
+    setWeightFormValue('')
+    setWeightFormDate(todayString())
+    setWeightFormEditingID('')
+    setWeightSubmitting(false)
+    setWeightFormVisible(true)
+  }
+
+  function openWeightEdit(record: WeightRecord) {
+    setWeightFormPetID(currentPetId || pets[0]?.id || '')
+    setWeightFormValue(String(record.weight))
+    setWeightFormDate((record.measured_at || '').slice(0, 10))
+    setWeightFormEditingID(record.id)
+    setWeightSubmitting(false)
+    setWeightFormVisible(true)
+  }
+
+  function closeWeightForm() {
+    setWeightFormVisible(false)
+  }
+
+  async function handleSaveWeight() {
+    if (weightSubmitting) {
+      return
+    }
+    const petID = weightFormPetID
+    if (!petID) {
+      await Taro.showToast({ title: '请选择宠物', icon: 'none' })
+      return
+    }
+    const raw = weightFormValue.trim()
+    const parsed = Number(raw)
+    if (!raw || !Number.isFinite(parsed)) {
+      await Taro.showToast({ title: '请填写体重数值', icon: 'none' })
+      return
+    }
+    if (parsed < WEIGHT_MIN_KG || parsed > WEIGHT_MAX_KG) {
+      await Taro.showToast({ title: `体重请填写 ${WEIGHT_MIN_KG}–${WEIGHT_MAX_KG} kg`, icon: 'none' })
+      return
+    }
+    if (!weightFormDate) {
+      await Taro.showToast({ title: '请选择测量日期', icon: 'none' })
+      return
+    }
+    const weight = Number(parsed.toFixed(2))
+    setWeightSubmitting(true)
+    try {
+      if (weightFormEditingID) {
+        await updatePetResource(petID, 'weights', weightFormEditingID, { measured_at: weightFormDate, weight })
+        setWeights(previous => previous.map(item => (
+          item.id === weightFormEditingID ? { ...item, measured_at: weightFormDate, weight } : item
+        )))
+        Taro.showToast({ title: '已保存修改', icon: 'success' })
+      }
+      else {
+        const created = await createPetResource(petID, 'weights', { measured_at: weightFormDate, weight })
+        const recordID = typeof created?.id === 'string' ? created.id : `local-${Date.now()}`
+        setWeights(previous => [...previous, { id: recordID, measured_at: weightFormDate, weight }])
+        Taro.showToast({ title: '已记录体重', icon: 'success' })
+      }
+      closeWeightForm()
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '保存体重失败'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+    finally {
+      setWeightSubmitting(false)
+    }
+  }
+
+  async function handleDeleteWeight(record: WeightRecord) {
+    const petID = currentPetId || pets[0]?.id || ''
+    if (!petID) {
+      return
+    }
+    const confirmed = await Taro.showModal({
+      title: '删除体重记录',
+      content: `确定删除 ${(record.measured_at || '').slice(0, 10)} 的体重记录（${fmtWeight(record.weight)} kg）吗？删除后无法找回哦`,
+      cancelText: '取消',
+      confirmText: '确定',
+    })
+    if (!confirmed.confirm) {
+      return
+    }
+    try {
+      await deletePetResource(petID, 'weights', record.id)
+      setWeights(previous => previous.filter(item => item.id !== record.id))
+      Taro.showToast({ title: '已删除', icon: 'success' })
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '删除失败,请重试'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+  }
+
   /* ===== 每页右下角"修改"按钮统一行为 =====
      - 5 章节(identity/personality/health/birthday/growth) 点击后:
        * 首次: 进入"当前页内联编辑"模式, 右下角按钮文案变 "√ 完成"
@@ -849,8 +1169,10 @@ export default function Profile() {
           <View className="page-head-divider" />
         </View>
         <View className="identity-hero">
-          <View className="identity-photo" onClick={() => openDetail('头像', '点击上传新头像', '在这里可以上传或更换宠物的头像照片，作为这本档案的封面留念。')}>
-            <Text className="identity-photo-char">{petName.slice(0, 1)}</Text>
+          <View className="identity-photo">
+            {profile?.avatar_asset_id
+              ? <Image className="identity-photo-img" src={assetURL(profile.avatar_asset_id)} mode="aspectFill" />
+              : <Text className="identity-photo-char">{petName.slice(0, 1)}</Text>}
           </View>
           <View className="identity-meta">
             <Text className="identity-about">About.</Text>
@@ -875,13 +1197,6 @@ export default function Profile() {
               <Text className="identity-fact-key">到家</Text>
               <Text className="identity-fact-val">{formatDate(profile?.home_date)}</Text>
             </View>
-            <View className="identity-swatches">
-              <View className="identity-swatch" style={{ background: '#5B84BE' }} />
-              <View className="identity-swatch" style={{ background: '#7FA5D6' }} />
-              <View className="identity-swatch" style={{ background: '#A9C4E4' }} />
-              <View className="identity-swatch" style={{ background: '#CFDEF0' }} />
-              <View className="identity-swatch" style={{ background: '#EDE5D8' }} />
-            </View>
           </View>
         </View>
         <View className="identity-bio">
@@ -894,15 +1209,72 @@ export default function Profile() {
           </View>
           <Text className="identity-bio-text">{bioText}</Text>
         </View>
-        <Button className="info-row" onClick={() => openDetail('身份与证件', '已收纳 2 项', '在这里集中管理宠物的疫苗本、芯片号、繁育证明等证件信息，仅家庭成员可见。')}>
-          <Text className="span">身份与证件</Text>
-          <Text className="strong">已收纳 2 项</Text>
-        </Button>
         {editingChapter === 'identity' && (
           <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '编辑身份信息: 后续版本支持', icon: 'none' })}>＋ 编辑身份信息</View>
         )}
       </View>
     </View>
+    )
+  }
+
+  /* ===== 章节: 证件收藏 (每行两张证件卡, 名称紧贴卡片上沿; 卡内左图右时间+说明) ===== */
+  const renderCertificatesPage = (part: number) => {
+    const start = (part - 1) * CERTIFICATES_PER_PAGE
+    const partCerts = certificates.slice(start, start + CERTIFICATES_PER_PAGE)
+    const showPlaceholder = certificates.length === 0 && part === 1
+    return (
+      <View className="page content-page" style={PAGE_PAPER_STYLE}>
+        <View className="page-body">
+          <View className="page-head">
+            <View className="page-head-title">
+              <Text className="page-head-en">{CHAPTER_EN.certificates}</Text>
+              <Text className="page-head-zh">证件收藏</Text>
+            </View>
+            <View className="page-head-divider" />
+          </View>
+          <View className="cert-grid">
+            {showPlaceholder && (
+              <View className="cert-cell">
+                <Text className="cert-name">{PLACEHOLDER_CERTIFICATE.name}</Text>
+                <View className="cert-card cert-card--placeholder">
+                  <View className="cert-photo">
+                    <Text className="cert-photo-char">证</Text>
+                  </View>
+                  <View className="cert-info">
+                    <Text className="cert-time">{PLACEHOLDER_CERTIFICATE.time}</Text>
+                    <Text className="cert-details">{PLACEHOLDER_CERTIFICATE.details}</Text>
+                  </View>
+                </View>
+              </View>
+            )}
+            {partCerts.map(cert => (
+              <View className="cert-cell" key={cert.id}>
+                <Text className="cert-name">{cert.name}</Text>
+                <View className="cert-card">
+                  <View className="cert-photo">
+                    {cert.asset_id
+                      ? <Image className="cert-photo-img" src={assetURL(cert.asset_id)} mode="aspectFill" />
+                      : <Text className="cert-photo-char">{cert.name.slice(0, 1)}</Text>}
+                  </View>
+                  <View className="cert-info">
+                    <Text className="cert-time">{cert.occurred_at ? formatDate(cert.occurred_at) : '时间待补充'}</Text>
+                    <Text className="cert-details">{cert.details || '暂无说明'}</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+            {/* 添加入口: 仅在右下角"修改"进入编辑态后出现 */}
+            {editingChapter === 'certificates' && (
+              <View className="cert-cell" onClick={openCertForm}>
+                <View className="cert-add">
+                  <Text className="cert-add-plus">＋</Text>
+                  <Text className="cert-add-text">添加证件</Text>
+                </View>
+              </View>
+            )}
+          </View>
+        </View>
+      </View>
     )
   }
 
@@ -925,12 +1297,12 @@ export default function Profile() {
               {personality.length === 0 && editingChapter !== 'personality' && (
                 <Text className="empty-text">还没有性格标签</Text>
               )}
-              {personality.map((item) => {
+              {personality.map((item, tagIndex) => {
                 const tagBody = `${item.trait}${item.value ? ` · ${item.value}` : ''}`
                 const isEditing = editingChapter === 'personality'
                 return (
                   <View
-                    className={`tag-capsule${isEditing ? ' editable' : ''}`}
+                    className={`tag-capsule tag-capsule--c${tagIndex % 6}${isEditing ? ' editable' : ''}`}
                     key={item.id}
                   >
                     <Text
@@ -1100,9 +1472,6 @@ export default function Profile() {
             </View>
           </View>
           <Text className="updated">点击查看详情</Text>
-          {editingChapter === 'health' && (
-            <View className="inline-edit-add" onClick={() => Taro.showToast({ title: '添加健康记录: 后续版本支持', icon: 'none' })}>＋ 添加健康记录</View>
-          )}
         </View>
       </View>
     )
@@ -1193,11 +1562,12 @@ export default function Profile() {
 
   /* ===== 章节: 成长足迹（第 1 页：体重卡 + 2 条事件；之后每页 3 条） ===== */
   const renderGrowthPage = (part: number) => {
+    /* 体重按测量日期新→旧, 只取最近三次展示 */
     const sortedWeights = [...weights].sort((a, b) => b.measured_at.localeCompare(a.measured_at))
-    const wLatest = sortedWeights[0]
-    const wPrev = sortedWeights[1]
+    const recentWeights = sortedWeights.slice(0, HEALTH_WEIGHT_PREVIEW)
+    const wLatest = recentWeights[0]
+    const wPrev = recentWeights[1]
     const wDiff = wLatest && wPrev ? wLatest.weight - wPrev.weight : 0
-
     const sortedEvents = [...growthEvents].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
     const partEvents = part === 1
       ? sortedEvents.slice(0, GROWTH_FIRST_PAGE_EVENTS)
@@ -1224,35 +1594,73 @@ export default function Profile() {
               <View
                 className="weight-card detail-trigger"
                 onClick={() => wLatest
-                  ? openDetail('体重记录', `当前 ${fmtWeight(wLatest.weight)} kg，比上次${wDiff < 0 ? '减少' : '增加'} ${Math.abs(wDiff).toFixed(2)} kg`, `最近记录：${sortedWeights.map(w => `${w.measured_at} ${fmtWeight(w.weight)} kg`).join('；')}。`)
+                  ? openDetail('体重记录', `当前 ${fmtWeight(wLatest.weight)} kg，比上次${wDiff < 0 ? '减少' : '增加'} ${Math.abs(wDiff).toFixed(2)} kg`, `最近记录：${recentWeights.map(w => `${w.measured_at} ${fmtWeight(w.weight)} kg`).join('；')}。`)
                   : openDetail('体重记录', '暂无记录', '还没有体重记录，添加后这里会展示体重变化趋势。')}
               >
                 {wLatest
-? (
-                  <>
-                    <View className="weight-head">
-                      <View className="weight-head-main">
-                        <Text className="span">当前体重</Text>
-                        <Text className="weight-value">
+                  ? (
+                      <>
+                        <View className="weight-head">
+                          <View className="weight-head-main">
+                            <Text className="span">当前体重</Text>
+                            <Text className="weight-value">
 {fmtWeight(wLatest.weight)}
 {' '}
 kg
-                        </Text>
+                            </Text>
+                          </View>
+                          <View className="weight-change">{wPrev ? `较上次 ${wDiff < 0 ? '−' : '+'}${Math.abs(wDiff).toFixed(2)}` : '首次记录'}</View>
+                        </View>
+                        <View className="chart">
+                          <View className="chart-line" />
+                        </View>
+                      </>
+                    )
+                  : (
+                      <View className="weight-head">
+                        <View className="weight-head-main">
+                          <Text className="span">当前体重</Text>
+                          <Text className="weight-value weight-value--empty">暂无记录</Text>
+                        </View>
                       </View>
-                      <View className="weight-change">{wPrev ? `较上次 ${wDiff < 0 ? '−' : '+'}${Math.abs(wDiff).toFixed(2)}` : '首次记录'}</View>
-                    </View>
-                    <View className="chart">
-                      <View className="chart-line" />
-                    </View>
-                  </>
-                )
-: (
-                  <View className="weight-head">
-                    <View className="weight-head-main">
-                      <Text className="span">当前体重</Text>
-                      <Text className="weight-value weight-value--empty">暂无记录</Text>
-                    </View>
+                    )}
+              </View>
+              {/* 体重管理: 最近三次, 编辑态可改可删, 可添加 */}
+              <View className="health-weight">
+                {recentWeights.map((item, index) => (
+                  <View
+                    className={`weight-row${isEditing ? ' editable' : ''}`}
+                    key={item.id}
+                    onClick={() => {
+                      if (isEditing) {
+                        openWeightEdit(item)
+                      }
+                    }}
+                  >
+                    <Text className="weight-row-date">{(item.measured_at || '').slice(0, 10)}</Text>
+                    {index === 0 && <Text className="weight-row-badge">最新</Text>}
+                    <Text className="weight-row-value">
+                      {fmtWeight(item.weight)}
+                      {' kg'}
+                    </Text>
+                    {isEditing && (
+                      <View
+                        className="weight-row-del"
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void handleDeleteWeight(item)
+                        }}
+                      >
+                        ×
+                      </View>
+                    )}
                   </View>
+                ))}
+                {recentWeights.length === 0 && (
+                  <Text className="weight-empty">还没有体重记录，编辑页面后可以记下第一次称重。</Text>
+                )}
+                {isEditing && (
+                  <View className="inline-edit-add" onClick={openWeightForm}>＋ 记录体重</View>
                 )}
               </View>
               <View className="growth-events-head">
@@ -1377,6 +1785,9 @@ kg
       case 'identity':
         body = renderProfilePage()
         break
+      case 'certificates':
+        body = renderCertificatesPage(info.part)
+        break
       case 'personality':
         body = renderPersonalityPage(info.part)
         break
@@ -1425,7 +1836,6 @@ kg
       <Button
         className="pet-switcher-button"
         onClick={() => setSwitcherOpen(true)}
-        disabled={pets.length === 0}
       >
         <Text className="pet-switcher-name">{selectedPet?.name || '暂未选择'}</Text>
         <Text className="pet-switcher-caret">▾</Text>
@@ -1680,13 +2090,23 @@ kg
                 onClick={() => handleSwitchPet(pet.id)}
               >
                 <View className="pet-switcher-item-avatar">
-                  {pet.name.slice(0, 1)}
+                  {petAvatars[pet.id]
+                    ? <Image className="pet-switcher-item-avatar-img" src={assetURL(petAvatars[pet.id])} mode="aspectFill" />
+                    : pet.name.slice(0, 1)}
                 </View>
                 <View className="pet-switcher-item-meta">
                   <Text className="strong">{pet.name}</Text>
                   <Text className="span">{pet.id === currentPetId ? '当前展示中' : '点击翻开此档案'}</Text>
                 </View>
-                {pet.id === currentPetId && <Text className="pet-switcher-check">✓</Text>}
+                <View
+                  className="pet-switcher-delete"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void handleDeletePet(pet)
+                  }}
+                >
+                  <Text className="pet-switcher-delete-x">×</Text>
+                </View>
               </Button>
             ))}
             {/* 最底部一行: 点击添加宠物 (与档案右上角添加宠物按钮同路径) */}
@@ -1792,6 +2212,100 @@ kg
             <View className="cal-sheet-actions">
               <View className="cal-cancel-button" onClick={closeBirthdayForm}>取消</View>
               <View className={`cal-save-button${birthdaySubmitting ? ' disabled' : ''}`} onClick={handleCreateBirthdayRecord}>{birthdaySubmitting ? '保存中' : '保存'}</View>
+            </View>
+          </View>
+        </View>
+      )}
+      {/* 添加证件弹层 (复用 cal-* 弹层样式) */}
+      {certFormVisible && (
+        <View className="cal-overlay" onClick={closeCertForm}>
+          <View className="cal-sheet" onClick={event => event.stopPropagation()}>
+            <View className="cal-sheet-handle" />
+            <Text className="cal-sheet-title">添加证件</Text>
+
+            <Text className="cal-field-label">宠物</Text>
+            <View className="cal-pet-chips">
+              {pets.map(pet => (
+                <View key={pet.id} className={`cal-pet-chip${certFormPetID === pet.id ? ' selected' : ''}`} onClick={() => setCertFormPetID(pet.id)}>{pet.name}</View>
+              ))}
+            </View>
+
+            <Text className="cal-field-label">证件名称</Text>
+            <Input className="cal-input" maxlength={30} value={certFormName} placeholder="如：狂犬病免疫证明" onInput={event => setCertFormName(event.detail.value)} />
+
+            <Text className="cal-field-label">时间</Text>
+            <Picker mode="date" value={certFormDate} end={certFormDate || undefined} onChange={event => setCertFormDate(event.detail.value)}>
+              <View className="cal-picker-row">
+                <Text>{certFormDate || '选择日期'}</Text>
+                <Text>选择</Text>
+              </View>
+            </Picker>
+
+            <Text className="cal-field-label">详细说明</Text>
+            <Textarea className="cal-textarea" value={certFormDetails} maxlength={500} placeholder="如疫苗批号、接种医院、下次补种时间等" onInput={event => setCertFormDetails(event.detail.value)} />
+
+            <View className="cal-image-actions">
+              <View className="cal-image-button" onClick={handleCertChooseImage}>{certFormUploading ? '上传中' : (certFormAssetID ? '更换图片' : '添加图片')}</View>
+              {certFormAssetID && <Text>已选择 1 张</Text>}
+            </View>
+
+            <View className="cal-sheet-actions">
+              <View className="cal-cancel-button" onClick={closeCertForm}>取消</View>
+              <View className={`cal-save-button${certSubmitting ? ' disabled' : ''}`} onClick={handleCreateCertificate}>{certSubmitting ? '保存中' : '保存'}</View>
+            </View>
+          </View>
+        </View>
+      )}
+      {/* 体重记录弹层 (健康资料页): 新增/修改共用 (复用 cal-* 弹层样式) */}
+      {weightFormVisible && (
+        <View className="cal-overlay" onClick={closeWeightForm}>
+          <View className="cal-sheet" onClick={event => event.stopPropagation()}>
+            <View className="cal-sheet-handle" />
+            <Text className="cal-sheet-title">{weightFormEditingID ? '修改体重记录' : '记录体重'}</Text>
+
+            <Text className="cal-field-label">宠物</Text>
+            <View className="cal-pet-chips">
+              {pets.map(pet => (
+                <View
+                  key={pet.id}
+                  className={`cal-pet-chip${weightFormPetID === pet.id ? ' selected' : ''}${weightFormEditingID ? ' locked' : ''}`}
+                  onClick={() => {
+                    if (!weightFormEditingID) {
+                      setWeightFormPetID(pet.id)
+                    }
+                  }}
+                >
+                  {pet.name}
+                </View>
+              ))}
+            </View>
+
+            <View className="cal-form-row">
+              <View className="cal-form-col">
+                <Text className="cal-field-label">体重（kg）</Text>
+                <Input
+                  className="cal-input"
+                  type="digit"
+                  value={weightFormValue}
+                  maxlength={6}
+                  placeholder="如 4.35"
+                  onInput={event => setWeightFormValue(event.detail.value)}
+                />
+              </View>
+              <View className="cal-form-col">
+                <Text className="cal-field-label">测量日期</Text>
+                <Picker mode="date" value={weightFormDate} onChange={event => setWeightFormDate(event.detail.value)}>
+                  <View className="cal-picker-row">
+                    <Text>{weightFormDate || '选择日期'}</Text>
+                    <Text>选择</Text>
+                  </View>
+                </Picker>
+              </View>
+            </View>
+
+            <View className="cal-sheet-actions">
+              <View className="cal-cancel-button" onClick={closeWeightForm}>取消</View>
+              <View className={`cal-save-button${weightSubmitting ? ' disabled' : ''}`} onClick={handleSaveWeight}>{weightSubmitting ? '保存中' : '保存'}</View>
             </View>
           </View>
         </View>
