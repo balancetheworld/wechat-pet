@@ -21,9 +21,10 @@ import (
 // 负责统一 Request 到 Responses API 的转换、发送、取消与响应归一化；
 // 不自行检索旧聊天、读取业务数据、执行工具、修改任务项、切模型或增加重试。
 type OpenAIProvider struct {
-	client  openai.Client
-	model   string
-	observe func(OpenAIObservation)
+	client          openai.Client
+	model           string
+	reasoningEffort string
+	observe         func(OpenAIObservation)
 }
 
 // NewOpenAIProvider 构造 OpenAI Provider。配置校验与现有 OpenAI 执行器保持一致；
@@ -32,6 +33,7 @@ func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 	config.APIKey = strings.TrimSpace(config.APIKey)
 	config.BaseURL = strings.TrimSpace(config.BaseURL)
 	config.Model = strings.TrimSpace(config.Model)
+	config.ReasoningEffort = strings.TrimSpace(config.ReasoningEffort)
 	if config.APIKey == "" {
 		return nil, errors.New("AI_API_KEY is required when AI is enabled")
 	}
@@ -54,7 +56,7 @@ func NewOpenAIProvider(config OpenAIConfig) (*OpenAIProvider, error) {
 		option.WithMaxRetries(0),
 		option.WithRequestTimeout(config.Timeout),
 	)
-	return &OpenAIProvider{client: client, model: config.Model, observe: config.Observer}, nil
+	return &OpenAIProvider{client: client, model: config.Model, reasoningEffort: config.ReasoningEffort, observe: config.Observer}, nil
 }
 
 // Complete 发起一次非流式模型调用并返回归一化响应（文档 4.2）。
@@ -123,7 +125,6 @@ func (p *OpenAIProvider) Stream(ctx context.Context, request Request, emit func(
 	if err != nil {
 		return Response{}, NewProviderError(ErrProviderRequestInvalid, false, 0, err)
 	}
-	stream := p.client.Responses.NewStreaming(ctx, params)
 	var response responses.Response
 	seq := 0
 	emitEvent := func(ev StreamEvent) error {
@@ -133,63 +134,99 @@ func (p *OpenAIProvider) Stream(ctx context.Context, request Request, emit func(
 		return emit(ev)
 	}
 	started := false
-	for stream.Next() {
-		event := stream.Current()
-		switch event.Type {
-		case "response.created":
-			created := event.AsResponseCreated()
-			response.ID = created.Response.ID
-			if !started {
-				if err := emitEvent(StreamEvent{Type: StreamResponseStarted, BlockID: created.Response.ID}); err != nil {
+	consume := func(params responses.ResponseNewParams) (Response, error) {
+		stream := p.client.Responses.NewStreaming(ctx, params)
+		for stream.Next() {
+			event := stream.Current()
+			switch event.Type {
+			case "response.created":
+				created := event.AsResponseCreated()
+				response.ID = created.Response.ID
+				if !started {
+					if err := emitEvent(StreamEvent{Type: StreamResponseStarted, BlockID: created.Response.ID}); err != nil {
+						return Response{}, err
+					}
+					started = true
+				}
+			case "response.output_text.delta":
+				delta := event.AsResponseOutputTextDelta()
+				if err := emitEvent(StreamEvent{Type: StreamContentDelta, BlockID: delta.ItemID, ContentDelta: delta.Delta}); err != nil {
 					return Response{}, err
 				}
-				started = true
+			case "response.reasoning_text.delta":
+				if delta := reasoningTextDelta(event); delta != "" {
+					if err := emitEvent(StreamEvent{Type: StreamReasoningDelta, BlockID: event.ItemID, ReasoningDelta: delta}); err != nil {
+						return Response{}, err
+					}
+				}
+			case "response.function_call_arguments.delta":
+				delta := event.AsResponseFunctionCallArgumentsDelta()
+				if err := emitEvent(StreamEvent{
+					Type:          StreamToolCallDelta,
+					BlockID:       delta.ItemID,
+					ToolCallDelta: ToolCallDelta{ID: delta.ItemID, ArgumentsPartial: delta.Delta},
+				}); err != nil {
+					return Response{}, err
+				}
+			case "response.completed":
+				response = event.AsResponseCompleted().Response
+			case "response.failed":
+				return Response{}, responseFailedError(event.AsResponseFailed().Response.Error)
 			}
-		case "response.output_text.delta":
-			delta := event.AsResponseOutputTextDelta()
-			if err := emitEvent(StreamEvent{Type: StreamContentDelta, BlockID: delta.ItemID, ContentDelta: delta.Delta}); err != nil {
+		}
+		if err := stream.Err(); err != nil {
+			return Response{}, classifyProviderError(ctx, err)
+		}
+		if response.ID == "" || response.Model == "" {
+			return Response{}, NewProviderError(ErrProviderOutputInvalid, false, 0, errors.New("stream completed without a normalized response"))
+		}
+		if response.Status == responses.ResponseStatusFailed {
+			return Response{}, responseFailedError(response.Error)
+		}
+		normalized := normalizeResponse(request, &response)
+		if response.Usage.TotalTokens > 0 || response.Usage.InputTokens > 0 || response.Usage.OutputTokens > 0 {
+			usage := normalizeUsage(response.Usage, request)
+			if err := emitEvent(StreamEvent{Type: StreamUsageReported, Usage: &usage}); err != nil {
 				return Response{}, err
 			}
-		case "response.function_call_arguments.delta":
-			delta := event.AsResponseFunctionCallArgumentsDelta()
-			if err := emitEvent(StreamEvent{
-				Type:          StreamToolCallDelta,
-				BlockID:       delta.ItemID,
-				ToolCallDelta: ToolCallDelta{ID: delta.ItemID, ArgumentsPartial: delta.Delta},
-			}); err != nil {
-				return Response{}, err
+		}
+		if err := emitEvent(StreamEvent{Type: StreamResponseFinished, BlockID: response.ID}); err != nil {
+			return Response{}, err
+		}
+		return normalized, nil
+	}
+	result, resultErr = consume(params)
+	if resultErr != nil {
+		var providerErr *ProviderError
+		if errors.As(resultErr, &providerErr) && providerErr.Code == ErrProviderRequestInvalid && !started {
+			if fallback, ok := strictDisabledParams(params); ok {
+				response = responses.Response{}
+				observation.StrictFallback = true
+				result, resultErr = consume(fallback)
 			}
-		case "response.completed":
-			response = event.AsResponseCompleted().Response
-		case "response.failed":
-			return Response{}, responseFailedError(event.AsResponseFailed().Response.Error)
 		}
 	}
-	if err := stream.Err(); err != nil {
-		return Response{}, classifyProviderError(ctx, err)
-	}
-	if response.ID == "" || response.Model == "" {
-		return Response{}, NewProviderError(ErrProviderOutputInvalid, false, 0, errors.New("stream completed without a normalized response"))
-	}
-	if response.Status == responses.ResponseStatusFailed {
-		return Response{}, responseFailedError(response.Error)
+	if resultErr != nil {
+		return Response{}, resultErr
 	}
 	observation.Model = string(response.Model)
 	observation.InputTokens = response.Usage.InputTokens
 	observation.OutputTokens = response.Usage.OutputTokens
 	observation.TotalTokens = response.Usage.TotalTokens
-	if response.Usage.TotalTokens > 0 || response.Usage.InputTokens > 0 || response.Usage.OutputTokens > 0 {
-		usage := normalizeUsage(response.Usage, request)
-		if err := emitEvent(StreamEvent{Type: StreamUsageReported, Usage: &usage}); err != nil {
-			return Response{}, err
-		}
-	}
-	result = normalizeResponse(request, &response)
-	if err := emitEvent(StreamEvent{Type: StreamResponseFinished, BlockID: response.ID}); err != nil {
-		return Response{}, err
-	}
 	observation.Status = string(result.FinishReason)
 	return result, nil
+}
+
+// reasoningTextDelta 读取推理正文分片。网关（如 tokenflux 的 deepseek-flash）会下发
+// response.reasoning_text.delta，SDK v1.12 未收录该事件类型，因此只从原始事件取 delta。
+func reasoningTextDelta(event responses.ResponseStreamEventUnion) string {
+	var payload struct {
+		Delta string `json:"delta"`
+	}
+	if err := json.Unmarshal([]byte(event.RawJSON()), &payload); err != nil {
+		return ""
+	}
+	return payload.Delta
 }
 
 // buildParams 把统一 Request 转换为 Responses API 请求参数。
@@ -234,6 +271,9 @@ func (p *OpenAIProvider) buildParams(request Request) (responses.ResponseNewPara
 		params.MaxOutputTokens = openai.Int(int64(request.MaxOutputTokens))
 	}
 	applySamplingParams(&params, request.Parameters)
+	if p.reasoningEffort != "" {
+		params.Reasoning = responses.ReasoningParam{Effort: responses.ReasoningEffort(p.reasoningEffort)}
+	}
 	return params, nil
 }
 

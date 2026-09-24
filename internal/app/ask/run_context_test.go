@@ -22,7 +22,7 @@ func TestControlInstructionsCoversRequiredRules(t *testing.T) {
 			t.Fatalf("ControlInstructions() missing key rule %q", keyword)
 		}
 	}
-	for _, keyword := range []string{"闲聊、打招呼也需要任务", "group.task_keys", "coverage.tasks", "unresolved"} {
+	for _, keyword := range []string{"闲聊、打招呼也需要任务", "group.task_keys", "coverage 与 end 由服务端按记录推导", "unresolved"} {
 		if !strings.Contains(text, keyword) {
 			t.Fatalf("ControlInstructions() missing casual reply rule %q", keyword)
 		}

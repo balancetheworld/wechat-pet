@@ -74,7 +74,7 @@ func (a *AgentModelAdapter) Step(ctx context.Context, input askapp.StepInput) (a
 			return askapp.ModelStepResult{}, fmt.Errorf("agent_model: start attempt: %w", err)
 		}
 	}
-	response, err := a.provider.Complete(ctx, request)
+	response, err := a.completeStep(ctx, request, input.OnAnswerDelta, input.OnThinkingDelta)
 	if err != nil {
 		executorErr := toExecutorError(err)
 		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, Response{}); transitionErr != nil {
@@ -83,9 +83,16 @@ func (a *AgentModelAdapter) Step(ctx context.Context, input askapp.StepInput) (a
 		return askapp.ModelStepResult{}, executorErr
 	}
 	result := modelStepResult(response)
+	if response.FinishReason == FinishLength {
+		executorErr := askapp.NewExecutorError(ErrProviderOutputTruncated, true, 0, errors.New("model output truncated by max_output_tokens"))
+		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, response); transitionErr != nil {
+			return result, transitionErr
+		}
+		return result, executorErr
+	}
 	records, err := parseRecordArray(response.Text)
 	if err != nil {
-		executorErr := askapp.NewExecutorError(ErrProviderOutputInvalid, false, 0, err)
+		executorErr := askapp.NewExecutorError(ErrProviderOutputInvalid, false, 0, fmt.Errorf("%w (len=%d, head=%q, tail=%q)", err, len(response.Text), headSnippet(response.Text), tailSnippet(response.Text)))
 		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, response); transitionErr != nil {
 			return result, transitionErr
 		}
@@ -164,6 +171,90 @@ func newAttemptID() (string, error) {
 	value[6] = (value[6] & 0x0f) | 0x40
 	value[8] = (value[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", value[0:4], value[4:6], value[6:8], value[8:10], value[10:16]), nil
+}
+
+// completeStep 在没有正文预览需求时走非流式调用；有预览需求时先尝试流式，
+// 仅在尚未发布任何正文预览且故障可恢复时降级为一次非流式调用（文档 8.7）。
+func (a *AgentModelAdapter) completeStep(ctx context.Context, request Request, onAnswerDelta, onThinkingDelta func(string) error) (Response, error) {
+	if onAnswerDelta == nil && onThinkingDelta == nil {
+		return a.provider.Complete(ctx, request)
+	}
+	response, published, err := a.streamStep(ctx, request, onAnswerDelta, onThinkingDelta)
+	if err == nil {
+		return response, nil
+	}
+	var providerErr *ProviderError
+	if !errors.As(err, &providerErr) {
+		return Response{}, err
+	}
+	if decision := CanDegradeToNonStreaming(published, !BlindRetryForbidden(providerErr.Code), true); !decision.Allow {
+		return Response{}, err
+	}
+	return a.provider.Complete(ctx, request)
+}
+
+// streamStep 流式接收一次 agent_step 响应，把 final_answer 正文按已生成的字符
+// 尽早回传给调用方；协议错误不发布，仍由完整响应统一校验。
+func (a *AgentModelAdapter) streamStep(ctx context.Context, request Request, onAnswerDelta, onThinkingDelta func(string) error) (Response, bool, error) {
+	parser := askapp.NewRecordArrayParser()
+	action := askapp.ResponseAction("")
+	published := false
+	parseFailed := false
+	emitted := ""
+	response, err := a.provider.Stream(ctx, request, func(event StreamEvent) error {
+		if event.Type == StreamReasoningDelta {
+			if onThinkingDelta == nil || event.ReasoningDelta == "" {
+				return nil
+			}
+			return onThinkingDelta(event.ReasoningDelta)
+		}
+		if event.Type != StreamContentDelta || parseFailed {
+			return nil
+		}
+		if action == askapp.ActionFinalAnswer {
+			if text, ok := parser.PartialText(); ok {
+				if strings.HasPrefix(text, emitted) {
+					if suffix := text[len(emitted):]; suffix != "" {
+						if err := onAnswerDelta(suffix); err != nil {
+							return err
+						}
+						published = true
+					}
+				}
+				emitted = text
+			} else {
+				emitted = ""
+			}
+		}
+		records, feedErr := parser.Feed(event.ContentDelta)
+		if feedErr != nil {
+			parseFailed = true
+			return nil
+		}
+		for _, record := range records {
+			if record.Type == askapp.RecordHeader && record.Header != nil {
+				action = record.Header.Action
+				continue
+			}
+			if action != askapp.ActionFinalAnswer || record.Type != askapp.RecordSegment || record.Segment == nil {
+				continue
+			}
+			if text := record.Segment.Text; strings.HasPrefix(text, emitted) {
+				if suffix := text[len(emitted):]; strings.TrimSpace(suffix) != "" {
+					if err := onAnswerDelta(suffix); err != nil {
+						return err
+					}
+					published = true
+				}
+			}
+			emitted = ""
+		}
+		return nil
+	})
+	if err != nil {
+		return Response{}, published, err
+	}
+	return response, published, nil
 }
 
 // toExecutorError 把 Provider 层稳定错误映射为 ask 层可识别的执行错误（文档 4.1、9）。
@@ -255,6 +346,24 @@ func toolsToSpecs(tools []askapp.Tool) []ToolSpec {
 }
 
 // parseRecordArray 把 Provider 返回的 record_array_v1 文本解析为 ProtocolRecord。
+// headSnippet/tailSnippet 只用于失败诊断：截取定长首尾片段进入错误信息（开发环境日志可见），
+// 便于区分「截断」「模型改写结构」「空响应」三类解析失败。
+func headSnippet(text string) string {
+	runes := []rune(text)
+	if len(runes) > 120 {
+		return string(runes[:120])
+	}
+	return text
+}
+
+func tailSnippet(text string) string {
+	runes := []rune(text)
+	if len(runes) > 120 {
+		return string(runes[len(runes)-120:])
+	}
+	return text
+}
+
 // 数组必须完整闭合；半截响应视为协议错误，不当作可执行动作。
 // 非 strict 结构化输出下模型可能把 schema 关键词（如 items）误当输出结构，
 // 输出 {"items":[...]} 包裹；此处先解包再交给严格解析器（文档 12.2 实测结论）。

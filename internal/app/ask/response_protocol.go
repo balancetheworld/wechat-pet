@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"unicode/utf16"
+	"unicode/utf8"
 )
 
 // 本文件固定 v2 核心问答的「动作先行响应协议 record_array_v1」（文档 8.4）。
@@ -234,6 +236,233 @@ func (p *RecordArrayParser) Feed(chunk string) ([]ProtocolRecord, error) {
 // Closed 报告数组是否已闭合（收到 ']'）。
 func (p *RecordArrayParser) Closed() bool { return p.closed }
 
+// PartialText 返回当前未闭合 segment 记录里 text 字符串值已可解码的前缀。
+// 它只服务流式预览：type 必须已解析为 segment 且 text 值已开始，其余情况返回 ok=false，
+// 不猜测结构、不参与契约校验，最终正文仍以完整记录为准。
+func (p *RecordArrayParser) PartialText() (string, bool) {
+	if p.closed || !p.started || p.needSeparator {
+		return "", false
+	}
+	i := skipJSONSpace(p.buf, 0)
+	if i >= len(p.buf) || p.buf[i] != '{' {
+		return "", false
+	}
+	i++
+	kind := ""
+	for {
+		i = skipJSONSpace(p.buf, i)
+		if i >= len(p.buf) {
+			return "", false
+		}
+		switch p.buf[i] {
+		case '}':
+			return "", false
+		case ',':
+			i++
+			continue
+		case '"':
+		default:
+			return "", false
+		}
+		key, next, closed, ok := readJSONStringPrefix(p.buf, i)
+		if !ok || !closed {
+			return "", false
+		}
+		i = skipJSONSpace(p.buf, next)
+		if i >= len(p.buf) || p.buf[i] != ':' {
+			return "", false
+		}
+		i = skipJSONSpace(p.buf, i+1)
+		if i >= len(p.buf) {
+			return "", false
+		}
+		if key == "type" {
+			value, valueNext, valueClosed, valueOK := readJSONStringPrefix(p.buf, i)
+			if !valueOK || !valueClosed {
+				return "", false
+			}
+			kind = value
+			i = valueNext
+			continue
+		}
+		if key == "text" && kind == string(RecordSegment) {
+			value, _, _, valueOK := readJSONStringPrefix(p.buf, i)
+			if !valueOK {
+				return "", false
+			}
+			return value, true
+		}
+		end := skipJSONValue(p.buf, i)
+		if end < 0 {
+			return "", false
+		}
+		i = end
+	}
+}
+
+// skipJSONValue 返回从 i 开始的完整 JSON 值之后的下标，不完整或非法时返回 -1。
+func skipJSONValue(data []byte, i int) int {
+	if i >= len(data) {
+		return -1
+	}
+	switch data[i] {
+	case '"':
+		_, next, closed, ok := readJSONStringPrefix(data, i)
+		if !ok || !closed {
+			return -1
+		}
+		return next
+	case '{', '[':
+		return findJSONValueEnd(data, i)
+	case 't':
+		return skipJSONLiteral(data, i, "true")
+	case 'f':
+		return skipJSONLiteral(data, i, "false")
+	case 'n':
+		return skipJSONLiteral(data, i, "null")
+	default:
+		return skipJSONNumber(data, i)
+	}
+}
+
+func skipJSONLiteral(data []byte, i int, literal string) int {
+	if i+len(literal) > len(data) {
+		return -1
+	}
+	if string(data[i:i+len(literal)]) != literal {
+		return -1
+	}
+	return i + len(literal)
+}
+
+func skipJSONNumber(data []byte, i int) int {
+	j := i
+	for j < len(data) && isJSONNumberByte(data[j]) {
+		j++
+	}
+	if j == i || j >= len(data) {
+		return -1
+	}
+	return j
+}
+
+func isJSONNumberByte(c byte) bool {
+	switch {
+	case c >= '0' && c <= '9':
+		return true
+	case c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E':
+		return true
+	default:
+		return false
+	}
+}
+
+// readJSONStringPrefix 读取可能尚未闭合的 JSON 字符串，i 必须指向开引号。
+// 返回已解码前缀、下一个下标、是否已闭合与是否可解析；转义或字符不完整时只返回此前缀。
+func readJSONStringPrefix(data []byte, i int) (string, int, bool, bool) {
+	if i >= len(data) || data[i] != '"' {
+		return "", i, false, false
+	}
+	builder := make([]byte, 0, len(data)-i)
+	j := i + 1
+	for j < len(data) {
+		c := data[j]
+		if c == '"' {
+			return string(builder), j + 1, true, true
+		}
+		if c != '\\' {
+			builder = append(builder, c)
+			j++
+			continue
+		}
+		if j+1 >= len(data) {
+			return string(trimIncompleteUTF8(builder)), len(data), false, true
+		}
+		switch data[j+1] {
+		case '"', '\\', '/':
+			builder = append(builder, data[j+1])
+			j += 2
+		case 'b':
+			builder = append(builder, '\b')
+			j += 2
+		case 'f':
+			builder = append(builder, '\f')
+			j += 2
+		case 'n':
+			builder = append(builder, '\n')
+			j += 2
+		case 'r':
+			builder = append(builder, '\r')
+			j += 2
+		case 't':
+			builder = append(builder, '\t')
+			j += 2
+		case 'u':
+			code, ok := decodeUnicodeHex(data, j+2)
+			if !ok {
+				return string(trimIncompleteUTF8(builder)), len(data), false, true
+			}
+			j += 6
+			if utf16.IsSurrogate(rune(code)) && j+6 <= len(data) && data[j] == '\\' && data[j+1] == 'u' {
+				if low, lowOK := decodeUnicodeHex(data, j+2); lowOK {
+					decoded := utf16.DecodeRune(rune(code), rune(low))
+					if decoded != utf8.RuneError {
+						builder = utf8.AppendRune(builder, decoded)
+						j += 6
+						continue
+					}
+				}
+			}
+			builder = utf8.AppendRune(builder, rune(code))
+		default:
+			return string(trimIncompleteUTF8(builder)), len(data), false, false
+		}
+	}
+	return string(trimIncompleteUTF8(builder)), len(data), false, true
+}
+
+func decodeUnicodeHex(data []byte, i int) (uint16, bool) {
+	if i+4 > len(data) {
+		return 0, false
+	}
+	value := uint16(0)
+	for _, c := range data[i : i+4] {
+		digit, ok := hexDigitValue(c)
+		if !ok {
+			return 0, false
+		}
+		value = value<<4 | uint16(digit)
+	}
+	return value, true
+}
+
+func hexDigitValue(c byte) (int, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return int(c - '0'), true
+	case c >= 'a' && c <= 'f':
+		return int(c-'a') + 10, true
+	case c >= 'A' && c <= 'F':
+		return int(c-'A') + 10, true
+	default:
+		return 0, false
+	}
+}
+
+// trimIncompleteUTF8 丢弃结尾处尚未收齐的多字节 UTF-8 序列，避免预览出现半个字符。
+func trimIncompleteUTF8(data []byte) []byte {
+	for back := 1; back <= 3 && back <= len(data); back++ {
+		if !utf8.RuneStart(data[len(data)-back]) {
+			continue
+		}
+		if utf8.Valid(data[len(data)-back:]) {
+			return data
+		}
+		return data[:len(data)-back]
+	}
+	return data
+}
+
 // normalizeCallArguments 归一化 call 记录的 arguments。
 // 协议正文（strict 结构化输出）使用 JSON 字符串承载工具参数，需转义内部引号；
 // 非 strict 回退时模型可能直接给出对象，两种形式都接受并统一为 JSON 对象字节。
@@ -348,7 +577,8 @@ func ValidateResponse(records []ProtocolRecord) (ResponseAction, error) {
 	}
 
 	if seenEnd == 0 {
-		return header.Action, fmt.Errorf("record_array: missing end")
+		// end 不是必需记录：数组闭合已经表达响应结束，服务端据此判定完成。
+		return header.Action, nil
 	}
 	if seenCoverage == 0 {
 		// coverage 缺失不是协议错误：模型经常在 call_tools 时漏写，

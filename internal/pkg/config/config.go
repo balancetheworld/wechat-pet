@@ -13,27 +13,28 @@ import (
 )
 
 type Config struct {
-	AppEnv           string `yaml:"app_env"`
-	HTTPAddr         string `yaml:"http_addr"`
-	DatabaseDriver   string `yaml:"database_driver"`
-	DatabaseDSN      string `yaml:"database_dsn"`
-	JWTSecret        string `yaml:"jwt_secret"`
-	JWTExpireMinutes int    `yaml:"jwt_expire_minutes"`
-	WeChatAppID      string `yaml:"wechat_app_id"`
-	WeChatAppSecret  string `yaml:"wechat_app_secret"`
-	StorageDriver    string `yaml:"storage_driver"`
-	LocalUploadDir   string `yaml:"local_upload_dir"`
-	PublicBaseURL    string `yaml:"public_base_url"`
-	COSSecretID      string `yaml:"cos_secret_id"`
-	COSSecretKey     string `yaml:"cos_secret_key"`
-	COSBucket        string `yaml:"cos_bucket"`
-	RedisAddr        string `yaml:"redis_addr"`
-	AIEnabled        bool   `yaml:"ai_enabled"`
-	AIProvider       string `yaml:"ai_provider"`
-	AIAPIKey         string `yaml:"ai_api_key"`
-	AIBaseURL        string `yaml:"ai_base_url"`
-	AIModel          string `yaml:"ai_model"`
-	AITimeoutSeconds int    `yaml:"ai_timeout_seconds"`
+	AppEnv            string `yaml:"app_env"`
+	HTTPAddr          string `yaml:"http_addr"`
+	DatabaseDriver    string `yaml:"database_driver"`
+	DatabaseDSN       string `yaml:"database_dsn"`
+	JWTSecret         string `yaml:"jwt_secret"`
+	JWTExpireMinutes  int    `yaml:"jwt_expire_minutes"`
+	WeChatAppID       string `yaml:"wechat_app_id"`
+	WeChatAppSecret   string `yaml:"wechat_app_secret"`
+	StorageDriver     string `yaml:"storage_driver"`
+	LocalUploadDir    string `yaml:"local_upload_dir"`
+	PublicBaseURL     string `yaml:"public_base_url"`
+	COSSecretID       string `yaml:"cos_secret_id"`
+	COSSecretKey      string `yaml:"cos_secret_key"`
+	COSBucket         string `yaml:"cos_bucket"`
+	RedisAddr         string `yaml:"redis_addr"`
+	AIEnabled         bool   `yaml:"ai_enabled"`
+	AIProvider        string `yaml:"ai_provider"`
+	AIAPIKey          string `yaml:"ai_api_key"`
+	AIBaseURL         string `yaml:"ai_base_url"`
+	AIModel           string `yaml:"ai_model"`
+	AITimeoutSeconds  int    `yaml:"ai_timeout_seconds"`
+	AIReasoningEffort string `yaml:"ai_reasoning_effort"`
 }
 
 func Load(yamlPaths ...string) (Config, error) {
@@ -109,6 +110,7 @@ func applyEnvironment(cfg *Config) error {
 	setString("AI_PROVIDER", &cfg.AIProvider)
 	setString("AI_BASE_URL", &cfg.AIBaseURL)
 	setString("AI_MODEL", &cfg.AIModel)
+	setString("AI_REASONING_EFFORT", &cfg.AIReasoningEffort)
 	if value, ok := os.LookupEnv("JWT_EXPIRE_MINUTES"); ok {
 		minutes, err := strconv.Atoi(value)
 		if err != nil {
@@ -180,6 +182,11 @@ func (c Config) Validate() error {
 		}
 		if c.AITimeoutSeconds <= 0 {
 			return errors.New("AI_TIMEOUT_SECONDS must be greater than zero")
+		}
+		switch c.AIReasoningEffort {
+		case "", "minimal", "low", "medium", "high":
+		default:
+			return errors.New("AI_REASONING_EFFORT must be minimal, low, medium, or high")
 		}
 	}
 	if c.AppEnv == "production" {

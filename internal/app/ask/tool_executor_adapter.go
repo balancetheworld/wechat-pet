@@ -267,6 +267,12 @@ func prepareInputForTool(toolName string, args map[string]any) (OperationPreview
 			}
 			fields["birthday"] = value
 		}
+		if value, ok := args["home_date"].(string); ok && value != "" {
+			if _, err := time.Parse("2006-01-02", value); err != nil {
+				return OperationPreviewInput{}, fmt.Errorf("home_date must be YYYY-MM-DD")
+			}
+			fields["home_date"] = value
+		}
 		if len(fields) == 0 {
 			return OperationPreviewInput{}, fmt.Errorf("at least one profile field is required")
 		}
@@ -324,6 +330,7 @@ func prepareInputForTool(toolName string, args map[string]any) (OperationPreview
 			Breed      string `json:"breed"`
 			Gender     string `json:"gender"`
 			Birthday   string `json:"birthday"`
+			HomeDate   string `json:"home_date"`
 			Sterilized *bool  `json:"sterilized"`
 		}{Name: name}
 		if value, ok := args["breed"].(string); ok {
@@ -337,6 +344,12 @@ func prepareInputForTool(toolName string, args map[string]any) (OperationPreview
 				return OperationPreviewInput{}, fmt.Errorf("birthday must be YYYY-MM-DD")
 			}
 			payload.Birthday = value
+		}
+		if value, ok := args["home_date"].(string); ok && value != "" {
+			if _, err := time.Parse("2006-01-02", value); err != nil {
+				return OperationPreviewInput{}, fmt.Errorf("home_date must be YYYY-MM-DD")
+			}
+			payload.HomeDate = value
 		}
 		if value, ok := args["sterilized"].(bool); ok {
 			payload.Sterilized = &value

@@ -2,8 +2,13 @@ package ai
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -303,6 +308,47 @@ func TestBuildParamsRecordArrayUsesProtocolToolsOnly(t *testing.T) {
 	}
 }
 
+func TestReasoningTextDeltaReadsUnknownEventType(t *testing.T) {
+	var event responses.ResponseStreamEventUnion
+	if err := json.Unmarshal([]byte(`{"type":"response.reasoning_text.delta","item_id":"item-1","delta":"先看精神"}`), &event); err != nil {
+		t.Fatalf("unknown reasoning event should decode: %v", err)
+	}
+	if event.Type != "response.reasoning_text.delta" || event.ItemID != "item-1" {
+		t.Fatalf("event = %+v", event)
+	}
+	if delta := reasoningTextDelta(event); delta != "先看精神" {
+		t.Fatalf("reasoning delta = %q", delta)
+	}
+}
+
+func TestBuildParamsAppliesReasoningEffort(t *testing.T) {
+	provider, err := NewOpenAIProvider(OpenAIConfig{APIKey: "key", Model: "gpt-5-mini", Timeout: time.Second, ReasoningEffort: "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params, err := provider.buildParams(Request{ResponseProtocol: askapp.RecordArrayV1, ResponseSchema: askapp.RecordArraySchema()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if params.Reasoning.Effort != responses.ReasoningEffortLow {
+		t.Fatalf("reasoning effort = %q, want low", params.Reasoning.Effort)
+	}
+}
+
+func TestBuildParamsOmitsReasoningWhenUnset(t *testing.T) {
+	provider, err := NewOpenAIProvider(OpenAIConfig{APIKey: "key", Model: "gpt-4o-mini", Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	params, err := provider.buildParams(Request{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if params.Reasoning.Effort != "" {
+		t.Fatalf("reasoning effort = %q, want empty", params.Reasoning.Effort)
+	}
+}
+
 func TestProviderErrorCodeAndKnownCodes(t *testing.T) {
 	err := NewProviderError(ErrProviderQuotaExhausted, false, 0, errors.New("boom"))
 	if ProviderErrorCode(err) != ErrProviderQuotaExhausted {
@@ -322,5 +368,45 @@ func TestProviderErrorCodeAndKnownCodes(t *testing.T) {
 	// 普通 error 提取为 provider_failed。
 	if ProviderErrorCode(errors.New("plain")) != ErrProviderFailed {
 		t.Fatal("plain error should map to provider_failed")
+	}
+}
+
+func TestStreamRetriesWithoutStrictSchema(t *testing.T) {
+	var mu sync.Mutex
+	bodies := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(body))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":{"message":"invalid strict schema","type":"invalid_request_error"}}`))
+	}))
+	defer server.Close()
+	provider, err := NewOpenAIProvider(OpenAIConfig{APIKey: "key", BaseURL: server.URL, Model: "test-model", Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := Request{
+		SchemaVersion:    "request_v1",
+		AttemptID:        "attempt-1",
+		Purpose:          PurposeAgentStep,
+		Model:            "test-model",
+		ResponseSchema:   askapp.RecordArraySchema(),
+		ResponseProtocol: askapp.RecordArrayV1,
+		Messages:         []Message{{Role: "user", Content: "你好"}},
+	}
+	if _, err := provider.Stream(context.Background(), request, func(StreamEvent) error { return nil }); err == nil {
+		t.Fatal("stream should fail without a usable schema")
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("requests = %d, want 2 (strict then fallback)", len(bodies))
+	}
+	if !strings.Contains(bodies[0], `"strict":true`) {
+		t.Fatalf("first request should use strict schema: %s", bodies[0])
+	}
+	if !strings.Contains(bodies[1], `"strict":false`) {
+		t.Fatalf("fallback request should disable strict: %s", bodies[1])
 	}
 }

@@ -12,7 +12,7 @@ import (
 // 受控指令只承载语义与规则，record_array_v1 的精确结构由 ResponseSchema 结构化输出承载。
 
 // ControlInstructionsVersion 是受控指令的版本（服务端版本化配置，文档 5.8 第 1 层）。
-const ControlInstructionsVersion = "ask-control-instructions-v3"
+const ControlInstructionsVersion = "ask-control-instructions-v5"
 
 // ClockBlockVersion 是服务端时间块的版本（文档 5.8 第 2 层参考数据）。
 const ClockBlockVersion = "ask-clock-v1"
@@ -46,8 +46,14 @@ func ControlInstructions() string {
 
 【回答组织】
 - 当前问题尚无任务时，在 header.task_updates 创建任务（含 task_key 和 goal）；已有任务时沿用。闲聊、打招呼也需要任务，不能因没有指定宠物而留空。
-- group.task_keys 必须引用已有任务；coverage.tasks 用同一 task_key 关联回答组的 group_key。没有明确宠物的闲聊使用 unresolved 对象，不猜测或查询宠物。
+- group.task_keys 必须引用已有任务。没有明确宠物的闲聊使用 unresolved 对象，不猜测或查询宠物。
+- coverage 与 end 由服务端按记录推导，不需要输出；只输出 header、group/segment（或 question、call）与必要的 risk 记录。
 - 一个最终回答可包含多个 group，每个 group 表达一个对象的一段答复。
+- 回答正文必须结构化：先一句话结论，再分点；每个要点单独一行，要点之间空行；单段不超过 3 行，禁止一整段写到底。
+- 允许并优先使用 Markdown 的加粗与列表：**加粗** 用于关键词，1. 2. 3. 用于有顺序的步骤，- 用于并列要点。不要使用标题（# / ## / ###）、表格、图片、链接或 HTML 标签。
+- 长回答拆成多个 segment：先给主 segment（casual 用 reply、fact 用 result、health 用 observation 或 next_action），其余内容按语义拆到其它允许字段（如 watch_item、care_condition、next_action、limitation）。多段之间不要重复同一句话。
+- 回答要精炼：正文合计控制在 600 字以内，分点最多 5 条；更细的内容留给用户追问，不要把整篇科普一次写完。
+- basis_kind 只能按真实来源标注：只有已经从服务端读到的已保存数据（档案、记录、工具结果）才能用 business_fact；写入预览、尚未确认的操作、你自己的动作或一般建议用 general_knowledge 或 user_statement 表述。
 - answer_kind 取值 casual（闲聊）/ fact（记录查询）/ health（健康建议）。
 - segment.field：casual 使用 reply，fact 使用 result；health 使用 observation、possible_direction、watch_item、care_condition、uncertainty、risk、next_action。scope 非 full 时还须使用 limitation。不要自造字段名。
 - scope 取值 full / limited / declined / unavailable，表达答复范围；受限时须说明原因。

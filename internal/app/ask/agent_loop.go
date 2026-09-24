@@ -30,12 +30,14 @@ type ToolExecutor interface {
 
 // StepInput 是一次 agent_step 决策的输入（文档 4.1、5.8）。
 type StepInput struct {
-	SessionID string         // 当前 Session 身份
-	RunID     string         // 当前 Run 身份
-	Blocks    []ContextBlock // 已组装、去重、裁剪的上下文
-	Tools     []Tool         // 候选工具（已过滤）；无工具时传空集合
-	Budget    ModelBudgetSnapshot
-	Images    []ModelImage
+	SessionID       string         // 当前 Session 身份
+	RunID           string         // 当前 Run 身份
+	Blocks          []ContextBlock // 已组装、去重、裁剪的上下文
+	Tools           []Tool         // 候选工具（已过滤）；无工具时传空集合
+	Budget          ModelBudgetSnapshot
+	Images          []ModelImage
+	OnAnswerDelta   func(string) error // final_answer 正文段闭合时即时回传预览；nil 表示不使用流式预览
+	OnThinkingDelta func(string) error // 模型推理正文分片即时回传；nil 表示不下发思考预览
 }
 
 type ModelImage struct {
@@ -147,7 +149,7 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 		}
 		budgetSnapshot.Reservation = modelEstimate
 		modelStartedAt := time.Now()
-		modelResult, err := model.Step(modelContext, StepInput{SessionID: initial.SessionID, RunID: initial.RunID, Blocks: stepBlocks, Tools: stepTools, Budget: budgetSnapshot, Images: initial.Images})
+		modelResult, err := model.Step(modelContext, StepInput{SessionID: initial.SessionID, RunID: initial.RunID, Blocks: stepBlocks, Tools: stepTools, Budget: budgetSnapshot, Images: initial.Images, OnAnswerDelta: initial.OnAnswerDelta, OnThinkingDelta: initial.OnThinkingDelta})
 		modelDuration := elapsedMillis(modelStartedAt)
 		budgetDeadlineExceeded := errors.Is(modelContext.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 		cancelModel()
@@ -169,14 +171,7 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 			}
 			return outcome, err
 		}
-		if err := normalizeDecisionEvidence(&decision, evidenceKeys, turnID); err != nil {
-			if validationRetries == 0 && step+1 < maxSteps {
-				validationRetries++
-				validationFeedback = err.Error()
-				continue
-			}
-			return outcome, err
-		}
+		normalizeDecisionEvidence(&decision, evidenceKeys, turnID)
 		nextCallKeys := cloneKeySet(callKeys)
 		if err := validateDecisionReferences(decision, taskItems, nextCallKeys, operationIDs, evidenceKeys, initial.RunID); err != nil {
 			if validationRetries == 0 && step+1 < maxSteps {
@@ -490,10 +485,11 @@ func evidenceKeysForBlocks(blocks []ContextBlock) map[string]struct{} {
 
 // normalizeDecisionEvidence 归一化模型给出的证据引用：只保留服务端可核验的引用。
 // 用户陈述（user_statement）的依据由服务端确定性补齐为当前轮 turn/<turn_id>，不依赖模型；
-// 图片观察、一般知识等来源没有可核验 id，模型可能凭格式填出并不存在的引用，这些引用直接丢弃，
-// 不影响回答本身；业务事实（business_fact）必须至少留下一个可核验引用，否则视为模型把推测写成事实，
-// 交由上层反馈重试。
-func normalizeDecisionEvidence(decision *StepDecision, evidenceKeys map[string]struct{}, turnID string) error {
+// 图片观察、一般知识等来源没有可核验 id，模型可能凭格式填出并不存在的引用，这些引用直接丢弃。
+// business_fact 且没有任何可核验引用时降级为 general_knowledge：写入预览、尚未确认的操作
+// 在 Run 期间本来就没有可核验来源，模型却常标成业务事实；来源标注不准不应打死整轮回答，
+// 真正的事实边界由风险等级、限制说明与后续核实负责。
+func normalizeDecisionEvidence(decision *StepDecision, evidenceKeys map[string]struct{}, turnID string) {
 	for groupIndex := range decision.Groups {
 		group := &decision.Groups[groupIndex]
 		for segmentIndex := range group.Segments {
@@ -503,14 +499,13 @@ func normalizeDecisionEvidence(decision *StepDecision, evidenceKeys map[string]s
 				segment.EvidenceRefs = withTurnEvidenceRef(segment.EvidenceRefs, turnID)
 			}
 			if segment.BasisKind == BasisBusinessFact && len(segment.EvidenceRefs) == 0 {
-				return fmt.Errorf("decision_loop: segment %q claims business_fact without resolvable evidence", segment.SegmentKey)
+				segment.BasisKind = BasisGeneralKnowledge
 			}
 		}
 		for riskIndex := range group.Risks {
 			group.Risks[riskIndex].Evidence = resolvableEvidenceRefs(group.Risks[riskIndex].Evidence, evidenceKeys)
 		}
 	}
-	return nil
 }
 
 func withTurnEvidenceRef(refs []EvidenceRef, turnID string) []EvidenceRef {

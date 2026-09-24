@@ -92,7 +92,6 @@ export function useAskSession() {
   const [pageVisible, setPageVisible] = useState(true)
   const [connectionVersion, setConnectionVersion] = useState(0)
   const pendingRequest = useRef<PendingRequest | null>(null)
-  const liveEventKeys = useRef<Set<string>>(new Set())
   const draft = useAskStore(state => state.draft)
   const activeSessionId = useAskStore(state => state.activeSessionId)
   const activeRunId = useAskStore(state => state.activeRunId)
@@ -109,9 +108,6 @@ export function useAskSession() {
   })
 
   const syncEvents = useCallback((sessionID: string, runID: string, events: AskEvent[]) => {
-    for (const event of events) {
-      liveEventKeys.current.add(`${event.run_id}:${event.sequence}`)
-    }
     queryClient.setQueryData<AskEvent[]>(askQueryKeys.eventLog(sessionID, runID), current => mergeEvents(current, events))
     dispatch({ type: 'events.received', events })
     const sequence = latestSequence(events)
@@ -393,16 +389,11 @@ export function useAskSession() {
 
   function reset() {
     pendingRequest.current = null
-    liveEventKeys.current.clear()
     createMutation.reset()
     replyMutation.reset()
     continueMutation.reset()
     dispatch({ type: 'reset' })
     resetStore()
-  }
-
-  function isLiveEvent(event: AskEvent) {
-    return liveEventKeys.current.has(`${event.run_id}:${event.sequence}`)
   }
 
   return {
@@ -418,7 +409,6 @@ export function useAskSession() {
     retryConnection,
     stop,
     retry,
-    isLiveEvent,
     reset,
   }
 }

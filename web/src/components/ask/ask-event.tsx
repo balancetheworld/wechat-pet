@@ -1,14 +1,32 @@
 import type { AskAnalysisResult, AskAnswerGroup, AskAssistantResult, AskDeltaResult, AskEvent, AskFactResult, AskFailedResult, AskFamilyPetsResult, AskProgressResult, AskQuestionResult, AskRiskResult, AskTaskCoverage } from '../../types/ask'
-import { Button, RichText, Text, View } from '@tarojs/components'
+import { Button, RichText, ScrollView, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { micromark } from 'micromark'
-import { useCallback, useEffect, useState } from 'react'
-import { assistantPreviewText } from '../../hooks/ask-reducer'
 import { askFailureTitle } from './ask-failure'
 import { askErrorReport } from './ask-report'
 import './ask-event.scss'
 
 const emptyEvents: AskEvent[] = []
+
+// 小程序 rich-text 不支持 class，外部 CSS 作用不到内部节点，因此把排版写成内联样式。
+// 字号与行高沿用外层 .ask-markdown（rpx），这里只控制间距、列表符号与字重。
+const markdownStyles: Record<string, string> = {
+  p: 'margin:0 0 12px;',
+  ul: 'margin:0 0 12px;padding-left:26px;list-style-type:disc;',
+  ol: 'margin:0 0 12px;padding-left:26px;list-style-type:decimal;',
+  li: 'margin:0 0 6px;',
+  strong: 'font-weight:600;',
+}
+
+function renderMarkdown(text: string) {
+  return micromark(text).replace(/<(p|ul|ol|li|strong)(\s[^>]*)?>/g, (matched, tag: string, attributes?: string) => {
+    const style = markdownStyles[tag]
+    if (!style) {
+      return matched
+    }
+    return attributes ? `<${tag}${attributes} style="${style}">` : `<${tag} style="${style}">`
+  })
+}
 
 const factLabels: Record<AskFactResult['fact_type'], string> = {
   bath: '洗澡记录',
@@ -106,26 +124,22 @@ function ProgressResult({ data }: { data: AskProgressResult }) {
   )
 }
 
-function DeltaResult({ delta, onDone }: { delta: string, onDone?: () => void }) {
-  const characters = Array.from(delta)
-  const characterCount = characters.length
-  const [visibleCount, setVisibleCount] = useState(0)
-
-  useEffect(() => {
-    if (visibleCount >= characterCount) {
-      onDone?.()
-      return undefined
-    }
-    const timer = setInterval(() => {
-      setVisibleCount(value => value >= characterCount ? value : Math.min(value + Math.ceil((characterCount - value) / 10), characterCount))
-    }, 45)
-    return () => clearInterval(timer)
-  }, [characterCount, onDone, visibleCount])
-
+function DeltaResult({ delta }: { delta: string }) {
   return (
     <View className="ask-copy-result">
-      <RichText className="ask-markdown ask-delta" nodes={micromark(characters.slice(0, visibleCount).join(''))} />
+      <RichText className="ask-markdown ask-delta" nodes={renderMarkdown(delta)} />
       <Button className="ask-copy-button" onClick={() => void copyText(delta)} aria-label="复制回答">复制</Button>
+    </View>
+  )
+}
+
+function ThinkingResult({ delta }: { delta: string }) {
+  return (
+    <View className="ask-thinking">
+      <Text className="ask-thinking-label">思考过程</Text>
+      <ScrollView className="ask-thinking-scroll" scrollY showScrollbar={false} scrollTop={delta.length * 100}>
+        <Text className="ask-thinking-text">{delta}</Text>
+      </ScrollView>
     </View>
   )
 }
@@ -143,7 +157,7 @@ function AssistantGroups({ groups, coverage, answer }: { groups: AskAnswerGroup[
           </View>
           {(group.segments ?? []).map(segment => (
             <View className="ask-answer-segment" key={segment.segment_key}>
-              <RichText className="ask-markdown" nodes={micromark(segment.text)} />
+              <RichText className="ask-markdown" nodes={renderMarkdown(segment.text)} />
               {!!segment.evidence_refs?.length && <Text className="ask-answer-evidence">{segment.evidence_refs.map(ref => ref.source_type).join('、')}</Text>}
             </View>
           ))}
@@ -165,12 +179,7 @@ function AssistantGroups({ groups, coverage, answer }: { groups: AskAnswerGroup[
   )
 }
 
-function AssistantResult({ data, preview }: { data: AskAssistantResult, preview: string }) {
-  const [previewing, setPreviewing] = useState(preview !== '')
-  const handlePreviewDone = useCallback(() => setPreviewing(false), [])
-  if (previewing) {
-    return <DeltaResult delta={preview} onDone={handlePreviewDone} />
-  }
+function AssistantResult({ data }: { data: AskAssistantResult }) {
   return <AssistantGroups groups={data.groups ?? []} coverage={data.coverage ?? []} answer={data.answer} />
 }
 
@@ -183,12 +192,15 @@ async function copyText(value: string) {
   }
 }
 
-export default function AskEventView({ event, input = '', events = emptyEvents, live = false }: { event: AskEvent, input?: string, events?: AskEvent[], live?: boolean }) {
+export default function AskEventView({ event, input = '', events = emptyEvents }: { event: AskEvent, input?: string, events?: AskEvent[] }) {
   if (event.type === 'run.progress') {
     return <ProgressResult data={event.data as AskProgressResult} />
   }
   if (event.type === 'assistant.delta') {
     return <DeltaResult delta={(event.data as AskDeltaResult).delta} />
+  }
+  if (event.type === 'assistant.thinking') {
+    return <ThinkingResult delta={(event.data as AskDeltaResult).delta} />
   }
   if (event.type === 'fact.completed') {
     const data = event.data as AskFactResult
@@ -213,17 +225,16 @@ export default function AskEventView({ event, input = '', events = emptyEvents, 
     const data = event.data as AskQuestionResult
     return (
       <View className="ask-message ask-message--assistant">
-        <RichText className="ask-markdown" nodes={micromark(data.question)} />
+        <RichText className="ask-markdown" nodes={renderMarkdown(data.question)} />
         <Button className="ask-copy-button" onClick={() => void copyText(data.question)} aria-label="复制回答">复制</Button>
       </View>
     )
   }
   if (event.type === 'assistant.completed') {
     const data = event.data as AskAssistantResult
-    const preview = live && data.groups?.length ? assistantPreviewText(events, event.run_id) : ''
     return (
       <View className="ask-message ask-message--assistant">
-        <AssistantResult data={data} preview={preview} />
+        <AssistantResult data={data} />
         <Button className="ask-copy-button" onClick={() => void copyText(data.answer)} aria-label="复制回答">复制</Button>
       </View>
     )

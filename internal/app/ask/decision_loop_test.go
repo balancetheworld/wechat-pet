@@ -141,7 +141,7 @@ func TestValidateFinalAnswerOK(t *testing.T) {
 	}
 }
 
-func TestRunDecisionLoopRejectsGhostReferences(t *testing.T) {
+func TestRunDecisionLoopDowngradesGhostEvidence(t *testing.T) {
 	group := ProtocolRecord{Type: RecordGroup, Group: &GroupRecord{
 		Type: RecordGroup, GroupKey: "g1", TaskKeys: []string{"t1"},
 		AnswerKind: AnswerFact, Scope: ScopeFull,
@@ -160,8 +160,16 @@ func TestRunDecisionLoopRejectsGhostReferences(t *testing.T) {
 		endRecord(),
 	}
 	model := &scriptedModel{responses: [][]ProtocolRecord{records}}
-	if _, err := RunDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{}, 1); err == nil {
-		t.Fatal("expected ghost evidence reference to be rejected")
+	outcome, err := RunDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{}, 1)
+	if err != nil {
+		t.Fatalf("ghost evidence should be downgraded instead of failing the run: %v", err)
+	}
+	if len(outcome.Groups) != 1 || len(outcome.Groups[0].Segments) != 1 {
+		t.Fatalf("outcome groups = %+v", outcome.Groups)
+	}
+	answerSegment := outcome.Groups[0].Segments[0]
+	if len(answerSegment.EvidenceRefs) != 0 || answerSegment.BasisKind != BasisGeneralKnowledge {
+		t.Fatalf("segment = %+v, want dropped evidence and general_knowledge", answerSegment)
 	}
 }
 

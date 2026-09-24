@@ -1,6 +1,6 @@
 import type { AskEvent, AskExecution, AskSnapshot } from '../types/ask'
 import { expect, it } from 'vitest'
-import { askReducer, assistantPreviewText, hasSequenceGap, initialAskRuntimeState, mergeAskDeltaEvents, visibleTurnEvents } from './ask-reducer'
+import { askReducer, hasSequenceGap, initialAskRuntimeState, mergeAskDeltaEvents, visibleTurnEvents } from './ask-reducer'
 
 function event(sequence: number, type: string): AskEvent {
   return {
@@ -195,15 +195,20 @@ it('accumulates chunked assistant deltas in sequence order', () => {
   expect(merged[0].data).toEqual({ message_id: 'message-1', delta: '目前需要观察精神变化' })
 })
 
-it('accumulates the assistant preview text of a single run', () => {
-  const events = [
-    { ...event(1, 'assistant.delta'), data: { message_id: 'message-1', delta: '目前' } },
-    { ...event(2, 'assistant.delta'), data: { message_id: 'message-1', delta: '需要观察' } },
-    { ...event(3, 'assistant.delta'), run_id: 'run-2', data: { message_id: 'message-2', delta: '另一条回答' } },
-  ]
-  expect(assistantPreviewText(events, 'run-1')).toBe('目前需要观察')
-  expect(assistantPreviewText(events, 'run-2')).toBe('另一条回答')
-  expect(assistantPreviewText(events, 'run-3')).toBe('')
+it('keeps the thinking preview while only reasoning has arrived', () => {
+  const first = { ...event(1, 'assistant.thinking'), data: { message_id: 'message-1', delta: '先看' } }
+  const second = { ...event(2, 'assistant.thinking'), data: { message_id: 'message-1', delta: '精神状态' } }
+  const visible = visibleTurnEvents([first, second])
+  expect(visible).toHaveLength(1)
+  expect(visible[0].type).toBe('assistant.thinking')
+  expect(visible[0].data).toEqual({ message_id: 'message-1', delta: '先看精神状态' })
+})
+
+it('hides the thinking preview once the answer text starts', () => {
+  const thinking = { ...event(1, 'assistant.thinking'), data: { message_id: 'message-1', delta: '先看精神状态' } }
+  const delta = { ...event(2, 'assistant.delta'), data: { message_id: 'message-1', delta: '目前' } }
+  const visible = visibleTurnEvents([thinking, delta])
+  expect(visible.map(value => value.type)).toEqual(['assistant.delta'])
 })
 
 it('replaces accumulated assistant preview with the terminal answer', () => {

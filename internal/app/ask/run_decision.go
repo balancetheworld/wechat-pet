@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 )
 
 // 本文件是决策循环结果到 RunDecision 的降级映射（文档 8.4、8.5），
@@ -14,10 +15,14 @@ import (
 // maxDecisionStepsPerRun 是单 Run 决策循环步数上限（一期保守值，文档 9.3）。
 const maxDecisionStepsPerRun = 16
 
+// thinkingDeltaFlushRunes 是思考预览的合并阈值：推理增量先按字符聚合再落库，
+// 避免逐 token 写事件把数据库与事件流打满。
+const thinkingDeltaFlushRunes = 80
+
 // runV2DecisionLoop 执行 v2 单 Agent 决策循环并降级映射为 RunDecision。
 // 组装上下文 -> 召回候选工具 -> 构造工具执行器 -> RunDecisionLoop -> 降级映射。
 // ruleLevel 是 processRun 已评估的确定性规则风险，与模型风险合并后作为最终风险。
-func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Run, contextMessages []ContextMessage, currentInput string, contextSnapshot ContextSnapshot, images []ModelImage, ruleLevel RiskLevel) (RunDecision, error) {
+func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Run, messageID string, contextMessages []ContextMessage, currentInput string, contextSnapshot ContextSnapshot, images []ModelImage, ruleLevel RiskLevel) (RunDecision, error) {
 	assembly := BuildRunContext(currentInput, contextMessages, contextSnapshot, s.now())
 	budgets, ok := s.repository.(BudgetRepository)
 	if !ok {
@@ -62,14 +67,55 @@ func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Ru
 	if err != nil {
 		return RunDecision{}, err
 	}
-	outcome, err := runDecisionLoop(ctx, s.agentModel, executor, StepInput{SessionID: session.ID, RunID: run.ID, Blocks: assembly.Blocks, Tools: tools, Images: images}, maxDecisionStepsPerRun, s.repository, taskItems, run.TurnID, budgets, recallTools)
+	streamedAnswer := false
+	thinking := strings.Builder{}
+	thinkingRunes := 0
+	flushThinking := func() {
+		text := thinking.String()
+		thinking.Reset()
+		thinkingRunes = 0
+		if strings.TrimSpace(text) == "" {
+			return
+		}
+		if _, appendErr := s.appendAssistantThinking(ctx, session, run, messageID, text); appendErr != nil {
+			if s.debugLogger != nil {
+				s.debugLogger.Error("ask stream thinking failed", "run_id", run.ID, "session_id", session.ID, "error", appendErr)
+			}
+		}
+	}
+	emitThinkingDelta := func(delta string) error {
+		thinking.WriteString(delta)
+		thinkingRunes += utf8.RuneCountInString(delta)
+		if thinkingRunes >= thinkingDeltaFlushRunes {
+			flushThinking()
+		}
+		return nil
+	}
+	emitAnswerDelta := func(delta string) error {
+		if strings.TrimSpace(delta) == "" {
+			return nil
+		}
+		flushThinking()
+		if _, appendErr := s.appendAssistantDelta(ctx, session, run, messageID, delta); appendErr != nil {
+			if s.debugLogger != nil {
+				s.debugLogger.Error("ask stream delta failed", "run_id", run.ID, "session_id", session.ID, "error", appendErr)
+			}
+			return nil
+		}
+		streamedAnswer = true
+		return nil
+	}
+	outcome, err := runDecisionLoop(ctx, s.agentModel, executor, StepInput{SessionID: session.ID, RunID: run.ID, Blocks: assembly.Blocks, Tools: tools, Images: images, OnAnswerDelta: emitAnswerDelta, OnThinkingDelta: emitThinkingDelta}, maxDecisionStepsPerRun, s.repository, taskItems, run.TurnID, budgets, recallTools)
 	if err != nil {
 		return RunDecision{}, err
 	}
+	flushThinking()
 	if err := validateOutcomeSubjects(session, outcome); err != nil {
 		return RunDecision{}, err
 	}
-	return mapLoopOutcomeToDecision(outcome, ruleLevel), nil
+	decision := mapLoopOutcomeToDecision(outcome, ruleLevel)
+	decision.StreamedAnswer = streamedAnswer
+	return decision, nil
 }
 
 func securityContextBlocks(hits []InjectionHit) []ContextBlock {

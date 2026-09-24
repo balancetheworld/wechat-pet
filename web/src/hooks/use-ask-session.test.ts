@@ -185,16 +185,4 @@ describe('useAskSession 401 重连控制', () => {
     expect(mocks.createAskSession).toHaveBeenCalledWith({ input: '你好', asset_refs: undefined }, 'key-1')
     expect(mocks.createAskSessionForPet).not.toHaveBeenCalled()
   })
-
-  it('只把事件流到达的事件标记为直播事件', async () => {
-    mocks.getAskSnapshot.mockResolvedValueOnce(runningSnapshot())
-    const runtime = useAskSession()
-    await flushPromises()
-    const callbacks = mocks.openAskEventStream.mock.calls[0][0] as StreamCallbacks
-    const streamed = { run_id: 'run-1', sequence: 1, type: 'assistant.delta', data: { message_id: 'message-1', delta: '目前' }, created_at: '2026-09-19T00:00:01Z' }
-    callbacks.onEvents([streamed])
-
-    expect(runtime.isLiveEvent(streamed)).toBe(true)
-    expect(runtime.isLiveEvent({ ...streamed, sequence: 2 })).toBe(false)
-  })
 })

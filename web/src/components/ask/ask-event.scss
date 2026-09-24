@@ -46,6 +46,36 @@
   line-height: 1.55;
 }
 
+.ask-thinking {
+  display: flex;
+  flex-direction: column;
+  gap: 6rpx;
+  align-self: flex-start;
+  max-width: 82%;
+  box-sizing: border-box;
+  padding: 14rpx 18rpx;
+  border-left: 4rpx solid var(--primary-dark);
+  border-radius: 2rpx 8rpx 8rpx 2rpx;
+  background: rgba(204, 223, 244, 0.6);
+}
+
+.ask-thinking-label {
+  color: var(--primary-deep);
+  font-size: 22rpx;
+  line-height: 1.4;
+}
+
+.ask-thinking-scroll {
+  height: 180rpx;
+}
+
+.ask-thinking-text {
+  color: rgba(74, 100, 137, 0.62);
+  font-size: 24rpx;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
 .ask-markdown {
   display: block;
   overflow-wrap: anywhere;

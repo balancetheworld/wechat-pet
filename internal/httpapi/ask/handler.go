@@ -395,6 +395,8 @@ func (h *Handler) StreamEvents(c *gin.Context) {
 		}
 		after = parsed
 	}
+	notifyEvents, unsubscribe := h.service.SubscribeRunEvents(c.Param("run_id"))
+	defer unsubscribe()
 	values, err := h.service.GetEvents(c.Request.Context(), familyID, c.Param("session_id"), c.Param("run_id"), after, userID)
 	if err != nil {
 		response.Fail(c, asAppError(err))
@@ -432,7 +434,15 @@ func (h *Handler) StreamEvents(c *gin.Context) {
 	if err != nil || terminal {
 		return
 	}
-	ticker := time.NewTicker(500 * time.Millisecond)
+	refresh := func() bool {
+		current, fetchErr := h.service.GetEvents(c.Request.Context(), familyID, c.Param("session_id"), c.Param("run_id"), after, userID)
+		if fetchErr != nil {
+			return true
+		}
+		finished, writeErr := writeEvents(current)
+		return writeErr != nil || finished
+	}
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	timeout := time.NewTimer(25 * time.Second)
 	defer timeout.Stop()
@@ -442,13 +452,12 @@ func (h *Handler) StreamEvents(c *gin.Context) {
 			return
 		case <-timeout.C:
 			return
-		case <-ticker.C:
-			values, err = h.service.GetEvents(c.Request.Context(), familyID, c.Param("session_id"), c.Param("run_id"), after, userID)
-			if err != nil {
+		case <-notifyEvents:
+			if refresh() {
 				return
 			}
-			terminal, err = writeEvents(values)
-			if err != nil || terminal {
+		case <-ticker.C:
+			if refresh() {
 				return
 			}
 		}

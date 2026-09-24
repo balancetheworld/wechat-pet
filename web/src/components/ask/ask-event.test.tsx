@@ -1,9 +1,16 @@
+import type { ReactNode } from 'react'
 import type { AskEvent } from '../../types/ask'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { expect, it, vi } from 'vitest'
 import AskEventView from './ask-event'
 
-vi.mock('@tarojs/components', () => ({ Button: 'button', RichText: ({ nodes }: { nodes: string }) => <div data-nodes={nodes} />, Text: 'span', View: 'div' }))
+vi.mock('@tarojs/components', () => ({
+  Button: 'button',
+  RichText: ({ nodes }: { nodes: string }) => <div data-nodes={nodes} />,
+  ScrollView: ({ children, className }: { children?: ReactNode, className?: string }) => <div className={className}>{children}</div>,
+  Text: 'span',
+  View: 'div',
+}))
 vi.mock('@tarojs/taro', () => ({ default: {} }))
 
 it('renders a completed casual answer with empty optional evidence and risks', () => {
@@ -56,13 +63,13 @@ it('renders markdown in assistant segments without exposing raw HTML', () => {
   }
 
   const markup = renderToStaticMarkup(<AskEventView event={event} />)
-  expect(markup).toContain('&lt;ol&gt;')
-  expect(markup).toContain('&lt;strong&gt;健康观察&lt;/strong&gt;')
-  expect(markup).toContain('&lt;strong&gt;记录查询&lt;/strong&gt;')
+  expect(markup).toContain('&lt;ol style=&quot;margin:0 0 12px;padding-left:26px;list-style-type:decimal;&quot;&gt;')
+  expect(markup).toContain('&lt;strong style=&quot;font-weight:600;&quot;&gt;健康观察&lt;/strong&gt;')
+  expect(markup).toContain('&lt;strong style=&quot;font-weight:600;&quot;&gt;记录查询&lt;/strong&gt;')
   expect(markup).not.toContain('&lt;script&gt;')
 })
 
-it('keeps playing the streamed preview before switching to the completed answer', () => {
+it('renders the completed answer immediately without replaying a preview', () => {
   const completed: AskEvent = {
     run_id: 'run-3',
     sequence: 8,
@@ -86,10 +93,24 @@ it('keeps playing the streamed preview before switching to the completed answer'
   const preview: AskEvent = { run_id: 'run-3', sequence: 7, type: 'assistant.delta', created_at: '2026-09-23T10:40:49Z', data: { message_id: 'message-1', delta: '你好！' } }
   const events = [preview, completed]
 
-  const live = renderToStaticMarkup(<AskEventView event={completed} events={events} live />)
-  expect(live).toContain('复制回答')
-  expect(live).not.toContain('你好！')
+  const markup = renderToStaticMarkup(<AskEventView event={completed} events={events} />)
+  expect(markup).toContain('你好！')
+  expect(markup).toContain('复制回答')
+})
 
-  const restored = renderToStaticMarkup(<AskEventView event={completed} events={events} />)
-  expect(restored).toContain('你好！')
+it('renders a streamed delta as received', () => {
+  const delta: AskEvent = { run_id: 'run-4', sequence: 1, type: 'assistant.delta', created_at: '2026-09-23T10:40:49Z', data: { message_id: 'message-1', delta: '目前需要观察食欲和精神。' } }
+
+  const markup = renderToStaticMarkup(<AskEventView event={delta} />)
+  expect(markup).toContain('目前需要观察食欲和精神。')
+})
+
+it('renders the thinking preview with its own label and no copy button', () => {
+  const thinking: AskEvent = { run_id: 'run-5', sequence: 1, type: 'assistant.thinking', created_at: '2026-09-23T10:40:49Z', data: { message_id: 'message-1', delta: '先看精神状态和饮水' } }
+
+  const markup = renderToStaticMarkup(<AskEventView event={thinking} />)
+  expect(markup).toContain('思考过程')
+  expect(markup).toContain('先看精神状态和饮水')
+  expect(markup).toContain('ask-thinking-scroll')
+  expect(markup).not.toContain('复制回答')
 })

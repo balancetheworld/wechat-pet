@@ -32,7 +32,6 @@ export default function Ask() {
     retryConnection,
     stop,
     retry,
-    isLiveEvent,
   } = useAskSession()
   const [assetRefs, setAssetRefs] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
@@ -280,7 +279,7 @@ export default function Ask() {
                     </View>
                   )}
                   {visibleTurnEvents(turn.events).map(event => (
-                    <AskEventView event={event} input={turn.input} events={turn.events} live={isLiveEvent(event)} key={`${turn.runID}-${event.sequence}`} />
+                    <AskEventView event={event} input={turn.input} events={turn.events} key={`${turn.runID}-${event.sequence}`} />
                   ))}
                 </View>
               ))}

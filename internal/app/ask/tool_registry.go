@@ -57,7 +57,8 @@ func createPetTool() Tool {
 				"breed": {"type": "string", "description": "品种，可选"},
 				"gender": {"type": "string", "description": "性别，如 公/母，可选"},
 				"sterilized": {"type": "boolean", "description": "是否已绝育，可选"},
-				"birthday": {"type": "string", "description": "生日，YYYY-MM-DD，可选；相对描述用上下文当前时间换算"}
+				"birthday": {"type": "string", "description": "生日，YYYY-MM-DD，可选；相对描述用上下文当前时间换算"},
+				"home_date": {"type": "string", "description": "到家/领养日期，YYYY-MM-DD，可选；属于档案字段，不要写成日历记录"}
 			},
 			"required": ["name"],
 			"additionalProperties": false
@@ -71,7 +72,10 @@ func createPetTool() Tool {
 			},
 			"required": ["operation_id", "status", "preview"]
 		}`),
-		UseCases:             []string{"用户明确表示家里新增了一只宠物并希望建档时，先准备新建预览，由用户确认后创建"},
+		UseCases: []string{
+			"用户明确表示家里新增了一只宠物并希望建档时，先准备新建预览，由用户确认后创建",
+			"用户同时给出到家/领养日期时一并写入 home_date 档案字段，不要额外新建日历日常记录",
+		},
 		NegativeCases:        []string{"用户只是提到宠物或询问时不得创建；名字缺失时先追问；不得凭推测补全品种、生日等字段"},
 		Preconditions:        []string{"宠物名字由用户明确给出"},
 		SideEffects:          []string{"创建一条待确认的新建宠物预览（尚未写入业务数据）"},
@@ -573,7 +577,8 @@ func updatePetProfileTool() Tool {
 				"breed": {"type": "string", "description": "品种，可选"},
 				"gender": {"type": "string", "description": "性别，如 公/母，可选"},
 				"sterilized": {"type": "boolean", "description": "是否已绝育，可选"},
-				"birthday": {"type": "string", "description": "生日，YYYY-MM-DD，可选；相对描述用上下文当前时间换算"}
+				"birthday": {"type": "string", "description": "生日，YYYY-MM-DD，可选；相对描述用上下文当前时间换算"},
+				"home_date": {"type": "string", "description": "到家/领养日期，YYYY-MM-DD，可选；属于档案字段，不要写成日历记录"}
 			},
 			"required": ["pet_id"],
 			"additionalProperties": false
@@ -587,7 +592,10 @@ func updatePetProfileTool() Tool {
 			},
 			"required": ["operation_id", "status", "preview"]
 		}`),
-		UseCases:             []string{"用户要求修改宠物档案字段（名字、品种、性别、绝育、生日）时，先准备修改预览，由用户确认后写入"},
+		UseCases: []string{
+			"用户要求修改宠物档案字段（名字、品种、性别、绝育、生日、到家日期）时，先准备修改预览，由用户确认后写入",
+			"用户提到「到家日期/领养日期」时写入档案 home_date；不要用日历日常记录代替档案字段",
+		},
 		NegativeCases:        []string{"用户只是询问档案内容时不得修改；未确认前不得声称已修改；头像/封面等资产字段不由模型修改"},
 		Preconditions:        []string{"pet_id 已由解析宠物明确且属于当前授权家庭范围；字段值可由用户陈述或已保存数据核验"},
 		SideEffects:          []string{"创建一条待确认的档案修改预览（尚未写入业务数据）"},

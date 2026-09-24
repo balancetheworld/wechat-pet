@@ -212,12 +212,12 @@ func TestValidateResponseStructuralErrors(t *testing.T) {
 			t.Fatalf("expected invalid action error, got %v", err)
 		}
 	})
-	t.Run("missing end", func(t *testing.T) {
+	t.Run("missing end is derived from array closure", func(t *testing.T) {
 		records := []ProtocolRecord{
 			{Type: RecordHeader, Header: &HeaderRecord{Type: RecordHeader, SchemaVersion: RecordArrayV1, Action: ActionFinalAnswer, TaskUpdates: []TaskUpdate{}}},
 		}
-		if _, err := ValidateResponse(records); err == nil || !strings.Contains(err.Error(), "missing end") {
-			t.Fatalf("expected missing end error, got %v", err)
+		if _, err := ValidateResponse(records); err != nil {
+			t.Fatalf("missing end should not fail structural validation, got %v", err)
 		}
 	})
 	t.Run("missing coverage is derived later", func(t *testing.T) {
@@ -371,4 +371,61 @@ func TestValidateResponseCallValidation(t *testing.T) {
 			t.Fatalf("expected arguments error, got %v", err)
 		}
 	})
+}
+
+func TestRecordArrayParserPartialTextStreamsSegmentBody(t *testing.T) {
+	p := NewRecordArrayParser()
+	if _, err := p.Feed(`[{"type":"header","schema_version":"record_array_v1","action":"final_answer","task_updates":[]},{"type":"group","group_key":"g1","task_keys":["t1"],"answer_kind":"casual","subjects":[],"scope":"full"},{"type":"segment","segment_key":"s1","group_key":"g1","subject_keys":[],"field":"reply","text":"多喝温水`); err != nil {
+		t.Fatal(err)
+	}
+	text, ok := p.PartialText()
+	if !ok || text != "多喝温水" {
+		t.Fatalf("partial text = (%q, %v), want 多喝温水", text, ok)
+	}
+	records, err := p.Feed(`，注意观察精神。","basis_kind":"general_knowledge"},{"type":"coverage","tasks":[]},{"type":"end"}]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 3 || records[0].Segment == nil {
+		t.Fatalf("closed records = %+v, want segment, coverage, end", records)
+	}
+	if records[0].Segment.Text != "多喝温水，注意观察精神。" {
+		t.Fatalf("segment text = %q", records[0].Segment.Text)
+	}
+	if text, ok := p.PartialText(); ok {
+		t.Fatalf("closed record should not expose partial text %q", text)
+	}
+}
+
+func TestRecordArrayParserPartialTextDecodesEscapes(t *testing.T) {
+	p := NewRecordArrayParser()
+	if _, err := p.Feed(`[{"type":"segment","segment_key":"s1","text":"a\nb\"c`); err != nil {
+		t.Fatal(err)
+	}
+	text, ok := p.PartialText()
+	if !ok || text != "a\nb\"c" {
+		t.Fatalf("partial text = (%q, %v), want %q", text, ok, "a\nb\"c")
+	}
+}
+
+func TestRecordArrayParserPartialTextDropsIncompleteRune(t *testing.T) {
+	full := "观察"
+	p := NewRecordArrayParser()
+	if _, err := p.Feed(`[{"type":"segment","segment_key":"s1","text":"` + full[:len(full)-1]); err != nil {
+		t.Fatal(err)
+	}
+	text, ok := p.PartialText()
+	if !ok || text != "观" {
+		t.Fatalf("partial text = (%q, %v), want 观", text, ok)
+	}
+}
+
+func TestRecordArrayParserPartialTextIgnoresOtherRecords(t *testing.T) {
+	p := NewRecordArrayParser()
+	if _, err := p.Feed(`[{"type":"question","question_key":"q1","text":"请问是哪只宠物`); err != nil {
+		t.Fatal(err)
+	}
+	if text, ok := p.PartialText(); ok {
+		t.Fatalf("question record exposed partial text %q", text)
+	}
 }

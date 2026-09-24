@@ -389,6 +389,7 @@ func (s *Service) executePetCreate(ctx context.Context, repository operationRepo
 		Breed      string `json:"breed"`
 		Gender     string `json:"gender"`
 		Birthday   string `json:"birthday"`
+		HomeDate   string `json:"home_date"`
 		Sterilized *bool  `json:"sterilized"`
 	}
 	if err := json.Unmarshal([]byte(value.Payload), &payload); err != nil || payload.Name == "" {
@@ -398,8 +399,8 @@ func (s *Service) executePetCreate(ctx context.Context, repository operationRepo
 	if err != nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "pet_create_failed")
 	}
-	if payload.Breed != "" || payload.Gender != "" || payload.Birthday != "" || payload.Sterilized != nil {
-		update := petapp.UpdatePetRequest{Name: payload.Name, Breed: payload.Breed, Gender: payload.Gender, Birthday: payload.Birthday}
+	if payload.Breed != "" || payload.Gender != "" || payload.Birthday != "" || payload.HomeDate != "" || payload.Sterilized != nil {
+		update := petapp.UpdatePetRequest{Name: payload.Name, Breed: payload.Breed, Gender: payload.Gender, Birthday: payload.Birthday, HomeDate: payload.HomeDate}
 		if payload.Sterilized != nil {
 			update.Sterilized = *payload.Sterilized
 		}
@@ -450,6 +451,11 @@ func profileMatchesFields(profile petapp.PetProfile, fields map[string]any) bool
 		case "birthday":
 			value, ok := want.(string)
 			if !ok || profile.Birthday == nil || *profile.Birthday != value {
+				return false
+			}
+		case "home_date":
+			value, ok := want.(string)
+			if !ok || profile.HomeDate == nil || *profile.HomeDate != value {
 				return false
 			}
 		}

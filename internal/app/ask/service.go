@@ -64,11 +64,12 @@ type imageAssetReader interface {
 }
 
 type RunDecision struct {
-	Status    RunStatus
-	RiskLevel RiskLevel
-	ErrorCode string
-	EventType string
-	Data      map[string]any
+	Status         RunStatus
+	RiskLevel      RiskLevel
+	ErrorCode      string
+	EventType      string
+	Data           map[string]any
+	StreamedAnswer bool
 }
 
 type ExecutionResult struct {
@@ -175,6 +176,7 @@ type Service struct {
 	businessRead BusinessReadRepository
 	imageAssets  imageAssetReader
 	debugLogger  *slog.Logger
+	notifier     *RunEventNotifier
 }
 
 type Versions struct {
@@ -202,7 +204,16 @@ func NewService(repository Repository, pets petapp.Repository, versions ...Versi
 			value.KnowledgeVersion = versions[0].KnowledgeVersion
 		}
 	}
-	return &Service{repository: repository, pets: pets, rules: DeterministicRuleEngine{}, now: time.Now, versions: value}, nil
+	return &Service{repository: repository, pets: pets, rules: DeterministicRuleEngine{}, now: time.Now, versions: value, notifier: NewRunEventNotifier()}, nil
+}
+
+// SubscribeRunEvents 订阅某个 Run 的事件通知；调用方负责调用返回的解除订阅函数。
+func (s *Service) SubscribeRunEvents(runID string) (<-chan struct{}, func()) {
+	return s.notifier.Subscribe(runID)
+}
+
+func (s *Service) notifyRunEvents(runID string) {
+	s.notifier.Notify(runID)
 }
 
 func (s *Service) SetCalendarRepository(repository any) {
@@ -614,6 +625,7 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		}
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
+	s.notifyRunEvents(run.ID)
 	run.Status = RunRunning
 	run.RowVersion++
 	run.StartedAt = &now
@@ -669,7 +681,7 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 			return ExecutionResult{}, appErrors.Internal(err)
 		}
 		events = append(events, progressEvent)
-		decision, err = s.runV2DecisionLoop(ctx, session, run, contextMessages, currentInput, contextSnapshot, images, risk.Level)
+		decision, err = s.runV2DecisionLoop(ctx, session, run, messageID, contextMessages, currentInput, contextSnapshot, images, risk.Level)
 		if err != nil {
 			errorCode, retryable := ExecutorErrorDetails(err)
 			if s.debugLogger != nil {
@@ -711,7 +723,7 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		decision.Data = providerFailureDecision(decision.ErrorCode).Data
 		data, _ = json.Marshal(decision.Data)
 	}
-	if decision.Status == RunCompleted && decision.EventType == "assistant.completed" {
+	if decision.Status == RunCompleted && decision.EventType == "assistant.completed" && !decision.StreamedAnswer {
 		answer, _ := decision.Data["answer"].(string)
 		deltaEvents, deltaErr := s.appendAssistantAnswerDeltas(ctx, session, run, messageID, answer)
 		if deltaErr != nil {
@@ -719,6 +731,11 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		}
 		events = append(events, deltaEvents...)
 	}
+	persistedEvents, listErr := s.repository.ListEvents(ctx, session.ID, run.ID, 0)
+	if listErr != nil {
+		return ExecutionResult{}, appErrors.Internal(listErr)
+	}
+	events = persistedEvents
 	finishedAt := s.now().UTC()
 	finishedEvent := Event{ID: finishedEventID, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Sequence: nextSequence(events), Type: decision.EventType, Data: string(data), CreatedAt: finishedAt}
 	responseMessage := Message{}
@@ -733,6 +750,7 @@ func (s *Service) processRun(ctx context.Context, familyID, sessionID, runID str
 		}
 		return ExecutionResult{}, appErrors.Internal(err)
 	}
+	s.notifyRunEvents(run.ID)
 	run.Status = decision.Status
 	run.RowVersion++
 	run.RiskLevel = decision.RiskLevel
@@ -769,7 +787,12 @@ func (s *Service) appendInjectionAuditEvent(ctx context.Context, session Session
 	if err != nil {
 		return Event{}, err
 	}
-	return s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "security.injection_detected", Data: string(data), CreatedAt: s.now().UTC()})
+	event, err := s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "security.injection_detected", Data: string(data), CreatedAt: s.now().UTC()})
+	if err != nil {
+		return Event{}, err
+	}
+	s.notifyRunEvents(run.ID)
+	return event, nil
 }
 
 func (s *Service) loadModelImages(ctx context.Context, familyID string, assetRefs []string) ([]ModelImage, error) {
@@ -914,6 +937,8 @@ func providerFailureMessage(errorCode string) string {
 		return "AI 服务请求配置不兼容，请检查模型与接口配置。"
 	case "provider_output_invalid":
 		return "AI 返回内容格式异常，未能解析健康建议。"
+	case "provider_output_truncated":
+		return "AI 本次回答被截断，正在重试。"
 	case "invalid_analysis_output":
 		return "AI 返回的健康建议未通过完整性或安全检查。"
 	case "invalid_executor_status":
@@ -942,7 +967,12 @@ func (s *Service) appendProgressEvent(ctx context.Context, session Session, run 
 	if err != nil {
 		return Event{}, err
 	}
-	return s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "run.progress", Data: string(data), CreatedAt: s.now().UTC()})
+	event, err := s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "run.progress", Data: string(data), CreatedAt: s.now().UTC()})
+	if err != nil {
+		return Event{}, err
+	}
+	s.notifyRunEvents(run.ID)
+	return event, nil
 }
 
 func (s *Service) appendAssistantDelta(ctx context.Context, session Session, run Run, messageID, delta string) (Event, error) {
@@ -954,7 +984,29 @@ func (s *Service) appendAssistantDelta(ctx context.Context, session Session, run
 	if err != nil {
 		return Event{}, err
 	}
-	return s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "assistant.delta", Data: string(data), CreatedAt: s.now().UTC()})
+	event, err := s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "assistant.delta", Data: string(data), CreatedAt: s.now().UTC()})
+	if err != nil {
+		return Event{}, err
+	}
+	s.notifyRunEvents(run.ID)
+	return event, nil
+}
+
+func (s *Service) appendAssistantThinking(ctx context.Context, session Session, run Run, messageID, delta string) (Event, error) {
+	id, err := newID()
+	if err != nil {
+		return Event{}, err
+	}
+	data, err := json.Marshal(map[string]string{"message_id": messageID, "delta": delta})
+	if err != nil {
+		return Event{}, err
+	}
+	event, err := s.repository.AppendRunEvent(ctx, Event{ID: id, SessionID: session.ID, TurnID: run.TurnID, RunID: run.ID, Type: "assistant.thinking", Data: string(data), CreatedAt: s.now().UTC()})
+	if err != nil {
+		return Event{}, err
+	}
+	s.notifyRunEvents(run.ID)
+	return event, nil
 }
 
 func (s *Service) Reply(ctx context.Context, familyID, userID, sessionID, runID, input string, expectedVersion int, idempotencyKey string) (ExecutionResult, error) {

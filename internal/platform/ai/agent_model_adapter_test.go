@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -85,6 +86,30 @@ type fakeProvider struct {
 	response    Response
 	err         error
 	callCount   int
+}
+
+// streamingProvider 按给定分片触发流事件，并返回完整归一化响应。
+type streamingProvider struct {
+	chunks      []string
+	response    Response
+	streamErr   error
+	completeErr error
+}
+
+func (p *streamingProvider) Complete(_ context.Context, _ Request) (Response, error) {
+	return p.response, p.completeErr
+}
+
+func (p *streamingProvider) Stream(_ context.Context, _ Request, emit func(StreamEvent) error) (Response, error) {
+	for _, chunk := range p.chunks {
+		if err := emit(StreamEvent{Type: StreamContentDelta, ContentDelta: chunk}); err != nil {
+			return Response{}, err
+		}
+	}
+	if p.streamErr != nil {
+		return Response{}, p.streamErr
+	}
+	return p.response, nil
 }
 
 func (f *fakeProvider) Complete(_ context.Context, request Request) (Response, error) {
@@ -460,6 +485,16 @@ func TestAgentModelAdapterStepPropagatesProviderError(t *testing.T) {
 }
 
 func TestAgentModelAdapterStepClassifiesInvalidOutput(t *testing.T) {
+	truncatedRepository := &memoryAttemptRepository{}
+	truncated := NewAgentModelAdapter(&fakeProvider{response: Response{Text: `{"records":[`, FinishReason: FinishLength}}, Profile{}, truncatedRepository)
+	_, truncatedErr := truncated.Step(context.Background(), askapp.StepInput{SessionID: "session-1", RunID: "run-2"})
+	if truncatedErr == nil {
+		t.Fatal("truncated output should fail")
+	}
+	if code, retryable := askapp.ExecutorErrorDetails(truncatedErr); code != ErrProviderOutputTruncated || !retryable {
+		t.Fatalf("truncated output error = (%q, %v), want (%q, true)", code, retryable, ErrProviderOutputTruncated)
+	}
+
 	repository := &memoryAttemptRepository{}
 	provider := &fakeProvider{response: Response{Text: ""}}
 	adapter := NewAgentModelAdapter(provider, Profile{}, repository)
@@ -473,6 +508,97 @@ func TestAgentModelAdapterStepClassifiesInvalidOutput(t *testing.T) {
 	}
 	if len(attempts) != 1 || attempts[0].Status != askapp.AttemptFailed || attempts[0].ErrorCode != ErrProviderOutputInvalid {
 		t.Fatalf("attempt = %+v", attempts)
+	}
+}
+
+func TestAgentModelAdapterStreamsFinalAnswerDeltas(t *testing.T) {
+	full := validFinalAnswerJSON
+	half := len(full) / 2
+	provider := &streamingProvider{
+		chunks:   []string{full[:half], full[half:]},
+		response: Response{AttemptID: "attempt-1", Model: "test-model", Text: full, FinishReason: FinishStop},
+	}
+	adapter := NewAgentModelAdapter(provider, Profile{ProviderID: "test", Model: "test-model"})
+	var deltas []string
+	result, err := adapter.Step(context.Background(), askapp.StepInput{OnAnswerDelta: func(delta string) error {
+		deltas = append(deltas, delta)
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Records) == 0 {
+		t.Fatal("streamed response should still parse into records")
+	}
+	if joined := strings.Join(deltas, ""); joined != "你好呀" {
+		t.Fatalf("streamed deltas = %q, want %q", joined, "你好呀")
+	}
+}
+
+func TestAgentModelAdapterStreamsPartialSegmentText(t *testing.T) {
+	answer := strings.Repeat("旺仔今天精神状态尚可，无呕吐。", 6)
+	full := `[` +
+		`{"type":"header","schema_version":"record_array_v1","action":"final_answer","task_updates":[]},` +
+		`{"type":"group","group_key":"g1","task_keys":["t1"],"answer_kind":"casual","subjects":[{"subject_key":"s1","kind":"unresolved","description":"某只宠物","source_turn_ids":[]}],"scope":"full"},` +
+		`{"type":"segment","segment_key":"seg1","group_key":"g1","subject_keys":["s1"],"field":"reply","text":"` + answer + `","basis_kind":"general_knowledge"},` +
+		`{"type":"coverage","tasks":[{"task_key":"t1","answer_group_keys":["g1"]}]},` +
+		`{"type":"end"}]`
+	chunks := make([]string, 0, len(full))
+	for i := 0; i < len(full); i += 8 {
+		end := i + 8
+		if end > len(full) {
+			end = len(full)
+		}
+		chunks = append(chunks, full[i:end])
+	}
+	provider := &streamingProvider{
+		chunks:   chunks,
+		response: Response{AttemptID: "attempt-1", Model: "test-model", Text: full, FinishReason: FinishStop},
+	}
+	adapter := NewAgentModelAdapter(provider, Profile{ProviderID: "test", Model: "test-model"})
+	var deltas []string
+	result, err := adapter.Step(context.Background(), askapp.StepInput{OnAnswerDelta: func(delta string) error {
+		deltas = append(deltas, delta)
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Records) == 0 {
+		t.Fatal("streamed response should still parse into records")
+	}
+	if len(deltas) < 2 {
+		t.Fatalf("deltas = %d, want progressive emission before the response completes", len(deltas))
+	}
+	for index, delta := range deltas {
+		if delta == "" {
+			t.Fatalf("delta[%d] is empty", index)
+		}
+	}
+	if joined := strings.Join(deltas, ""); joined != answer {
+		t.Fatalf("streamed deltas = %q, want %q", joined, answer)
+	}
+}
+
+func TestAgentModelAdapterFallsBackWhenStreamFailsBeforePublish(t *testing.T) {
+	provider := &streamingProvider{
+		streamErr: NewProviderError(ErrProviderUnavailable, true, 0, nil),
+		response:  Response{AttemptID: "attempt-1", Model: "test-model", Text: validFinalAnswerJSON, FinishReason: FinishStop},
+	}
+	adapter := NewAgentModelAdapter(provider, Profile{ProviderID: "test", Model: "test-model"})
+	var deltas []string
+	result, err := adapter.Step(context.Background(), askapp.StepInput{OnAnswerDelta: func(delta string) error {
+		deltas = append(deltas, delta)
+		return nil
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Records) == 0 {
+		t.Fatal("fallback complete should parse into records")
+	}
+	if len(deltas) != 0 {
+		t.Fatalf("streamed deltas = %#v, want none before fallback", deltas)
 	}
 }
 

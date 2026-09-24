@@ -7,6 +7,7 @@ const failureTitles: Record<string, string> = {
   provider_canceled: 'AI 请求已中断',
   provider_failed: 'AI 服务调用失败',
   provider_output_invalid: 'AI 返回内容格式异常',
+  provider_output_truncated: 'AI 本次回答被截断',
   provider_quota_exhausted: 'AI 服务额度不可用',
   provider_rate_limited: 'AI 服务请求过于频繁',
   provider_request_invalid: 'AI 服务请求配置异常',

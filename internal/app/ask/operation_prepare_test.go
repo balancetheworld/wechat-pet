@@ -136,7 +136,7 @@ func TestProcessRunPreparesCalendarRecordUpdate(t *testing.T) {
 }
 
 func TestProcessRunPreparesPetProfileUpdate(t *testing.T) {
-	operation := prepareOperationFor(t, "update_pet_profile", `{"pet_id":"pet-1","breed":"英短","birthday":"2020-05-01"}`)
+	operation := prepareOperationFor(t, "update_pet_profile", `{"pet_id":"pet-1","breed":"英短","birthday":"2020-05-01","home_date":"2020-06-01"}`)
 	if operation.Target != operationTargetPetProfileUpdate || operation.Status != OperationPending {
 		t.Fatalf("operation = %+v, want pending pet profile update", operation)
 	}
@@ -147,7 +147,7 @@ func TestProcessRunPreparesPetProfileUpdate(t *testing.T) {
 	if err := json.Unmarshal([]byte(operation.Payload), &payload); err != nil {
 		t.Fatalf("payload = %s: %v", operation.Payload, err)
 	}
-	if payload.PetID != "pet-1" || payload.Fields["breed"] != "英短" || payload.Fields["birthday"] != "2020-05-01" {
+	if payload.PetID != "pet-1" || payload.Fields["breed"] != "英短" || payload.Fields["birthday"] != "2020-05-01" || payload.Fields["home_date"] != "2020-06-01" {
 		t.Fatalf("payload = %+v", payload)
 	}
 	if _, leaked := payload.Fields["avatar_asset_id"]; leaked {
@@ -226,7 +226,7 @@ func TestProcessRunPreparesPetHealthUpdate(t *testing.T) {
 }
 
 func TestProcessRunPreparesPetCreate(t *testing.T) {
-	operation := prepareOperationFor(t, "create_pet", `{"name":"球球","breed":"英短","birthday":"2024-04-01"}`)
+	operation := prepareOperationFor(t, "create_pet", `{"name":"球球","breed":"英短","birthday":"2024-04-01","home_date":"2024-05-01"}`)
 	if operation.Target != operationTargetPetCreate || operation.Status != OperationPending {
 		t.Fatalf("operation = %+v, want pending pet create", operation)
 	}
@@ -234,11 +234,12 @@ func TestProcessRunPreparesPetCreate(t *testing.T) {
 		Name     string `json:"name"`
 		Breed    string `json:"breed"`
 		Birthday string `json:"birthday"`
+		HomeDate string `json:"home_date"`
 	}
 	if err := json.Unmarshal([]byte(operation.Payload), &payload); err != nil {
 		t.Fatalf("payload = %s: %v", operation.Payload, err)
 	}
-	if payload.Name != "球球" || payload.Breed != "英短" || payload.Birthday != "2024-04-01" {
+	if payload.Name != "球球" || payload.Breed != "英短" || payload.Birthday != "2024-04-01" || payload.HomeDate != "2024-05-01" {
 		t.Fatalf("payload = %+v", payload)
 	}
 }

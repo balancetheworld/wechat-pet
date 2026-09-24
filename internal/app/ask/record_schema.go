@@ -25,8 +25,6 @@ func RecordArraySchema() map[string]any {
 						riskRecordSchema(),
 						questionRecordSchema(),
 						callRecordSchema(),
-						coverageRecordSchema(),
-						endRecordSchema(),
 					},
 				},
 			},

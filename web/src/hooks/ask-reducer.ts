@@ -56,11 +56,13 @@ export function hasSequenceGap(events: AskEvent[], currentSequence: number) {
   return false
 }
 
+const streamedPreviewTypes = new Set(['assistant.delta', 'assistant.thinking'])
+
 export function mergeAskDeltaEvents(events: AskEvent[]) {
   const merged: AskEvent[] = []
   for (const event of events) {
     const previous = merged.at(-1)
-    if (previous?.type === 'assistant.delta' && event.type === 'assistant.delta' && previous.run_id === event.run_id) {
+    if (previous && previous.type === event.type && streamedPreviewTypes.has(event.type) && previous.run_id === event.run_id) {
       const previousData = previous.data as AskDeltaResult
       const currentData = event.data as AskDeltaResult
       if (typeof previousData.delta === 'string' && typeof currentData.delta === 'string') {
@@ -76,29 +78,22 @@ export function mergeAskDeltaEvents(events: AskEvent[]) {
   return merged
 }
 
-export function assistantPreviewText(events: AskEvent[], runID: string) {
-  const merged = mergeAskDeltaEvents(events.filter(event => event.type === 'assistant.delta' && event.run_id === runID))
-  let text = ''
-  for (const event of merged) {
-    const data = event.data as AskDeltaResult
-    if (typeof data.delta === 'string') {
-      text += data.delta
-    }
-  }
-  return text
-}
-
-const visibleEventTypes = new Set(['run.progress', 'assistant.delta', 'assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed'])
+const visibleEventTypes = new Set(['run.progress', 'assistant.thinking', 'assistant.delta', 'assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed'])
 
 const terminalEventTypes = new Set(['assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed', 'run.canceled'])
 
 export function visibleTurnEvents(events: AskEvent[]) {
   const hasTerminalEvent = events.some(event => terminalEventTypes.has(event.type))
-  return mergeAskDeltaEvents(events.filter(event => visibleEventTypes.has(event.type) && !(event.type === 'assistant.delta' && hasTerminalEvent)))
+  const hasAnswerText = hasTerminalEvent || events.some(event => event.type === 'assistant.delta')
+  return mergeAskDeltaEvents(events.filter(event => visibleEventTypes.has(event.type)
+    && !(event.type === 'assistant.thinking' && hasAnswerText)
+    && !(event.type === 'assistant.delta' && hasTerminalEvent)))
 }
 
 function phaseForEvent(state: AskRuntimeState, event: AskEvent): AskRuntimePhase {
   switch (event.type) {
+    case 'assistant.thinking':
+      return 'thinking'
     case 'run.queued':
     case 'run.started':
       return 'thinking'

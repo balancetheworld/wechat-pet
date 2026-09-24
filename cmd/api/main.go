@@ -130,7 +130,7 @@ func main() {
 		logger.Error("create ask repository", "error", err)
 		os.Exit(1)
 	}
-	providerConfig := aiplatform.OpenAIConfig{APIKey: cfg.AIAPIKey, BaseURL: cfg.AIBaseURL, Model: cfg.AIModel, Timeout: time.Duration(cfg.AITimeoutSeconds) * time.Second, Observer: func(observation aiplatform.OpenAIObservation) {
+	providerConfig := aiplatform.OpenAIConfig{APIKey: cfg.AIAPIKey, BaseURL: cfg.AIBaseURL, Model: cfg.AIModel, Timeout: time.Duration(cfg.AITimeoutSeconds) * time.Second, ReasoningEffort: cfg.AIReasoningEffort, Observer: func(observation aiplatform.OpenAIObservation) {
 		logger.Info("ask ai provider", "provider", cfg.AIProvider, "operation", observation.Operation, "model", observation.Model, "duration_ms", observation.Duration.Milliseconds(), "input_tokens", observation.InputTokens, "output_tokens", observation.OutputTokens, "total_tokens", observation.TotalTokens, "status", observation.Status, "error_code", observation.ErrorCode, "retryable", observation.Retryable, "strict_fallback", observation.StrictFallback)
 	}}
 	askService, err := askapp.NewService(askRepository, petRepository)
@@ -174,7 +174,7 @@ func main() {
 				Cancellation:       aiplatform.CapabilitySupported,
 				UsageNormalization: aiplatform.CapabilitySupported,
 			},
-			Parameters: []aiplatform.Parameter{{Name: "max_output_tokens", Value: 4096, Required: true}},
+			Parameters: []aiplatform.Parameter{{Name: "max_output_tokens", Value: 8192, Required: true}},
 		}
 		askService.SetAgentModel(aiplatform.NewAgentModelAdapter(askProvider, askProfile, askRepository))
 	}

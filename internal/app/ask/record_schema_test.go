@@ -30,8 +30,8 @@ func anyOfRecordSchemas(t *testing.T) []map[string]any {
 	if !ok {
 		t.Fatalf("records.items.anyOf missing or not an array: %v", items["anyOf"])
 	}
-	if len(anyOf) != 8 {
-		t.Fatalf("anyOf length = %d, want 8", len(anyOf))
+	if len(anyOf) != 6 {
+		t.Fatalf("anyOf length = %d, want 6 (coverage/end 由服务端推导，不再要求模型输出)", len(anyOf))
 	}
 	records := make([]map[string]any, 0, len(anyOf))
 	for _, raw := range anyOf {
@@ -48,7 +48,7 @@ func TestRecordArraySchemaAnyOfCoversAllRecordTypes(t *testing.T) {
 	records := anyOfRecordSchemas(t)
 	want := []RecordType{
 		RecordHeader, RecordGroup, RecordSegment, RecordRisk,
-		RecordQuestion, RecordCall, RecordCoverage, RecordEnd,
+		RecordQuestion, RecordCall,
 	}
 	seen := make(map[string]bool)
 	for _, rec := range records {

@@ -120,6 +120,7 @@ type StreamEventType string
 const (
 	StreamResponseStarted  StreamEventType = "response_started"
 	StreamContentDelta     StreamEventType = "content_delta"
+	StreamReasoningDelta   StreamEventType = "reasoning_delta"
 	StreamToolCallDelta    StreamEventType = "tool_call_delta"
 	StreamUsageReported    StreamEventType = "usage_reported"
 	StreamResponseFinished StreamEventType = "response_finished"
@@ -135,14 +136,15 @@ type ToolCallDelta struct {
 
 // StreamEvent 定位 Attempt 与内容块或调用标识，并带本地顺序。
 type StreamEvent struct {
-	Type          StreamEventType
-	AttemptID     string
-	BlockID       string // 内容块或调用标识
-	Sequence      int    // 本地顺序
-	ContentDelta  string
-	ToolCallDelta ToolCallDelta
-	Usage         *Usage
-	Error         error
+	Type           StreamEventType
+	AttemptID      string
+	BlockID        string // 内容块或调用标识
+	Sequence       int    // 本地顺序
+	ContentDelta   string
+	ReasoningDelta string
+	ToolCallDelta  ToolCallDelta
+	Usage          *Usage
+	Error          error
 }
 
 // Provider 是统一 Provider 接口。文档 4：Agent 只依赖统一 Provider 接口，Provider 负责不同 SDK、请求格式与响应格式适配。
@@ -164,6 +166,7 @@ const (
 	ErrProviderRequestInvalid        = "provider_request_invalid"
 	ErrProviderContextTooLong        = "provider_context_too_long"
 	ErrProviderOutputInvalid         = "provider_output_invalid"
+	ErrProviderOutputTruncated       = "provider_output_truncated"
 	ErrProviderCapabilityUnsupported = "provider_capability_unsupported"
 	ErrProviderFailed                = "provider_failed"
 )

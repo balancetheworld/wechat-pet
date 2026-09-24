@@ -56,9 +56,7 @@ func TestNormalizeDecisionEvidenceDropsUnresolvableRefs(t *testing.T) {
 			Evidence: []EvidenceRef{{SourceType: "calendar_record", SourceID: "missing"}},
 		}},
 	}}}
-	if err := normalizeDecisionEvidence(&decision, map[string]struct{}{}, "turn-1"); err != nil {
-		t.Fatalf("fabricated evidence on non-business segment should be dropped, got %v", err)
-	}
+	normalizeDecisionEvidence(&decision, map[string]struct{}{}, "turn-1")
 	refs := decision.Groups[0].Segments[0].EvidenceRefs
 	if len(refs) != 1 || refs[0].SourceType != "turn" || refs[0].SourceID != "turn-1" {
 		t.Fatalf("segment evidence = %+v, want server-filled turn ref", refs)
@@ -68,7 +66,7 @@ func TestNormalizeDecisionEvidenceDropsUnresolvableRefs(t *testing.T) {
 	}
 }
 
-func TestNormalizeDecisionEvidenceRejectsBusinessFactWithoutEvidence(t *testing.T) {
+func TestNormalizeDecisionEvidenceDowngradesBusinessFactWithoutEvidence(t *testing.T) {
 	decision := StepDecision{Groups: []AnswerGroup{{
 		GroupKey:   "g1",
 		TaskKeys:   []string{"t1"},
@@ -81,8 +79,13 @@ func TestNormalizeDecisionEvidenceRejectsBusinessFactWithoutEvidence(t *testing.
 			EvidenceRefs: []EvidenceRef{{SourceType: "calendar_record", SourceID: "missing"}},
 		}},
 	}}}
-	if err := normalizeDecisionEvidence(&decision, map[string]struct{}{}, "turn-1"); err == nil {
-		t.Fatal("business_fact without resolvable evidence should fail")
+	normalizeDecisionEvidence(&decision, map[string]struct{}{}, "turn-1")
+	segment := decision.Groups[0].Segments[0]
+	if len(segment.EvidenceRefs) != 0 {
+		t.Fatalf("unresolvable evidence should be dropped, got %+v", segment.EvidenceRefs)
+	}
+	if segment.BasisKind != BasisGeneralKnowledge {
+		t.Fatalf("business_fact without resolvable evidence should downgrade to general_knowledge, got %s", segment.BasisKind)
 	}
 }
 
