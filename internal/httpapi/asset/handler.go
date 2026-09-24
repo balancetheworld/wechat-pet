@@ -185,7 +185,7 @@ func currentUserID(c *gin.Context) (string, bool) {
 
 func supportedType(value string) bool {
 	switch value {
-	case "avatar", "pet_avatar", "pet_cover", "birthday_photo", "birthday_video", "growth_image", "calendar_image":
+	case "avatar", "pet_avatar", "pet_cover", "certificate", "birthday_photo", "birthday_video", "growth_image", "calendar_image":
 		return true
 	}
 	return false

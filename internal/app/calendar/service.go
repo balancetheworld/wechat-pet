@@ -17,6 +17,7 @@ type Repository interface {
 	GetDay(context.Context, string, string) (DayDTO, error)
 	CreateRecord(context.Context, string, string, CreateRecordRequest, time.Time) (RecordDTO, error)
 	UpdateRecord(context.Context, string, string, string, UpdateRecordRequest, *time.Time) (RecordDTO, error)
+	DeleteRecord(context.Context, string, string, string) error
 	CompleteReminder(context.Context, string, string, string, CompleteReminderRequest, time.Time) (CompleteReminderDTO, error)
 }
 
@@ -100,7 +101,7 @@ func (s *Service) UpdateRecord(ctx context.Context, familyID, userID, recordID s
 	if strings.TrimSpace(recordID) == "" {
 		return RecordDTO{}, appErrors.InvalidParam("日历记录 ID 不能为空")
 	}
-	if request.Content == nil && request.OccurredAt == nil {
+	if request.Content == nil && request.OccurredAt == nil && request.MediaAssetIDs == nil {
 		return RecordDTO{}, appErrors.InvalidParam("没有可更新字段")
 	}
 	content := request.Content
@@ -119,7 +120,16 @@ func (s *Service) UpdateRecord(ctx context.Context, familyID, userID, recordID s
 		}
 		occurredAt = &parsed
 	}
-	value, err := s.repository.UpdateRecord(ctx, familyID, userID, recordID, UpdateRecordRequest{Content: content}, occurredAt)
+	/* 图片整体替换: 与创建记录同一套校验 + 家庭资产鉴权 */
+	if request.MediaAssetIDs != nil {
+		if err := validateMedia(request.MediaAssetIDs); err != nil {
+			return RecordDTO{}, err
+		}
+		if err := s.authorizeMedia(ctx, familyID, request.MediaAssetIDs); err != nil {
+			return RecordDTO{}, err
+		}
+	}
+	value, err := s.repository.UpdateRecord(ctx, familyID, userID, recordID, UpdateRecordRequest{Content: content, MediaAssetIDs: request.MediaAssetIDs}, occurredAt)
 	if err != nil {
 		return RecordDTO{}, mapError(err)
 	}
@@ -127,6 +137,18 @@ func (s *Service) UpdateRecord(ctx context.Context, familyID, userID, recordID s
 		return RecordDTO{}, err
 	}
 	return value, nil
+}
+
+/* DeleteRecord 软删除日历记录: 前端二次确认后调用 */
+func (s *Service) DeleteRecord(ctx context.Context, familyID, userID, recordID string) error {
+	if strings.TrimSpace(recordID) == "" {
+		return appErrors.InvalidParam("日历记录 ID 不能为空")
+	}
+	/* 注意: 不能无条件 mapError — 成功时 err 为 nil, mapError 会把 nil 包装成 Internal(500) */
+	if err := s.repository.DeleteRecord(ctx, familyID, userID, recordID); err != nil {
+		return mapError(err)
+	}
+	return nil
 }
 
 func (s *Service) CompleteReminder(ctx context.Context, familyID, userID, reminderID string, request CompleteReminderRequest) (CompleteReminderDTO, error) {

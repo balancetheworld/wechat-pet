@@ -171,6 +171,11 @@ func (r *SQLRepository) CreateRecord(ctx context.Context, familyID, userID strin
 
 /* UpdateRecord 部分更新日历记录: content 指针非 nil 时更新内容, occurredAt 非 nil 时同步更新发生时间与日期列 */
 func (r *SQLRepository) UpdateRecord(ctx context.Context, familyID, userID, recordID string, request UpdateRecordRequest, occurredAt *time.Time) (RecordDTO, error) {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return RecordDTO{}, err
+	}
+	defer tx.Rollback()
 	sets := []string{"updated_by = ?", "updated_at = CURRENT_TIMESTAMP"}
 	args := []any{userID}
 	if request.Content != nil {
@@ -182,7 +187,7 @@ func (r *SQLRepository) UpdateRecord(ctx context.Context, familyID, userID, reco
 		args = append(args, *occurredAt, occurredAt.Format("2006-01-02"))
 	}
 	args = append(args, recordID, familyID)
-	result, err := r.db.ExecContext(ctx, r.query("UPDATE calendar_records SET "+strings.Join(sets, ", ")+" WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), args...)
+	result, err := tx.ExecContext(ctx, r.query("UPDATE calendar_records SET "+strings.Join(sets, ", ")+" WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), args...)
 	if err != nil {
 		return RecordDTO{}, err
 	}
@@ -192,7 +197,33 @@ func (r *SQLRepository) UpdateRecord(ctx context.Context, familyID, userID, reco
 		}
 		return RecordDTO{}, sql.ErrNoRows
 	}
+	/* 图片整体替换: 先清空原有关联, 再按新列表插入 (空数组 = 清空图片) */
+	if request.MediaAssetIDs != nil {
+		if _, err := tx.ExecContext(ctx, r.query("DELETE FROM calendar_record_media WHERE record_id = ? AND family_id = ?"), recordID, familyID); err != nil {
+			return RecordDTO{}, err
+		}
+		if err := r.insertMedia(ctx, tx, familyID, recordID, request.MediaAssetIDs); err != nil {
+			return RecordDTO{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return RecordDTO{}, err
+	}
 	return r.getRecord(ctx, familyID, recordID)
+}
+
+/* DeleteRecord 软删除日历记录: 只置 deleted_at, 媒体与提醒随查询条件自然不可见 */
+func (r *SQLRepository) DeleteRecord(ctx context.Context, familyID, userID, recordID string) error {
+	result, err := r.db.ExecContext(ctx, r.query("UPDATE calendar_records SET deleted_at = CURRENT_TIMESTAMP, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), userID, recordID, familyID)
+	if err != nil {
+		return err
+	}
+	if affected, err := result.RowsAffected(); err != nil {
+		return err
+	} else if affected == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
 }
 
 func (r *SQLRepository) CompleteReminder(ctx context.Context, familyID, userID, reminderID string, request CompleteReminderRequest, completedAt time.Time) (CompleteReminderDTO, error) {

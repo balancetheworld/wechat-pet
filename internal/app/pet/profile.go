@@ -290,7 +290,7 @@ func (r *SQLRepository) Resource(ctx context.Context, familyID, petID, resource,
 func resourceSpec(resource string) (string, string, error) {
 	switch resource {
 	case "certificates":
-		return "pet_certificates", "type,name,number", nil
+		return "pet_certificates", "type,name,number,occurred_at,details,asset_id", nil
 	case "personality":
 		return "pet_personality", "trait,value", nil
 	case "questions":

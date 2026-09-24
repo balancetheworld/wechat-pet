@@ -88,6 +88,20 @@ func (h *Handler) UpdateRecord(c *gin.Context) {
 	response.Success(c, result)
 }
 
+func (h *Handler) DeleteRecord(c *gin.Context) {
+	familyID, familyOK := middleware.GetCurrentFamilyID(c)
+	userID, userOK := middleware.GetCurrentUserID(c)
+	if !familyOK || !userOK {
+		response.Fail(c, appErrors.Forbidden())
+		return
+	}
+	if err := h.service.DeleteRecord(c.Request.Context(), familyID, userID, c.Param("record_id")); err != nil {
+		response.Fail(c, asAppError(err))
+		return
+	}
+	response.Success(c, struct{}{})
+}
+
 func (h *Handler) CompleteReminder(c *gin.Context) {
 	familyID, familyOK := middleware.GetCurrentFamilyID(c)
 	userID, userOK := middleware.GetCurrentUserID(c)
