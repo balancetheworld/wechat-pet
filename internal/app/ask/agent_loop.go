@@ -327,8 +327,13 @@ func settleCallBudget(ctx context.Context, budgets BudgetRepository, reservation
 }
 
 func accountModelBudget(ctx context.Context, budgets BudgetRepository, reservation BudgetReservation, usage ModelUsage, durationMillis int64) error {
-	if budgets == nil || !usage.Complete {
+	if budgets == nil {
 		return nil
+	}
+	if !usage.Complete {
+		amount := reservation.Amount
+		amount.DurationMillis = durationMillis
+		return settleCallBudget(ctx, budgets, reservation, amount)
 	}
 	tokens := usage.TotalTokens
 	if tokens == 0 {

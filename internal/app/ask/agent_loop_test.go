@@ -13,6 +13,11 @@ type scriptedModel struct {
 	inputs    []StepInput
 }
 
+type failingModel struct {
+	err     error
+	records []ProtocolRecord
+}
+
 type blockingModel struct{}
 
 type validationToolExecutor struct{}
@@ -34,6 +39,15 @@ func (m *scriptedModel) Step(_ context.Context, input StepInput) (ModelStepResul
 	r := m.responses[0]
 	m.responses = m.responses[1:]
 	return ModelStepResult{Records: r, Usage: ModelUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, Complete: true}}, nil
+}
+
+func (m *failingModel) Step(_ context.Context, _ StepInput) (ModelStepResult, error) {
+	if m.err != nil {
+		err := m.err
+		m.err = nil
+		return ModelStepResult{}, err
+	}
+	return ModelStepResult{Records: m.records, Usage: ModelUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, Complete: true}}, nil
 }
 
 // fakeToolExecutor 直接返回空结果，记录收到的批次。
@@ -289,8 +303,36 @@ func TestRunDecisionLoopEnforcesDurationBudget(t *testing.T) {
 	if ledgerErr != nil {
 		t.Fatal(ledgerErr)
 	}
-	if ledger.Used.DurationMillis != 0 || ledger.Reserved.DurationMillis < 1 {
+	if ledger.Used.DurationMillis < 1 || ledger.Reserved.DurationMillis != 0 {
 		t.Fatalf("duration budget = used %d reserved %d", ledger.Used.DurationMillis, ledger.Reserved.DurationMillis)
+	}
+}
+
+func TestRunDecisionLoopReleasesConcurrencyAfterUnknownUsage(t *testing.T) {
+	repository := newBudgetTestRepository(t)
+	if err := repository.EnsureBudget(context.Background(), BudgetRun, "run-unknown-usage", BudgetLimits{MaxModelCalls: 3, MaxTokens: 20000, MaxDurationMillis: 10000, MaxConcurrency: 1}); err != nil {
+		t.Fatal(err)
+	}
+	model := &failingModel{err: NewExecutorError("provider_timeout", true, 0, context.DeadlineExceeded)}
+	_, err := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{RunID: "run-unknown-usage"}, 1, nil, nil, "", repository, nil)
+	code, _ := ExecutorErrorDetails(err)
+	if code != "provider_timeout" {
+		t.Fatalf("error = %v, code = %q, want provider_timeout", err, code)
+	}
+	ledger, ledgerErr := repository.GetBudget(context.Background(), BudgetRun, "run-unknown-usage")
+	if ledgerErr != nil {
+		t.Fatal(ledgerErr)
+	}
+	if ledger.Reserved != (BudgetAmount{}) {
+		t.Fatalf("reserved = %+v, want none after failed call", ledger.Reserved)
+	}
+	if ledger.Used.ModelCalls != 1 || ledger.Used.Tokens == 0 || ledger.Used.DurationMillis < 1 {
+		t.Fatalf("used = %+v, want 1 call with non-zero tokens and duration", ledger.Used)
+	}
+	model.records = finalAnswerRecords()
+	outcome, retryErr := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{RunID: "run-unknown-usage"}, 1, nil, nil, "", repository, nil)
+	if retryErr != nil || outcome.Action != ActionFinalAnswer {
+		t.Fatalf("retry after failed call: outcome = %+v, error = %v", outcome, retryErr)
 	}
 }
 
