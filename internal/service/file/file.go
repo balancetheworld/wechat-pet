@@ -87,6 +87,10 @@ func (s *Service) Get(ctx context.Context, assetID string) (Asset, error) {
 	return s.assets.Get(ctx, assetID)
 }
 
+func (s *Service) Read(ctx context.Context, assetID string) ([]byte, error) {
+	return s.storage.Read(ctx, assetID)
+}
+
 func (s *Service) Upload(ctx context.Context, key string, content io.Reader, size int64, contentType string) (string, error) {
 	if err := s.storage.Upload(ctx, key, content, size, contentType); err != nil {
 		return "", err

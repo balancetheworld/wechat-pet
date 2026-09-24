@@ -1,0 +1,56 @@
+.ask-operation {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10rpx;
+  align-self: flex-start;
+  max-width: 82%;
+  padding: 18rpx 22rpx;
+  border: 1rpx solid rgba(255, 255, 255, 0.72);
+  border-radius: 8rpx;
+  background: rgba(255, 254, 251, 0.78);
+  box-shadow: var(--shadow-sm);
+}
+
+.ask-operation-title {
+  color: var(--primary-deep);
+  font-size: 24rpx;
+}
+
+.ask-operation-preview {
+  color: var(--ink);
+  font-size: 27rpx;
+  line-height: 1.55;
+}
+
+.ask-operation-result {
+  color: var(--green);
+  font-size: 24rpx;
+}
+
+.ask-operation--failed .ask-operation-result {
+  color: var(--red);
+}
+
+.ask-operation-actions {
+  display: flex;
+  gap: 12rpx;
+  margin-top: 6rpx;
+}
+
+.ask-operation-button {
+  min-width: 160rpx;
+  margin: 0;
+  padding: 0 20rpx;
+  color: #fff;
+  font-size: 24rpx;
+  line-height: 56rpx;
+  border-radius: 6rpx;
+  background: var(--primary-dark);
+}
+
+.ask-operation-button--ghost {
+  color: var(--primary-deep);
+  border: 1rpx solid rgba(0, 0, 0, 0.12);
+  background: transparent;
+}

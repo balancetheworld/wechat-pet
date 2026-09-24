@@ -18,8 +18,8 @@ type SQLRepository struct {
 	driver string
 }
 
-func (r *SQLRepository) ListRecentRecords(ctx context.Context, familyID, petID string, since time.Time, limit int) ([]ContextRecord, error) {
-	rows, err := r.db.QueryContext(ctx, r.query("SELECT id, category, COALESCE(medical_type, ''), COALESCE(custom_medical_type, ''), content, occurred_at FROM calendar_records WHERE family_id = ? AND pet_id = ? AND occurred_at >= ? AND deleted_at IS NULL ORDER BY occurred_at DESC, id DESC LIMIT ?"), familyID, petID, since, limit)
+func (r *SQLRepository) ListRecentRecords(ctx context.Context, familyID, petID string, since, before time.Time, limit int) ([]ContextRecord, error) {
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT id, category, COALESCE(medical_type, ''), COALESCE(custom_medical_type, ''), content, occurred_at FROM calendar_records WHERE family_id = ? AND pet_id = ? AND occurred_at >= ? AND occurred_at < ? AND deleted_at IS NULL ORDER BY occurred_at DESC, id DESC LIMIT ?"), familyID, petID, since, before, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -28,6 +28,49 @@ func (r *SQLRepository) ListRecentRecords(ctx context.Context, familyID, petID s
 	for rows.Next() {
 		var value ContextRecord
 		if err := rows.Scan(&value.ID, &value.Category, &value.MedicalType, &value.CustomMedicalType, &value.Content, &value.OccurredAt); err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
+// ListFamilyReminders 列出家庭在指定日期之前的待办提醒（跨宠物），供问问的提醒查询使用。
+func (r *SQLRepository) ListFamilyReminders(ctx context.Context, familyID, before string, limit int) ([]FamilyReminder, error) {
+	if limit < 1 || limit > 100 {
+		limit = 30
+	}
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT m.id, m.pet_id, p.name, m.reminder_date, r.category, COALESCE(r.medical_type, ''), r.content FROM calendar_reminders m JOIN calendar_records r ON r.id = m.source_record_id AND r.family_id = m.family_id AND r.deleted_at IS NULL JOIN pets p ON p.id = m.pet_id AND p.family_id = m.family_id WHERE m.family_id = ? AND m.status = 'pending' AND m.reminder_date <= ? ORDER BY m.reminder_date, m.created_at, m.id LIMIT ?"), familyID, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]FamilyReminder, 0)
+	for rows.Next() {
+		var value FamilyReminder
+		if err := rows.Scan(&value.ID, &value.PetID, &value.PetName, &value.ReminderDate, &value.Category, &value.MedicalType, &value.Content); err != nil {
+			return nil, err
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
+// ListFamilyRecords 列出家庭在时间范围内的记录（跨宠物），供问问的日程查询使用。
+// 只返回展示与引用所需的字段；limit 由调用方限定上限。
+func (r *SQLRepository) ListFamilyRecords(ctx context.Context, familyID string, since, before time.Time, limit int) ([]FamilyRecord, error) {
+	if limit < 1 || limit > 100 {
+		limit = 30
+	}
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT r.id, r.pet_id, p.name, r.category, COALESCE(r.medical_type, ''), r.content, r.occurred_at FROM calendar_records r JOIN pets p ON p.id = r.pet_id AND p.family_id = r.family_id WHERE r.family_id = ? AND r.deleted_at IS NULL AND r.occurred_at >= ? AND r.occurred_at < ? ORDER BY r.occurred_at DESC, r.id DESC LIMIT ?"), familyID, since, before, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]FamilyRecord, 0)
+	for rows.Next() {
+		var value FamilyRecord
+		if err := rows.Scan(&value.ID, &value.PetID, &value.PetName, &value.Category, &value.MedicalType, &value.Content, &value.OccurredAt); err != nil {
 			return nil, err
 		}
 		result = append(result, value)

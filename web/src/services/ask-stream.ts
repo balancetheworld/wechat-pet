@@ -19,11 +19,13 @@ export interface AskEventStream {
 
 export class AskEventStreamError extends Error {
   readonly retryable: boolean
+  readonly statusCode?: number
 
-  constructor(message: string, retryable: boolean) {
+  constructor(message: string, retryable: boolean, statusCode?: number) {
     super(message)
     this.name = 'AskEventStreamError'
     this.retryable = retryable
+    this.statusCode = statusCode
   }
 }
 
@@ -36,7 +38,7 @@ function streamError(error: unknown) {
     return error
   }
   if (error instanceof ApiError || error instanceof SyntaxError) {
-    return new AskEventStreamError(error.message, false)
+    return new AskEventStreamError(error.message, false, error instanceof ApiError ? error.statusCode : undefined)
   }
   return new AskEventStreamError(error instanceof Error ? error.message : '事件流连接失败', true)
 }

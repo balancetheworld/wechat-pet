@@ -29,6 +29,7 @@ func TestListRecentRecordsScopesFamilyPetAndTime(t *testing.T) {
 		{id: "record-3", family: "family-2", pet: "pet-1", content: "其他家庭", at: base.Add(-6 * time.Hour)},
 		{id: "record-4", family: "family-1", pet: "pet-1", content: "已删除", at: base.Add(-2 * time.Hour), deleted: base},
 		{id: "record-5", family: "family-1", pet: "pet-1", content: "过早记录", at: base.Add(-100 * 24 * time.Hour)},
+		{id: "record-6", family: "family-1", pet: "pet-1", content: "未来记录", at: base.Add(time.Hour)},
 	}
 	for _, row := range rows {
 		if _, err := db.Exec("INSERT INTO calendar_records (id, family_id, pet_id, category, medical_type, custom_medical_type, content, occurred_at, deleted_at) VALUES (?, ?, ?, 'medical', '', '', ?, ?, ?)", row.id, row.family, row.pet, row.content, row.at, row.deleted); err != nil {
@@ -39,7 +40,7 @@ func TestListRecentRecordsScopesFamilyPetAndTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := repository.ListRecentRecords(context.Background(), "family-1", "pet-1", base.Add(-90*24*time.Hour), 5)
+	result, err := repository.ListRecentRecords(context.Background(), "family-1", "pet-1", base.Add(-90*24*time.Hour), base, 5)
 	if err != nil {
 		t.Fatal(err)
 	}

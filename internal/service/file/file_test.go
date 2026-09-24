@@ -21,6 +21,10 @@ func (m *memoryStorage) Upload(_ context.Context, key string, content io.Reader,
 	return nil
 }
 
+func (m *memoryStorage) Read(_ context.Context, key string) ([]byte, error) {
+	return m.objects[key], nil
+}
+
 func (m *memoryStorage) Delete(_ context.Context, key string) error {
 	delete(m.objects, key)
 	return nil

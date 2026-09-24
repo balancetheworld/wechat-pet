@@ -44,6 +44,14 @@ func (s *LocalStorage) Upload(_ context.Context, key string, content io.Reader, 
 	return nil
 }
 
+func (s *LocalStorage) Read(_ context.Context, key string) ([]byte, error) {
+	path, err := s.path(key)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
 func (s *LocalStorage) Delete(_ context.Context, key string) error {
 	path, err := s.path(key)
 	if err != nil {

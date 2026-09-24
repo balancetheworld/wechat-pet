@@ -1,8 +1,10 @@
 package asset
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/hex"
+	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -14,12 +16,14 @@ import (
 	appErrors "github.com/balancetheworld/wechat-pet/internal/pkg/errors"
 	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
 	"github.com/balancetheworld/wechat-pet/internal/pkg/response"
+	aiplatform "github.com/balancetheworld/wechat-pet/internal/platform/ai"
 	fileservice "github.com/balancetheworld/wechat-pet/internal/service/file"
 	"github.com/gin-gonic/gin"
 )
 
 const maxAvatarSize = 5 << 20
 const maxMediaSize = 50 << 20
+const maxAskImageSize = 10 << 20
 
 type Handler struct {
 	service   *fileservice.Service
@@ -75,6 +79,9 @@ func (h *Handler) Upload(c *gin.Context) {
 	if uploadType != "avatar" && uploadType != "pet_avatar" && uploadType != "pet_cover" {
 		limit = maxMediaSize
 	}
+	if uploadType == "ask_image" {
+		limit = maxAskImageSize
+	}
 	if file.Size <= 0 || file.Size > limit {
 		response.Fail(c, appErrors.InvalidParam("文件大小超出限制"))
 		return
@@ -91,6 +98,28 @@ func (h *Handler) Upload(c *gin.Context) {
 		return
 	}
 	defer content.Close()
+	uploadContent := io.Reader(content)
+	if uploadType == "ask_image" {
+		data, readErr := io.ReadAll(io.LimitReader(content, maxAskImageSize+1))
+		if readErr != nil {
+			response.Fail(c, appErrors.InvalidParam("图片读取失败"))
+			return
+		}
+		info, validateErr := aiplatform.ValidateImage(data, aiplatform.DefaultImageLimit())
+		if validateErr != nil {
+			response.Fail(c, appErrors.InvalidParam("图片格式或尺寸不支持"))
+			return
+		}
+		controlled, transformErr := aiplatform.MakeControlledVersion(info.Format, data, aiplatform.DefaultImageLimit())
+		if transformErr != nil {
+			response.Fail(c, appErrors.InvalidParam("图片解析失败"))
+			return
+		}
+		uploadContent = bytes.NewReader(controlled)
+		file.Size = int64(len(controlled))
+		contentType = "image/jpeg"
+		extension = ".jpg"
+	}
 	assetID, err := newAssetID(extension)
 	if err != nil {
 		response.Fail(c, appErrors.Internal(err))
@@ -106,7 +135,7 @@ func (h *Handler) Upload(c *gin.Context) {
 			familyID = summary.ID
 		}
 	}
-	if _, err := h.service.UploadForOwner(c.Request.Context(), assetID, content, file.Size, contentType, fileservice.Asset{ID: assetID, UserID: userID, FamilyID: familyID, Type: uploadType}); err != nil {
+	if _, err := h.service.UploadForOwner(c.Request.Context(), assetID, uploadContent, file.Size, contentType, fileservice.Asset{ID: assetID, UserID: userID, FamilyID: familyID, Type: uploadType}); err != nil {
 		response.Fail(c, appErrors.Internal(err))
 		return
 	}
@@ -185,7 +214,8 @@ func currentUserID(c *gin.Context) (string, bool) {
 
 func supportedType(value string) bool {
 	switch value {
-	case "avatar", "pet_avatar", "pet_cover", "certificate", "birthday_photo", "birthday_video", "growth_image", "calendar_image":
+case "avatar", "pet_avatar", "pet_cover", "certificate", "birthday_photo", "birthday_video", "growth_image", "calendar_image", "ask_image":
+
 		return true
 	}
 	return false

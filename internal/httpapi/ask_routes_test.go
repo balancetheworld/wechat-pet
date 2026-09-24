@@ -20,6 +20,53 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// askRouteModel 是 HTTP 路由端到端测试的 v2 决策循环模型替身：始终返回
+// request_input，使 ProcessRun 降级为 assistant.question（waiting_input），便于驱动 Reply 流程。
+type askRouteModel struct{}
+
+func (askRouteModel) Step(context.Context, askapp.StepInput) (askapp.ModelStepResult, error) {
+	return askapp.ModelStepResult{Records: askRouteRequestInputRecords(), Usage: askapp.ModelUsage{Complete: true}}, nil
+}
+
+func askRouteRequestInputRecords() []askapp.ProtocolRecord {
+	return []askapp.ProtocolRecord{
+		{Type: askapp.RecordHeader, Header: &askapp.HeaderRecord{
+			Type:          askapp.RecordHeader,
+			SchemaVersion: askapp.RecordArrayV1,
+			Action:        askapp.ActionRequestInput,
+			TaskUpdates:   []askapp.TaskUpdate{{TaskKey: "t1", Goal: "查旺仔呕吐记录"}},
+		}},
+		{Type: askapp.RecordQuestion, Question: &askapp.QuestionRecord{
+			Type:        askapp.RecordQuestion,
+			QuestionKey: "q1",
+			TaskKeys:    []string{"t1"},
+			Text:        "请问是哪只宠物？",
+			MissingFields: []askapp.MissingField{
+				{TaskKey: "t1", Field: "pet_id", Necessity: "blocking"},
+			},
+		}},
+		{Type: askapp.RecordCoverage, Coverage: &askapp.CoverageRecord{
+			Type:  askapp.RecordCoverage,
+			Tasks: []askapp.TaskCoverage{{TaskKey: "t1", QuestionKeys: []string{"q1"}}},
+		}},
+		{Type: askapp.RecordEnd},
+	}
+}
+
+// injectAskRouteV2Dependencies 给 ask Service 注入 v2 决策循环依赖（目录、业务读取、模型），
+// 使 ProcessRun 走 v2 路径而非降级。
+func injectAskRouteV2Dependencies(t *testing.T, service *askapp.Service, calendarRepository *calendarapp.SQLRepository, petRepository *petapp.SQLRepository, askRepository *askapp.SQLRepository) {
+	t.Helper()
+	catalog, err := askapp.DefaultCatalog(askapp.DefaultToolVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetCalendarRepository(calendarRepository)
+	service.SetToolCatalog(catalog)
+	service.SetBusinessReadRepository(askapp.NewBusinessReadRepository(petRepository, calendarRepository, askRepository))
+	service.SetAgentModel(askRouteModel{})
+}
+
 func TestAskRoutesLifecycle(t *testing.T) {
 	db, err := sql.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -51,10 +98,15 @@ func TestAskRoutesLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	askService, err := askapp.NewService(askRepository, petRepository, askapp.DeterministicExecutor{})
+	askService, err := askapp.NewService(askRepository, petRepository)
 	if err != nil {
 		t.Fatal(err)
 	}
+	calendarRepository, err := calendarapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	injectAskRouteV2Dependencies(t, askService, calendarRepository, petRepository, askRepository)
 	signer, err := jwtpkg.NewSigner("test-secret", time.Hour)
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +163,7 @@ func TestAskRoutesLifecycle(t *testing.T) {
 		t.Fatalf("process version fields missing: %s", process.Body.String())
 	}
 	snapshot := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/snapshot", "")
-	if snapshot.Code != http.StatusOK || !strings.Contains(snapshot.Body.String(), `"pets":[{"pet_id":"pet-1","pet_name":"团子"`) || !strings.Contains(snapshot.Body.String(), `"turn_index":0`) || !strings.Contains(snapshot.Body.String(), `"row_version":3`) || !strings.Contains(snapshot.Body.String(), `"runs":[{"run":{"id":"`+runID+`"`) || !strings.Contains(snapshot.Body.String(), `"messages":[{"role":"user","content":"最近没精神"`) || !strings.Contains(snapshot.Body.String(), `"type":"run.progress"`) || !strings.Contains(snapshot.Body.String(), `"event_cursors":[{"run_id":"`+runID+`","sequence":8}]`) {
+	if snapshot.Code != http.StatusOK || !strings.Contains(snapshot.Body.String(), `"pets":[{"pet_id":"pet-1","pet_name":"团子"`) || !strings.Contains(snapshot.Body.String(), `"turn_index":0`) || !strings.Contains(snapshot.Body.String(), `"row_version":3`) || !strings.Contains(snapshot.Body.String(), `"runs":[{"run":{"id":"`+runID+`"`) || !strings.Contains(snapshot.Body.String(), `"messages":[{"role":"user","content":"最近没精神"`) || !strings.Contains(snapshot.Body.String(), `"type":"run.progress"`) || !strings.Contains(snapshot.Body.String(), `"event_cursors":[{"run_id":"`+runID+`","sequence":7}]`) {
 		t.Fatalf("snapshot status = %d, body = %s", snapshot.Code, snapshot.Body.String())
 	}
 	stream := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events/stream?after=1", "")
@@ -125,14 +177,14 @@ func TestAskRoutesLifecycle(t *testing.T) {
 	}
 	replyBody := `{"input":"现在呼吸困难","expected_version":3}`
 	reply := askRouteRequest(t, router, token, http.MethodPost, replyPath, replyBody)
-	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), `"turn_count":1`) || !strings.Contains(reply.Body.String(), `"id":"`+runID+`"`) || !strings.Contains(reply.Body.String(), `"row_version":4`) || !strings.Contains(reply.Body.String(), `"clarification_count":1`) || !strings.Contains(reply.Body.String(), `"sequence":9`) || !strings.Contains(reply.Body.String(), `"status":"queued"`) {
+	if reply.Code != http.StatusOK || !strings.Contains(reply.Body.String(), `"turn_count":2`) || !strings.Contains(reply.Body.String(), `"id":"`+runID+`"`) || !strings.Contains(reply.Body.String(), `"row_version":4`) || !strings.Contains(reply.Body.String(), `"clarification_count":1`) || !strings.Contains(reply.Body.String(), `"sequence":8`) || !strings.Contains(reply.Body.String(), `"status":"queued"`) {
 		t.Fatalf("reply status = %d, body = %s", reply.Code, reply.Body.String())
 	}
 	if queued := runQueue.jobs[len(runQueue.jobs)-1]; queued.RunID != runID || queued.RowVersion != 4 {
 		t.Fatalf("replied run job = %+v", queued)
 	}
 	replayedReply := askRouteRequest(t, router, token, http.MethodPost, replyPath, replyBody)
-	if replayedReply.Code != http.StatusOK || !strings.Contains(replayedReply.Body.String(), `"row_version":4`) || !strings.Contains(replayedReply.Body.String(), `"sequence":9`) {
+	if replayedReply.Code != http.StatusOK || !strings.Contains(replayedReply.Body.String(), `"row_version":4`) || !strings.Contains(replayedReply.Body.String(), `"sequence":8`) {
 		t.Fatalf("replayed reply status = %d, body = %s", replayedReply.Code, replayedReply.Body.String())
 	}
 	conflictingReply := askRouteRequestWithKey(t, router, token, http.MethodPost, replyPath, `{"input":"其他回答","expected_version":3}`, askRouteIdempotencyKey(http.MethodPost, replyPath, replyBody))
@@ -140,7 +192,7 @@ func TestAskRoutesLifecycle(t *testing.T) {
 		t.Fatalf("conflicting reply status = %d, body = %s", conflictingReply.Code, conflictingReply.Body.String())
 	}
 	resumed := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/process", "")
-	if resumed.Code != http.StatusOK || !strings.Contains(resumed.Body.String(), `"status":"escalated"`) || !strings.Contains(resumed.Body.String(), `"risk_level":"red"`) || !strings.Contains(resumed.Body.String(), `"sequence":13`) {
+	if resumed.Code != http.StatusOK || !strings.Contains(resumed.Body.String(), `"status":"completed"`) || !strings.Contains(resumed.Body.String(), `"risk_level":"red"`) || !strings.Contains(resumed.Body.String(), `"sequence":13`) {
 		t.Fatalf("resumed process status = %d, body = %s", resumed.Code, resumed.Body.String())
 	}
 	var messageCount int
@@ -160,151 +212,6 @@ func TestAskRoutesLifecycle(t *testing.T) {
 	}
 }
 
-func TestAskRoutesMultiPetFactContract(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	setupAskRouteSchema(t, db)
-	if _, err := db.Exec("INSERT INTO users (id, openid, nickname, last_login_at, created_at, updated_at) VALUES ('user-1', 'openid-1', '用户', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO families (id, name, created_at, updated_at) VALUES ('family-1', '家庭', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO family_members (id, family_id, user_id, role, status, created_at, updated_at) VALUES ('member-1', 'family-1', 'user-1', 'owner', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO pets (id, family_id, name, created_by, updated_by, created_at, updated_at) VALUES ('pet-1', 'family-1', '旺仔', 'user-1', 'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), ('pet-2', 'family-1', '球球', 'user-1', 'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`CREATE TABLE calendar_records (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, category TEXT NOT NULL, medical_type TEXT, custom_medical_type TEXT, content TEXT NOT NULL, occurred_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO calendar_records (id, family_id, pet_id, category, medical_type, custom_medical_type, content, occurred_at, deleted_at) VALUES ('record-1', 'family-1', 'pet-1', 'daily', '', '', '旺仔洗澡', '2026-08-20 10:00:00', NULL)"); err != nil {
-		t.Fatal(err)
-	}
-	familyRepository, err := familyapp.NewRepository(db, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
-	petRepository, err := petapp.NewRepository(db, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
-	askRepository, err := askapp.NewRepository(db, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
-	calendarRepository, err := calendarapp.NewRepository(db, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
-	askService, err := askapp.NewService(askRepository, petRepository, askapp.DeterministicExecutor{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	askService.SetCalendarRepository(calendarRepository)
-	signer, err := jwtpkg.NewSigner("test-secret", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	router := NewWithDependencies(Dependencies{AskService: askService, AskRunQueue: &recordingRunQueue{service: askService}, FamilyRepository: familyRepository, TokenSigner: signer})
-	token, err := signer.Sign("user-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	create := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions", `{"input":"旺仔和球球上次洗澡分别是什么时候"}`)
-	if create.Code != http.StatusOK || !strings.Contains(create.Body.String(), `"pet_id":"pet-1"`) || !strings.Contains(create.Body.String(), `"pet_id":"pet-2"`) {
-		t.Fatalf("create status = %d, body = %s", create.Code, create.Body.String())
-	}
-	sessionID := extractAskRouteID(create.Body.String(), "session")
-	runID := extractAskRouteID(create.Body.String(), "run")
-	if sessionID == "" || runID == "" {
-		t.Fatalf("missing IDs: %s", create.Body.String())
-	}
-	process := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/process", "")
-	body := process.Body.String()
-	if process.Code != http.StatusOK || !strings.Contains(body, `"status":"completed"`) || !strings.Contains(body, `"type":"fact.completed"`) || !strings.Contains(body, `"fact_type":"bath"`) || !strings.Contains(body, `"pet_id":"pet-1"`) || !strings.Contains(body, `"pet_id":"pet-2"`) || !strings.Contains(body, `"found":false`) {
-		t.Fatalf("process status = %d, body = %s", process.Code, body)
-	}
-	if strings.Contains(body, `"PetID"`) || strings.Contains(body, `"PetName"`) {
-		t.Fatalf("fact fields are not snake_case: %s", body)
-	}
-	events := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events?after=1", "")
-	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"type":"fact.completed"`) || !strings.Contains(events.Body.String(), `"fact_type":"bath"`) {
-		t.Fatalf("events status = %d, body = %s", events.Code, events.Body.String())
-	}
-}
-
-func TestAskRoutesFamilyPetQueryContract(t *testing.T) {
-	db, err := sql.Open("sqlite3", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	setupAskRouteSchema(t, db)
-	if _, err := db.Exec("INSERT INTO users (id, openid, nickname, last_login_at, created_at, updated_at) VALUES ('user-1', 'openid-1', '用户', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO families (id, name, created_at, updated_at) VALUES ('family-1', '家庭', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO family_members (id, family_id, user_id, role, status, created_at, updated_at) VALUES ('member-1', 'family-1', 'user-1', 'owner', 'active', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec("INSERT INTO pets (id, family_id, name, created_by, updated_by, created_at, updated_at) VALUES ('pet-1', 'family-1', '旺仔', 'user-1', 'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP), ('pet-2', 'family-1', '球球', 'user-1', 'user-1', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"); err != nil {
-		t.Fatal(err)
-	}
-	familyRepository, err := familyapp.NewRepository(db, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
-	petRepository, err := petapp.NewRepository(db, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
-	askRepository, err := askapp.NewRepository(db, "sqlite")
-	if err != nil {
-		t.Fatal(err)
-	}
-	askService, err := askapp.NewService(askRepository, petRepository, askapp.DeterministicExecutor{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	signer, err := jwtpkg.NewSigner("test-secret", time.Hour)
-	if err != nil {
-		t.Fatal(err)
-	}
-	router := NewWithDependencies(Dependencies{AskService: askService, AskRunQueue: &recordingRunQueue{service: askService}, FamilyRepository: familyRepository, TokenSigner: signer})
-	token, err := signer.Sign("user-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	create := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions", `{"input":"你知道我家有哪些宠物吗"}`)
-	if create.Code != http.StatusOK {
-		t.Fatalf("create status = %d, body = %s", create.Code, create.Body.String())
-	}
-	sessionID := extractAskRouteID(create.Body.String(), "session")
-	runID := extractAskRouteID(create.Body.String(), "run")
-	if sessionID == "" || runID == "" {
-		t.Fatalf("missing IDs: %s", create.Body.String())
-	}
-	process := askRouteRequest(t, router, token, http.MethodPost, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/process", "")
-	body := process.Body.String()
-	if process.Code != http.StatusOK || !strings.Contains(body, `"status":"completed"`) || !strings.Contains(body, `"type":"family.pets.completed"`) || !strings.Contains(body, `"pet_id":"pet-1"`) || !strings.Contains(body, `"pet_name":"旺仔"`) || !strings.Contains(body, `"pet_id":"pet-2"`) || !strings.Contains(body, `"pet_name":"球球"`) {
-		t.Fatalf("process status = %d, body = %s", process.Code, body)
-	}
-	if strings.Contains(body, `"PetID"`) || strings.Contains(body, `"PetName"`) {
-		t.Fatalf("family pet fields are not snake_case: %s", body)
-	}
-	stream := askRouteRequest(t, router, token, http.MethodGet, "/api/v1/ask/sessions/"+sessionID+"/runs/"+runID+"/events/stream?after=1", "")
-	if stream.Code != http.StatusOK || !strings.Contains(stream.Body.String(), `"type":"family.pets.completed"`) {
-		t.Fatalf("stream status = %d, body = %s", stream.Code, stream.Body.String())
-	}
-}
-
 func askRouteRequest(t *testing.T, router http.Handler, token, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	return askRouteRequestWithKey(t, router, token, method, path, body, askRouteIdempotencyKey(method, path, body))
@@ -320,7 +227,7 @@ func (q *recordingRunQueue) Enqueue(ctx context.Context, job askapp.RunJob) erro
 	if q.service == nil {
 		return nil
 	}
-	_, err := q.service.ProcessRunVersion(ctx, job.FamilyID, job.SessionID, job.RunID, job.RowVersion)
+	_, err := q.service.ProcessRunVersion(ctx, job.FamilyID, job.SessionID, job.RunID, job.RowVersion, job.ExecutionEpoch)
 	return err
 }
 
@@ -370,13 +277,17 @@ func setupAskRouteSchema(t *testing.T, db *sql.DB) {
 		}
 	}
 	askStatements := []string{
-		`CREATE TABLE ask_sessions (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, created_by TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, turn_count INTEGER NOT NULL, prompt_version TEXT NOT NULL, rule_version TEXT NOT NULL, knowledge_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, completed_at TIMESTAMP)`,
+		// v2：会话（对齐 000015/000016）
+		`CREATE TABLE ask_sessions (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, resolved_pet_id TEXT, created_by TEXT NOT NULL, status TEXT NOT NULL, risk_level TEXT NOT NULL, turn_count INTEGER NOT NULL, input_sequence INTEGER NOT NULL DEFAULT 0, event_sequence INTEGER NOT NULL DEFAULT 0, launch_instance TEXT NOT NULL DEFAULT '', generation INTEGER NOT NULL DEFAULT 1, prompt_version TEXT NOT NULL, rule_version TEXT NOT NULL, knowledge_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, completed_at TIMESTAMP, deleted_at TIMESTAMP)`,
 		`CREATE TABLE ask_session_pets (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, pet_id TEXT NOT NULL, mention TEXT NOT NULL, sort_order INTEGER NOT NULL, UNIQUE(session_id, pet_id), UNIQUE(session_id, sort_order))`,
-		`CREATE TABLE ask_turns (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, status TEXT NOT NULL, input TEXT NOT NULL, selected_run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(session_id, turn_index))`,
-		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_index INTEGER NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, clarification_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, risk_level TEXT NOT NULL, rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL, lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at TIMESTAMP, attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TIMESTAMP, UNIQUE(turn_id, run_index))`,
-		`CREATE TABLE ask_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(run_id, sequence))`,
-		`CREATE TABLE ask_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT, role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL)`,
-		`CREATE TABLE ask_idempotency_keys (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, response_data TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, UNIQUE(user_id, operation, idempotency_key))`,
+		`CREATE TABLE ask_turns (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_index INTEGER NOT NULL, input_sequence INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, input TEXT NOT NULL, asset_refs TEXT NOT NULL DEFAULT '[]', selected_run_id TEXT NOT NULL, superseded_by TEXT, created_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP, UNIQUE(session_id, turn_index))`,
+		`CREATE TABLE ask_runs (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, origin_turn_id TEXT NOT NULL DEFAULT '', run_index INTEGER NOT NULL, row_version INTEGER NOT NULL DEFAULT 1, clarification_count INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL, risk_level TEXT NOT NULL, input_revision INTEGER NOT NULL DEFAULT 0, execution_epoch INTEGER NOT NULL DEFAULT 0, termination_reason TEXT NOT NULL DEFAULT '', checkpoint TEXT NOT NULL DEFAULT '', rule_version TEXT NOT NULL, prompt_version TEXT NOT NULL, created_at TIMESTAMP NOT NULL, started_at TIMESTAMP, completed_at TIMESTAMP, error_code TEXT NOT NULL DEFAULT '', lease_owner TEXT NOT NULL DEFAULT '', lease_expires_at TIMESTAMP, attempt_count INTEGER NOT NULL DEFAULT 0, next_attempt_at TIMESTAMP, deleted_at TIMESTAMP, UNIQUE(turn_id, run_index))`,
+		`CREATE TABLE ask_events (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL, created_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP, UNIQUE(run_id, sequence))`,
+		`CREATE TABLE ask_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT, role TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP)`,
+		`CREATE TABLE ask_task_items (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, origin_turn_id TEXT NOT NULL DEFAULT '', item_revision INTEGER NOT NULL DEFAULT 1, goal TEXT NOT NULL, source_turn_ids TEXT NOT NULL DEFAULT '[]', subjects TEXT NOT NULL DEFAULT '[]', outcome TEXT NOT NULL DEFAULT 'pending', missing_fields TEXT NOT NULL DEFAULT '[]', incomplete_reason TEXT NOT NULL DEFAULT '', result_ref TEXT NOT NULL DEFAULT '', supersedes TEXT NOT NULL DEFAULT '', superseded_by TEXT NOT NULL DEFAULT '', withdrawn_reason TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP)`,
+		`CREATE TABLE ask_budgets (id TEXT PRIMARY KEY, scope TEXT NOT NULL, scope_id TEXT NOT NULL, max_model_calls INTEGER NOT NULL DEFAULT 0, max_tool_calls INTEGER NOT NULL DEFAULT 0, max_tokens INTEGER NOT NULL DEFAULT 0, max_cost_micros BIGINT NOT NULL DEFAULT 0, max_duration_millis BIGINT NOT NULL DEFAULT 0, max_concurrency INTEGER NOT NULL DEFAULT 0, model_calls_used INTEGER NOT NULL DEFAULT 0, tool_calls_used INTEGER NOT NULL DEFAULT 0, tokens_used INTEGER NOT NULL DEFAULT 0, cost_used_micros BIGINT NOT NULL DEFAULT 0, duration_used_millis BIGINT NOT NULL DEFAULT 0, model_calls_reserved INTEGER NOT NULL DEFAULT 0, tool_calls_reserved INTEGER NOT NULL DEFAULT 0, tokens_reserved INTEGER NOT NULL DEFAULT 0, cost_reserved_micros BIGINT NOT NULL DEFAULT 0, duration_reserved_millis BIGINT NOT NULL DEFAULT 0, concurrency_reserved INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, UNIQUE(scope, scope_id))`,
+		`CREATE TABLE ask_reservations (id TEXT PRIMARY KEY, budget_id TEXT NOT NULL REFERENCES ask_budgets(id), model_calls INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0, tokens INTEGER NOT NULL DEFAULT 0, cost_micros BIGINT NOT NULL DEFAULT 0, duration_millis BIGINT NOT NULL DEFAULT 0, concurrency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'reserved', created_at TIMESTAMP NOT NULL, settled_at TIMESTAMP, released_at TIMESTAMP)`,
+		`CREATE TABLE ask_idempotency_keys (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, operation TEXT NOT NULL, idempotency_key TEXT NOT NULL, request_hash TEXT NOT NULL, response_data TEXT NOT NULL, session_id TEXT NOT NULL, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, created_at TIMESTAMP NOT NULL, deleted_at TIMESTAMP, UNIQUE(user_id, operation, idempotency_key))`,
 	}
 	for _, statement := range askStatements {
 		if _, err := db.Exec(statement); err != nil {

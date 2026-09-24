@@ -557,7 +557,7 @@ GOCACHE=/tmp/pet-go-build go test ./...
 - 新增 `POST /api/v1/ask/sessions/:session_id/runs/:run_id/reply` 接口。
 - 仅允许 `waiting_input` 状态的原 Run 接收回答。
 - 新 Turn 使用当前 `Session.TurnCount` 作为 `turn_index`，新 Run 从 `run_index = 0` 开始。
-- 会话最多允许三轮 Turn，达到上限后拒绝继续追问。
+- 同一会话可以持续创建新的 Turn，直到用户主动重置会话或会话被取消。
 - 新回答创建后仍保持 `queued`，由现有 `/process` 接口触发执行，因此每轮都会重新经过红色风险规则。
 - 回复时必须命中当前会话最新 Turn 的选中 Run，旧的 `waiting_input` Run 不能再次分叉创建轮次。
 
@@ -680,7 +680,7 @@ git diff --check
 
 ### 关键设计
 
-上下文在 Run 实际从 `queued` 进入 `running` 前读取，确保 Executor 使用的是当前会话状态。历史输入按轮次升序恢复，最多保留 5 轮，避免无限增长 Prompt。
+上下文在 Run 实际从 `queued` 进入 `running` 前读取，确保 Executor 使用的是当前会话状态。历史输入按轮次升序恢复，并通过上下文预算压缩，避免无限增长 Prompt。该预算只限制单次模型请求携带的历史，不限制用户在同一 Session 中继续提问。
 
 Profile 通过可选接口读取。未启用 Profile 资源或扩展表不可用时保留基础宠物信息，避免旧部署因扩展表缺失导致问问 Run 失败；未成功读取的字段不会被伪造填充。
 
@@ -1130,7 +1130,7 @@ creating   → input_error / ambiguous / network_error
 - 消息区：按用户输入、追问、结果和风险事件分组，结果内容不依赖字符串解析。
 - 多宠物事实结果：按 `session.pets` / `items` 顺序逐行展示宠物名、记录状态、发生时间和摘要；`found=false` 展示“暂无记录”。
 - 普通分析结果：固定展示当前判断、观察到的情况、可能原因、接下来怎么做、需要就医的情况五个字段。
-- 追问：一次只显示一个问题，提交后回到 `processing`，最多遵守后端三轮限制。
+- 追问：一次只显示一个问题，提交后回到 `processing`，只要会话仍可用就可以继续追问。
 - 红色风险：使用高优先级风险提示和立即就医行动，不和绿色普通分析混排。
 - 失败状态：不暴露内部错误、SQL 或模型信息，提供重试当前问题和修改输入两个动作。
 
@@ -1587,7 +1587,7 @@ Service 先验证：
 - Run 属于 Session 且状态为 `waiting_input`。
 - `expected_version` 等于 Run 当前 `row_version`。
 - Run 是当前 Turn 的 `selected_run_id`。
-- `clarification_count` 尚未达到上限。
+- `clarification_count` 仅用于记录当前 Run 的补充次数。
 
 随后 Repository 在一个事务中执行：
 
@@ -1638,14 +1638,7 @@ assistant 后续正式回答预留
 
 确定性风险规则会同时检查原始 Turn 输入和该 Run 下的所有用户回答。因此原问题是“最近没精神”，用户补充“现在呼吸困难”时，恢复执行会优先触发红色风险升级，不会进入普通模型追问。
 
-Agent 最多允许三次补充。第三次补充后如果 Executor 仍返回 `waiting_input`，Service 将结果收敛为：
-
-```text
-status=failed
-error_code=clarification_limit_reached
-```
-
-避免 Run 永久停留在不可继续回答的等待状态。
+同一个 Run 可以持续接收补充回答。`clarification_count` 会随每次恢复递增，用于执行审计，但不会因为次数增加而自动失败；只有 Executor、风险规则或基础状态校验明确返回失败时，Run 才会进入 `failed`。
 
 ### 前端请求编排
 
@@ -1688,7 +1681,7 @@ Zustand 新增 `activeRunVersion`。同 Run 从 `waiting_input` 恢复为 `queue
 - 旧 `expected_version` 无法恢复 Run。
 - 原始问题、追问和用户回答按顺序进入消息历史。
 - 用户补充中的红旗症状触发确定性红色升级。
-- 达到三次补充后不再生成第四次追问。
+- 连续多次补充仍可恢复同一个 Run，不因次数增加自动失败。
 - 前端同 Run 回答保留独立用户消息，新事件追加到回答之后。
 
 ### 验证结果
@@ -2127,7 +2120,7 @@ AI_MODEL
 AI_TIMEOUT_SECONDS
 ```
 
-`AI_ENABLED=false` 时继续装配 `DeterministicExecutor`，保持本地开发和未配置环境的原有行为。开启后必须提供 API Key、模型名和正数超时时间；API Key 会在配置日志中脱敏。默认 Provider 为 `openai`，默认 Base URL 为 `https://api.openai.com/v1`，默认超时为 30 秒。设置 `AI_PROVIDER=hunyuan` 后使用腾讯混元 OpenAI 兼容接口；若未显式设置 Base URL，则使用 `https://api.hunyuan.cloud.tencent.com/v1`，模型可配置为 `hunyuan-turbos-latest` 等混元模型名。
+`AI_ENABLED=false` 时继续装配 `DeterministicExecutor`，保持本地开发和未配置环境的原有行为。开启后必须提供 API Key、模型名和正数超时时间；API Key 会在配置日志中脱敏。默认 Provider 为 `openai`，默认 Base URL 为 `https://api.openai.com/v1`，默认超时为 30 秒。OpenAI Responses API 使用 `AI_PROVIDER=openai`。DeepSeek、混元和其他兼容 `/chat/completions` 的服务统一使用 `AI_PROVIDER=chat_completion`，通过 `AI_BASE_URL`、`AI_MODEL` 和 `AI_API_KEY` 切换，不需要新增 Provider 实现。DeepSeek 可配置为 `https://api.deepseek.com` 和 `deepseek-chat`。
 
 ### 修改文件
 
@@ -2266,6 +2259,8 @@ ESLint 0 个错误
 后端在 Run 执行期间持久化 `run.progress` 事件，前端按事件流和 Snapshot 恢复并展示以下阶段：
 
 ```text
+正在理解你的问题
+已理解你的问题
 正在整理宠物的症状描述
 已关联宠物资料和近期记录
 正在进行风险初筛
@@ -2400,14 +2395,14 @@ message=正在理解你的问题
 
 - `internal/app/ask/intent.go`：定义意图、路由输入和本地短问候规则。
 - `internal/app/ask/service.go`：增加高危优先、意图分支和按需健康上下文。
-- `internal/platform/ai/openai.go`、`internal/platform/ai/hunyuan.go`：接入真实 Provider 意图分类并区分观测操作。
+- `internal/platform/ai/openai.go`、`internal/platform/ai/chat_completion.go`：接入 Responses API 和通用 Chat Completions Provider，并区分观测操作。
 - `internal/httpapi/ask/handler.go`：将 `assistant.completed` 识别为流终态。
 - `web/src/types/ask.ts`、`web/src/components/ask/ask-event.tsx`、`web/src/hooks/ask-reducer.ts`、`web/src/hooks/use-ask-session.ts`、`web/src/pages/ask/index.tsx`：接入路由阶段、普通文本终态和稳定失败文案。
-- `internal/app/ask/service_test.go`、`internal/platform/ai/hunyuan_test.go`、`internal/httpapi/ask_routes_test.go`、`web/src/hooks/ask-reducer.test.ts`：覆盖路由、上下文边界、终态和恢复行为。
+- `internal/app/ask/service_test.go`、`internal/platform/ai/chat_completion_test.go`、`internal/httpapi/ask_routes_test.go`、`web/src/hooks/ask-reducer.test.ts`：覆盖路由、上下文边界、终态和恢复行为。
 
 ### 当前限制
 
-- 自动定位接口只对本地高置信闲聊放宽宠物名称要求；需要模型判断的无宠物输入仍需先选择宠物或包含宠物名称。
+- 自动定位接口在家庭存在宠物时允许无宠物名称输入先创建会话，再由模型路由决定是否读取宠物上下文；低信息输入会进入澄清，不会默认执行健康分析。
 - 意图分类依赖 Provider 时会额外消耗一次模型请求和 Token。
 - 当前未实现自主工具循环、长期记忆检索和多模态输入。
 
@@ -2432,7 +2427,7 @@ message=正在理解你的问题
 → family.pets.completed
 ```
 
-本地高置信规则识别家庭宠物列表问题，使自动定位接口可以先创建会话。由于当前 Session 要求 `pet_id` 非空，会话技术性绑定家庭中的第一只宠物；执行时重新按 `session.family_id` 调用宠物 Repository 的 `List`，返回当前家庭完整宠物列表。
+本地高置信规则识别家庭宠物列表问题，使自动定位接口可以先创建会话。由于当前 Session 要求 `pet_id` 非空，会话技术性绑定家庭中的第一只宠物；执行时重新按 `session.family_id` 调用宠物 Repository 的 `List`，返回当前家庭完整宠物列表，并同时返回 `count` 和 `pets`。
 
 ### 架构边界
 

@@ -14,6 +14,14 @@ func TestResolvePetsSupportsMultipleNames(t *testing.T) {
 	}
 }
 
+func TestResolvePetsSupportsChineseMultiplePetExpression(t *testing.T) {
+	pets := []petapp.Pet{{ID: "pet-1", Name: "旺仔"}, {ID: "pet-2", Name: "球球"}}
+	result := ResolvePets("旺仔和球球最近拉肚子分别几次", pets)
+	if result.Status != PetResolveResolved || len(result.Resolved) != 2 || result.Resolved[0].ID != "pet-1" || result.Resolved[1].ID != "pet-2" {
+		t.Fatalf("resolution = %+v", result)
+	}
+}
+
 func TestResolvePetsReportsDuplicateName(t *testing.T) {
 	pets := []petapp.Pet{{ID: "pet-1", Name: "旺仔"}, {ID: "pet-2", Name: "旺仔"}, {ID: "pet-3", Name: "球球"}}
 	result := ResolvePets("旺仔和球球上次洗澡是什么时候", pets)

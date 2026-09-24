@@ -22,9 +22,11 @@ export interface AskRuntimeState {
 
 export type AskRuntimeAction
   = { type: 'local.submitted', input: string, clientRunID: string }
+    | { type: 'local.followed_up', input: string, clientRunID: string }
     | { type: 'local.replied', input: string, clientRunID: string, runID: string }
     | { type: 'snapshot.restored', execution: AskExecution }
     | { type: 'snapshot.loaded', snapshot: AskSnapshot }
+    | { type: 'snapshot.loading' }
     | { type: 'events.received', events: AskEvent[] }
     | { type: 'stream.reconnecting' }
     | { type: 'request.failed', phase: 'failed' | 'input_error' | 'ambiguous' | 'network_error', message: string }
@@ -74,6 +76,27 @@ export function mergeAskDeltaEvents(events: AskEvent[]) {
   return merged
 }
 
+export function assistantPreviewText(events: AskEvent[], runID: string) {
+  const merged = mergeAskDeltaEvents(events.filter(event => event.type === 'assistant.delta' && event.run_id === runID))
+  let text = ''
+  for (const event of merged) {
+    const data = event.data as AskDeltaResult
+    if (typeof data.delta === 'string') {
+      text += data.delta
+    }
+  }
+  return text
+}
+
+const visibleEventTypes = new Set(['run.progress', 'assistant.delta', 'assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed'])
+
+const terminalEventTypes = new Set(['assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed', 'run.canceled'])
+
+export function visibleTurnEvents(events: AskEvent[]) {
+  const hasTerminalEvent = events.some(event => terminalEventTypes.has(event.type))
+  return mergeAskDeltaEvents(events.filter(event => visibleEventTypes.has(event.type) && !(event.type === 'assistant.delta' && hasTerminalEvent)))
+}
+
 function phaseForEvent(state: AskRuntimeState, event: AskEvent): AskRuntimePhase {
   switch (event.type) {
     case 'run.queued':
@@ -104,8 +127,6 @@ function phaseForRun(status: AskRun['status'], fallback: AskRuntimePhase): AskRu
       return 'waiting_input'
     case 'completed':
       return 'completed'
-    case 'escalated':
-      return 'escalated'
     case 'failed':
     case 'canceled':
     case 'interrupted':
@@ -186,25 +207,14 @@ function restoreSnapshot(state: AskRuntimeState, execution: AskExecution) {
 function restoreFullSnapshot(state: AskRuntimeState, snapshot: AskSnapshot) {
   const turns: AskRuntimeTurn[] = []
   for (const value of snapshot.turns) {
-    const messages = (value.messages ?? []).filter(message => message.role === 'user')
-    const entries = messages.length > 0 ? messages : [{ content: value.turn.input, created_at: value.turn.created_at }]
-    for (let index = 0; index < entries.length; index++) {
-      const message = entries[index]
-      const nextMessage = entries[index + 1]
-      const events = value.events.filter((event) => {
-        if (index === entries.length - 1) {
-          return event.created_at >= message.created_at
-        }
-        return event.created_at >= message.created_at && event.created_at < nextMessage.created_at
-      })
-      turns.push({
-        id: messages.length > 0 ? `${value.turn.id}:${index}` : value.turn.id,
-        runID: value.run.id,
-        input: message.content,
-        optimistic: false,
-        events: events.slice().sort((left, right) => left.sequence - right.sequence),
-      })
-    }
+    const message = (value.messages ?? []).find(message => message.role === 'user')
+    turns.push({
+      id: value.turn.id,
+      runID: value.run.id,
+      input: message?.content ?? value.turn.input,
+      optimistic: false,
+      events: value.events.slice().sort((left, right) => left.sequence - right.sequence),
+    })
   }
   for (const current of state.turns.filter(value => value.optimistic)) {
     const serverTurn = turns.find(value => value.runID === current.runID || value.input === current.input)
@@ -257,11 +267,20 @@ export function askReducer(state: AskRuntimeState, action: AskRuntimeAction): As
       return restoreSnapshot(state, action.execution)
     case 'snapshot.loaded':
       return restoreFullSnapshot(state, action.snapshot)
+    case 'snapshot.loading':
+      return { ...state, phase: 'reconnecting', error: '' }
     case 'local.replied':
       return {
         ...state,
         phase: 'replying',
         turns: [...state.turns, { id: action.clientRunID, runID: action.runID, input: action.input, optimistic: true, events: [] }],
+        error: '',
+      }
+    case 'local.followed_up':
+      return {
+        ...state,
+        phase: 'creating',
+        turns: [...state.turns, { id: action.clientRunID, runID: action.clientRunID, input: action.input, optimistic: true, events: [] }],
         error: '',
       }
     case 'events.received': {

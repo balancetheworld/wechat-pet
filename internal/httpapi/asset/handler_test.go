@@ -34,7 +34,8 @@ func (s *testStorage) Upload(context.Context, string, io.Reader, int64, string) 
 	s.uploaded = true
 	return nil
 }
-func (s *testStorage) Delete(context.Context, string) error { return nil }
+func (s *testStorage) Read(context.Context, string) ([]byte, error) { return nil, nil }
+func (s *testStorage) Delete(context.Context, string) error         { return nil }
 func (s *testStorage) URL(context.Context, string) (string, error) {
 	return "http://example.test/avatar.jpg", nil
 }

@@ -60,6 +60,28 @@ type ContextRecord struct {
 	OccurredAt        time.Time
 }
 
+// FamilyRecord：家庭范围内的记录条目（带宠物标识），供日程列表查询使用。
+type FamilyRecord struct {
+	ID          string
+	PetID       string
+	PetName     string
+	Category    string
+	MedicalType string
+	Content     string
+	OccurredAt  time.Time
+}
+
+// FamilyReminder：家庭范围内的待办提醒条目，供提醒列表查询使用。
+type FamilyReminder struct {
+	ID           string
+	PetID        string
+	PetName      string
+	ReminderDate string
+	Category     string
+	MedicalType  string
+	Content      string
+}
+
 type FactRecord struct {
 	ID                string
 	MedicalType       string

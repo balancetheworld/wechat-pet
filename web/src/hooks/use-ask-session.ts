@@ -2,14 +2,12 @@ import type { AskEvent, AskExecution, AskSnapshot } from '../types/ask'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import { createAskSession, createAskSessionForPet, getAskSnapshot, replyAskRun } from '../services/ask'
+import { continueAskSession, createAskSession, getAskSnapshot, replyAskRun, retryAskRun, stopAskRun } from '../services/ask'
 import { openAskEventStream } from '../services/ask-stream'
-import { getPets } from '../services/pet'
 import { ApiError } from '../services/request'
 import { useAskStore } from '../stores/ask-store'
-import { useAuthStore } from '../stores/auth-store'
-import { usePetStore } from '../stores/pet-store'
 import { askReducer, hasSequenceGap, initialAskRuntimeState } from './ask-reducer'
+import { shouldReconnectAfterSnapshotError, shouldReconnectAfterStreamError } from './ask-session-reconnect'
 
 export const askQueryKeys = {
   session: (sessionID: string) => ['ask', 'session', sessionID] as const,
@@ -38,7 +36,11 @@ function isTerminalEvent(event: AskEvent) {
 }
 
 function isTerminalRunStatus(status: AskExecution['run']['status']) {
-  return status === 'waiting_input' || status === 'completed' || status === 'escalated' || status === 'failed' || status === 'canceled' || status === 'interrupted'
+  return status === 'waiting_input' || status === 'completed' || status === 'failed' || status === 'canceled' || status === 'interrupted'
+}
+
+function isFollowUpRunStatus(status: AskExecution['run']['status']) {
+  return status === 'completed' || status === 'failed' || status === 'canceled' || status === 'interrupted'
 }
 
 function errorPhase(error: unknown) {
@@ -55,7 +57,11 @@ function errorPhase(error: unknown) {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '问问请求失败'
+  const message = error instanceof Error ? error.message : '问问请求失败'
+  if (!TARO_APP_DEBUG || !(error instanceof ApiError)) {
+    return message
+  }
+  return [message, `类型：${error.kind}`, error.statusCode ? `HTTP：${error.statusCode}` : '', error.code ? `业务代码：${error.code}` : '', error.requestId ? `请求 ID：${error.requestId}` : ''].filter(Boolean).join('；')
 }
 
 function localRunID() {
@@ -71,10 +77,10 @@ function isRetryableRequest(error: unknown) {
 }
 
 interface PendingRequest {
-  kind: 'create' | 'reply'
+  kind: 'create' | 'continue' | 'reply'
   input: string
+  assetRefs?: string[]
   idempotencyKey: string
-  petID?: string
   sessionID?: string
   runID?: string
   expectedVersion?: number
@@ -82,18 +88,17 @@ interface PendingRequest {
 
 export function useAskSession() {
   const queryClient = useQueryClient()
-  const [runtime, dispatch] = useReducer(askReducer, initialAskRuntimeState)
+  const [runtime, dispatch] = useReducer(askReducer, initialAskRuntimeState, state => useAskStore.getState().activeSessionId ? { ...state, phase: 'reconnecting' as const } : state)
   const [pageVisible, setPageVisible] = useState(true)
   const [connectionVersion, setConnectionVersion] = useState(0)
   const pendingRequest = useRef<PendingRequest | null>(null)
-  const petsLoad = useRef<Promise<void> | null>(null)
+  const liveEventKeys = useRef<Set<string>>(new Set())
   const draft = useAskStore(state => state.draft)
   const activeSessionId = useAskStore(state => state.activeSessionId)
   const activeRunId = useAskStore(state => state.activeRunId)
   const activeRunVersion = useAskStore(state => state.activeRunVersion)
   const setDraft = useAskStore(state => state.setDraft)
   const resetStore = useAskStore(state => state.reset)
-  const token = useAuthStore(state => state.token)
 
   Taro.useDidShow(() => {
     setPageVisible(true)
@@ -103,32 +108,10 @@ export function useAskSession() {
     setPageVisible(false)
   })
 
-  useEffect(() => {
-    if (!pageVisible || !token) {
-      return
-    }
-    let disposed = false
-    const loading = getPets().then((value) => {
-      if (!disposed) {
-        const petState = usePetStore.getState()
-        petState.setPets(value)
-        if (value.length > 0 && !value.some(pet => pet.id === petState.currentPetId)) {
-          petState.setCurrentPetId(value[0].id)
-        }
-      }
-    }).catch(() => undefined)
-    petsLoad.current = loading
-    void loading.finally(() => {
-      if (petsLoad.current === loading) {
-        petsLoad.current = null
-      }
-    })
-    return () => {
-      disposed = true
-    }
-  }, [pageVisible, token])
-
   const syncEvents = useCallback((sessionID: string, runID: string, events: AskEvent[]) => {
+    for (const event of events) {
+      liveEventKeys.current.add(`${event.run_id}:${event.sequence}`)
+    }
     queryClient.setQueryData<AskEvent[]>(askQueryKeys.eventLog(sessionID, runID), current => mergeEvents(current, events))
     dispatch({ type: 'events.received', events })
     const sequence = latestSequence(events)
@@ -165,7 +148,7 @@ export function useAskSession() {
   }, [queryClient])
 
   const createMutation = useMutation({
-    mutationFn: ({ input, key, petID }: { input: string, key: string, petID?: string }) => petID ? createAskSessionForPet(petID, { input }, key) : createAskSession({ input }, key),
+    mutationFn: ({ input, assetRefs, key }: { input: string, assetRefs?: string[], key: string }) => createAskSession({ input, asset_refs: assetRefs }, key),
     onSuccess: restoreSnapshot,
     onError(error) {
       dispatch({ type: 'request.failed', phase: error instanceof ApiError && error.statusCode === 409 ? 'ambiguous' : errorPhase(error), message: errorMessage(error) })
@@ -173,7 +156,15 @@ export function useAskSession() {
   })
 
   const replyMutation = useMutation({
-    mutationFn: ({ sessionID, runID, input, expectedVersion, key }: { sessionID: string, runID: string, input: string, expectedVersion: number, key: string }) => replyAskRun(sessionID, runID, { input, expected_version: expectedVersion }, key),
+    mutationFn: ({ sessionID, runID, input, assetRefs, expectedVersion, key }: { sessionID: string, runID: string, input: string, assetRefs?: string[], expectedVersion: number, key: string }) => replyAskRun(sessionID, runID, { input, asset_refs: assetRefs, expected_version: expectedVersion }, key),
+    onSuccess: restoreSnapshot,
+    onError(error) {
+      dispatch({ type: 'request.failed', phase: errorPhase(error), message: errorMessage(error) })
+    },
+  })
+
+  const continueMutation = useMutation({
+    mutationFn: ({ sessionID, input, assetRefs, key }: { sessionID: string, input: string, assetRefs?: string[], key: string }) => continueAskSession(sessionID, { input, asset_refs: assetRefs }, key),
     onSuccess: restoreSnapshot,
     onError(error) {
       dispatch({ type: 'request.failed', phase: errorPhase(error), message: errorMessage(error) })
@@ -225,7 +216,7 @@ export function useAskSession() {
           if (disposed || recovering) {
             return
           }
-          if (!error.retryable) {
+          if (!shouldReconnectAfterStreamError(error)) {
             disposed = true
             dispatch({ type: 'request.failed', phase: 'failed', message: error.message })
             return
@@ -263,11 +254,14 @@ export function useAskSession() {
         recovering = false
         if (!disposed) {
           dispatch({ type: 'request.failed', phase: errorPhase(error), message: errorMessage(error) })
-          reconnect()
+          if (shouldReconnectAfterSnapshotError(error)) {
+            reconnect()
+          }
         }
       }
     }
     async function initialize() {
+      dispatch({ type: 'snapshot.loading' })
       try {
         const snapshot = await getAskSnapshot(sessionID)
         if (disposed) {
@@ -279,9 +273,15 @@ export function useAskSession() {
           connect()
         }
       }
-      catch {
+      catch (error) {
         if (!disposed) {
-          connect()
+          if (!shouldReconnectAfterSnapshotError(error)) {
+            disposed = true
+            dispatch({ type: 'request.failed', phase: 'failed', message: errorMessage(error) })
+          }
+          else {
+            connect()
+          }
         }
       }
     }
@@ -295,22 +295,41 @@ export function useAskSession() {
     }
   }, [activeRunId, activeRunVersion, activeSessionId, connectionVersion, pageVisible, restoreFullSnapshot, syncEvents])
 
-  async function submit(input = draft) {
+  async function submit(input = draft, assetRefs: string[] = []) {
     const value = input.trim()
-    if (petsLoad.current) {
-      await petsLoad.current
+    if (activeSessionId && (!runtime.session || !runtime.run || runtime.session.id !== activeSessionId)) {
+      return
     }
-    const petState = usePetStore.getState()
-    const petID = petState.currentPetId && petState.pets.some(pet => pet.id === petState.currentPetId) ? petState.currentPetId : petState.pets.length === 1 ? petState.pets[0].id : undefined
+    if (activeSessionId && runtime.run && isFollowUpRunStatus(runtime.run.status)) {
+      const current = pendingRequest.current
+      const pending = current?.kind === 'continue' && current.input === value && current.sessionID === activeSessionId ? current : { kind: 'continue' as const, input: value, assetRefs, idempotencyKey: idempotencyKey(), sessionID: activeSessionId }
+      const reused = pending === current
+      pendingRequest.current = pending
+      if (!reused) {
+        dispatch({ type: 'local.followed_up', input: value, clientRunID: localRunID() })
+      }
+      try {
+        const continued = await continueMutation.mutateAsync({ sessionID: activeSessionId, input: value, assetRefs: pending.assetRefs, key: pending.idempotencyKey })
+        pendingRequest.current = null
+        useAskStore.getState().setDraft('')
+        return continued
+      }
+      catch (error) {
+        if (!isRetryableRequest(error)) {
+          pendingRequest.current = null
+        }
+        throw error
+      }
+    }
     const current = pendingRequest.current
-    const pending = current?.kind === 'create' && current.input === value && current.petID === petID ? current : { kind: 'create' as const, input: value, petID, idempotencyKey: idempotencyKey() }
+    const pending = current?.kind === 'create' && current.input === value ? current : { kind: 'create' as const, input: value, assetRefs, idempotencyKey: idempotencyKey() }
     const reused = pending === current
     pendingRequest.current = pending
     if (!reused) {
       dispatch({ type: 'local.submitted', input: value, clientRunID: localRunID() })
     }
     try {
-      const created = await createMutation.mutateAsync({ input: value, petID: pending.petID, key: pending.idempotencyKey })
+      const created = await createMutation.mutateAsync({ input: value, assetRefs: pending.assetRefs, key: pending.idempotencyKey })
       pendingRequest.current = null
       useAskStore.getState().setDraft('')
       return created
@@ -323,21 +342,21 @@ export function useAskSession() {
     }
   }
 
-  async function reply(input = draft) {
+  async function reply(input = draft, assetRefs: string[] = []) {
     if (!activeSessionId || !activeRunId || !runtime.run) {
       return
     }
     const value = input.trim()
     const expectedVersion = runtime.run.row_version
     const current = pendingRequest.current
-    const pending = current?.kind === 'reply' && current.input === value && current.sessionID === activeSessionId && current.runID === activeRunId && current.expectedVersion === expectedVersion ? current : { kind: 'reply' as const, input: value, idempotencyKey: idempotencyKey(), sessionID: activeSessionId, runID: activeRunId, expectedVersion }
+    const pending = current?.kind === 'reply' && current.input === value && current.sessionID === activeSessionId && current.runID === activeRunId && current.expectedVersion === expectedVersion ? current : { kind: 'reply' as const, input: value, assetRefs, idempotencyKey: idempotencyKey(), sessionID: activeSessionId, runID: activeRunId, expectedVersion }
     const reused = pending === current
     pendingRequest.current = pending
     if (!reused) {
       dispatch({ type: 'local.replied', input: value, clientRunID: localRunID(), runID: activeRunId })
     }
     try {
-      const queued = await replyMutation.mutateAsync({ sessionID: activeSessionId, runID: activeRunId, input: value, expectedVersion, key: pending.idempotencyKey })
+      const queued = await replyMutation.mutateAsync({ sessionID: activeSessionId, runID: activeRunId, input: value, assetRefs: pending.assetRefs, expectedVersion, key: pending.idempotencyKey })
       pendingRequest.current = null
       useAskStore.getState().setDraft('')
       return queued
@@ -358,12 +377,32 @@ export function useAskSession() {
     setConnectionVersion(value => value + 1)
   }
 
+  async function stop() {
+    if (!activeSessionId || !activeRunId || !runtime.run) {
+      return
+    }
+    restoreSnapshot(await stopAskRun(activeSessionId, activeRunId, runtime.run.row_version))
+  }
+
+  async function retry() {
+    if (!activeSessionId || !activeRunId || !runtime.run) {
+      return
+    }
+    restoreSnapshot(await retryAskRun(activeSessionId, activeRunId, runtime.run.row_version))
+  }
+
   function reset() {
     pendingRequest.current = null
+    liveEventKeys.current.clear()
     createMutation.reset()
     replyMutation.reset()
+    continueMutation.reset()
     dispatch({ type: 'reset' })
     resetStore()
+  }
+
+  function isLiveEvent(event: AskEvent) {
+    return liveEventKeys.current.has(`${event.run_id}:${event.sequence}`)
   }
 
   return {
@@ -377,6 +416,9 @@ export function useAskSession() {
     submit,
     reply,
     retryConnection,
+    stop,
+    retry,
+    isLiveEvent,
     reset,
   }
 }
