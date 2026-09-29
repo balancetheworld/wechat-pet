@@ -829,14 +829,7 @@ func (s *Service) loadHealthContext(ctx context.Context, session Session, messag
 		}
 	}
 	value := ContextSnapshot{Version: DefaultContextVersion, CapturedAt: queryBefore, RecentTurns: recentTurns, Messages: messages, Sources: []ContextSource{{Name: "ask_messages", Version: "ask-messages-v1", Status: "available", ItemCount: len(messages)}}}
-	petIDs := make([]string, 0, len(session.Pets))
-	for _, sessionPet := range session.Pets {
-		petIDs = append(petIDs, sessionPet.PetID)
-	}
-	if len(petIDs) == 0 && session.PetID != "" {
-		petIDs = append(petIDs, session.PetID)
-	}
-	for _, petID := range petIDs {
+	for _, petID := range sessionPetIDs(session) {
 		pet, petErr := s.pets.Get(ctx, session.FamilyID, petID)
 		if petErr != nil {
 			if errors.Is(petErr, petapp.ErrNotFound) {
@@ -908,6 +901,42 @@ func (s *Service) loadHealthContext(ctx context.Context, session Session, messag
 	return compactContextSnapshot(value, ContextMaxChars), nil
 }
 
+// sessionPetIDs 返回当前会话已授权的宠物 ID，顺序与 Session.Pets 一致；
+// 未记录会话宠物时退回会话绑定宠物。
+func sessionPetIDs(session Session) []string {
+	petIDs := make([]string, 0, len(session.Pets))
+	for _, sessionPet := range session.Pets {
+		petIDs = append(petIDs, sessionPet.PetID)
+	}
+	if len(petIDs) == 0 && session.PetID != "" {
+		petIDs = append(petIDs, session.PetID)
+	}
+	return petIDs
+}
+
+// loadPetRoster 加载当前会话已授权宠物的基础清单（id 与名字），并为可读到的宠物
+// 标注 pet_base 来源。它只回答「有哪些候选对象」：品种、健康与记录明细仍由工具按需查询。
+// 读取失败按 pet_base 来源状态记录，不中断本次决策。
+func (s *Service) loadPetRoster(ctx context.Context, session Session) ([]PetContext, []ContextSource) {
+	petIDs := sessionPetIDs(session)
+	pets := make([]PetContext, 0, len(petIDs))
+	sources := make([]ContextSource, 0, len(petIDs))
+	for _, petID := range petIDs {
+		pet, err := s.pets.Get(ctx, session.FamilyID, petID)
+		if errors.Is(err, petapp.ErrNotFound) {
+			sources = append(sources, ContextSource{Name: "pet_base:" + petID, Version: "pet-base-v1", Status: "absent"})
+			continue
+		}
+		if err != nil {
+			sources = append(sources, ContextSource{Name: "pet_base:" + petID, Version: "pet-base-v1", Status: "failed"})
+			continue
+		}
+		pets = append(pets, PetContext{ID: pet.ID, Name: pet.Name})
+		sources = append(sources, ContextSource{Name: "pet_base:" + petID, Version: "pet-base-v1", Status: "available", ItemCount: 1})
+	}
+	return pets, sources
+}
+
 func boolCount(value bool) int {
 	if value {
 		return 1
@@ -936,6 +965,8 @@ func providerFailureMessage(errorCode string) string {
 	case "provider_request_invalid":
 		return "AI 服务请求配置不兼容，请检查模型与接口配置。"
 	case "provider_output_invalid":
+		return "AI 返回内容格式异常，未能解析健康建议。"
+	case ErrAgentOutputUnparsable:
 		return "AI 返回内容格式异常，未能解析健康建议。"
 	case "provider_output_truncated":
 		return "AI 本次回答被截断，正在重试。"

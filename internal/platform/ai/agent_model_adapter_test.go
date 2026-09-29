@@ -499,14 +499,14 @@ func TestAgentModelAdapterStepClassifiesInvalidOutput(t *testing.T) {
 	provider := &fakeProvider{response: Response{Text: ""}}
 	adapter := NewAgentModelAdapter(provider, Profile{}, repository)
 	_, err := adapter.Step(context.Background(), askapp.StepInput{SessionID: "session-1", RunID: "run-1"})
-	if code, retryable := askapp.ExecutorErrorDetails(err); code != ErrProviderOutputInvalid || retryable {
-		t.Fatalf("invalid output error = (%q, %v), want (%q, false)", code, retryable, ErrProviderOutputInvalid)
+	if code, retryable := askapp.ExecutorErrorDetails(err); code != askapp.ErrAgentOutputUnparsable || retryable {
+		t.Fatalf("unparsable output error = (%q, %v), want (%q, false)", code, retryable, askapp.ErrAgentOutputUnparsable)
 	}
 	attempts, err := repository.ListAttempts(context.Background(), "run-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(attempts) != 1 || attempts[0].Status != askapp.AttemptFailed || attempts[0].ErrorCode != ErrProviderOutputInvalid {
+	if len(attempts) != 1 || attempts[0].Status != askapp.AttemptFailed || attempts[0].ErrorCode != askapp.ErrAgentOutputUnparsable {
 		t.Fatalf("attempt = %+v", attempts)
 	}
 }

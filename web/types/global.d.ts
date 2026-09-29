@@ -13,6 +13,9 @@ declare module '*.styl';
 
 declare const TARO_APP_API_BASE_URL: string
 declare const TARO_APP_DEBUG: boolean
+declare const TARO_APP_REMINDER_TEMPLATE_ID: string
+declare const TARO_APP_ASK_LANDING_GIFS: string
+declare const TARO_APP_ASK_ANSWER_GIF: string
 
 declare namespace NodeJS {
   interface ProcessEnv {

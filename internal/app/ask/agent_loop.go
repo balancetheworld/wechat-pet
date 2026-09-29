@@ -104,6 +104,7 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 	}
 	outcome := LoopOutcome{}
 	validationRetries := 0
+	outputRepairs := 0
 	validationFeedback := ""
 
 	for step := 0; step < maxSteps; step++ {
@@ -160,6 +161,11 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 			return outcome, NewExecutorError("budget_exhausted", false, 0, context.DeadlineExceeded)
 		}
 		if err != nil {
+			if isAgentOutputUnparsable(err) && outputRepairs < maxOutputRepairs && step+1 < maxSteps {
+				outputRepairs++
+				validationFeedback = outputRepairFeedback(err)
+				continue
+			}
 			return outcome, err
 		}
 		decision, err := DecideStep(modelResult.Records)
@@ -295,6 +301,27 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 		}
 	}
 	return outcome, fmt.Errorf("agent_loop: exceeded %d decision steps without terminal action", maxSteps)
+}
+
+// maxOutputRepairs 是「模型正文无法解析」的修复次数上限（文档 9.3）。
+// 它与校验修复各自计数：解析失败不挤占校验修复额度，两类修复合计仍在模型调用预算内。
+const maxOutputRepairs = 1
+
+// isAgentOutputUnparsable 报告模型应答正文是否完整返回但无法按协议解析。
+func isAgentOutputUnparsable(err error) bool {
+	var executorError *ExecutorError
+	return errors.As(err, &executorError) && executorError.Code == ErrAgentOutputUnparsable
+}
+
+// outputRepairFeedback 把解析失败整理为受控纠错提示：只保留错误类别与位置，
+// 不回灌错误信息末尾的模型原文片段（原文片段仅供服务端日志诊断，文档 8.4）。
+func outputRepairFeedback(err error) string {
+	reason := err.Error()
+	if index := strings.Index(reason, " (len="); index >= 0 {
+		reason = reason[:index]
+	}
+	reason = strings.TrimPrefix(reason, ErrAgentOutputUnparsable+": ")
+	return "模型回复不是可解析的 record_array_v1（" + reason + "）"
 }
 
 const agentOutputTokenReserve = 2048

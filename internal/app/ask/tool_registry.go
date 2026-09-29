@@ -10,6 +10,10 @@ import "encoding/json"
 // DefaultToolVersion 是一期工具目录的统一 Schema 版本。
 const DefaultToolVersion = "v1"
 
+// petRosterToolName 是家庭宠物清单工具的稳定名称，决策循环据此把该工具固定在
+// 候选集合内（没有对象名的提问不会通过召回命中它）。
+const petRosterToolName = "list_family_pets"
+
 // DefaultTools 返回一期只读工具集合（文档 7.2 表格）。
 // 只注册有真实后端（BusinessReadRepository）支撑的只读工具：
 //   - resolve_pet            解析家庭宠物
@@ -212,7 +216,7 @@ func listCalendarRecordsTool() Tool {
 // 用户问「有几只宠物/都有谁」时先拿这份列表；模型不得凭名字猜 pet_id。
 func listFamilyPetsTool() Tool {
 	return Tool{
-		Name:         "list_family_pets",
+		Name:         petRosterToolName,
 		OperationID:  "read.pet.list",
 		AliasesZH:    []string{"几只宠物", "有多少宠物", "宠物列表", "都有哪些宠物", "家里有哪些宠物", "现有宠物", "谁在家"},
 		AliasesEN:    []string{"list family pets", "how many pets", "my pets"},
@@ -490,7 +494,8 @@ func createCalendarRecordTool() Tool {
 			"properties": {
 				"pet_id": {"type": "string", "description": "已明确的宠物 ID，不可猜测"},
 				"category": {"type": "string", "enum": ["daily", "medical"], "description": "记录大类：daily 日常 / medical 医疗"},
-				"medical_type": {"type": "string", "description": "医疗类型，如 vaccine/deworming，category=medical 时使用"},
+				"medical_type": {"type": "string", "enum": ["vaccine", "deworming", "checkup", "visit", "medication", "other"], "description": "医疗类型，仅 category=medical 时使用；自定义类型填 other 并在 custom_medical_type 写明名称，category=daily 时不得填写"},
+				"custom_medical_type": {"type": "string", "maxLength": 50, "description": "自定义医疗类型名称，仅 medical_type=other 时填写，最多 50 个字符；其他取值下不得填写"},
 				"content": {"type": "string", "description": "记录正文，例如「洗澡」「服用驱虫药」"},
 				"occurred_at": {"type": "string", "description": "发生时间，RFC3339；相对时间用上下文当前时间换算"}
 			},
@@ -506,8 +511,11 @@ func createCalendarRecordTool() Tool {
 			},
 			"required": ["operation_id", "status", "preview"]
 		}`),
-		UseCases:             []string{"用户明确要求把某件事记到宠物日历或记录里时，先准备写入预览，由用户在页面确认后写入"},
-		NegativeCases:        []string{"用户只是询问或尚未确认时不得写入；发生时间不确定时先追问，不猜测时间；不得声称已写入"},
+		UseCases: []string{
+			"用户明确要求把某件事记到宠物日历或记录里时，先准备写入预览，由用户在页面确认后写入",
+			"医疗记录类型不在枚举内时用 medical_type=other 并在 custom_medical_type 写明用户原话类型，例如 medical_type=other、custom_medical_type=过敏复查",
+		},
+		NegativeCases:        []string{"用户只是询问或尚未确认时不得写入；发生时间不确定时先追问，不猜测时间；不得声称已写入；日常记录不得填 medical_type 或 custom_medical_type；不得把自定义名称直接塞进 medical_type"},
 		Preconditions:        []string{"pet_id 已由解析宠物明确且属于当前授权家庭范围；occurred_at 已换算为绝对时间"},
 		SideEffects:          []string{"创建一条待确认的日历记录预览（尚未写入业务数据）"},
 		RiskLevel:            ToolRiskMedium,

@@ -116,6 +116,44 @@ func TestProcessRunV2FinalAnswer(t *testing.T) {
 	}
 }
 
+func TestProcessRunV2ProvidesPetRosterForBusinessQuery(t *testing.T) {
+	model := &scriptedModel{responses: [][]ProtocolRecord{finalAnswerRecords()}}
+	service, _ := newV2Service(t, model, &fakeBusinessRead{})
+
+	created, err := service.CreateSession(context.Background(), "family-1", "user-1", "pet-1", "上次洗澡是什么时候", "create-v2-roster")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.ProcessRun(context.Background(), "family-1", created.Session.ID, created.Run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if len(model.inputs) == 0 {
+		t.Fatal("decision loop should invoke the model")
+	}
+	first := model.inputs[0]
+	roster := false
+	for _, block := range first.Blocks {
+		if block.Kind == "profile" && strings.Contains(block.Text, "团子") {
+			roster = true
+			if len(block.EvidenceRefs) == 0 {
+				t.Fatalf("pet roster block missing evidence: %+v", block)
+			}
+		}
+	}
+	if !roster {
+		t.Fatalf("business query should preload pet roster: %+v", first.Blocks)
+	}
+	pinned := false
+	for _, tool := range first.Tools {
+		if tool.Name == petRosterToolName {
+			pinned = true
+		}
+	}
+	if !pinned {
+		t.Fatalf("business query should pin pet roster tool: %+v", first.Tools)
+	}
+}
+
 func TestProcessRunV2RequestInput(t *testing.T) {
 	model := &scriptedModel{responses: [][]ProtocolRecord{requestInputRecords()}}
 	service, _ := newV2Service(t, model, &fakeBusinessRead{})

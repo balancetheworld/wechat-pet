@@ -44,30 +44,54 @@
   flex-direction: column;
 }
 
-/* --- ai 精灵(猫)— 精准定位到画面右侧红圈处 ---
-   用 right + top 直接锚定元素右上角, 不再用 transform 居中
-   (top/right 是相对 .ask-cat-wrap, 容器由 flex: 1 1 auto 撑满剩余高度) */
+/* --- ai 精灵(猫 GIF)— 未发起会话时居中展示 ---
+   容器由 flex: 1 1 auto 撑满剩余高度, 图片在其中垂直水平居中 */
 .ask-cat-wrap {
   flex: 1 1 auto;
   position: relative;
   width: 100%;
   min-height: 360rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ask-cat-stage {
+  position: relative;
+  /* 居中后整体再往下往左挪一点, 避开顶部标题 */
+  transform: translate(-60rpx, 320rpx);
 }
 
 .ask-cat {
-  position: absolute;
   display: block;
+  /* 素材为 480x640, 按同比例缩放 */
   width: 420rpx;
-  height: 420rpx;
-  /* 红圈中心约在屏幕 65% 横向 / 31% 纵向
-     元素右上角定位: 距容器右 4%, 距容器顶 14% (推算后元素中心 ≈ 红圈中心) */
-  top: 14%;
-  right: 4%;
-  /* 相对锚点偏移: 右移 50px, 下移 300px (用大写 PX 绕过 Taro 自动转 rpx) */
-  transform: translate(50PX, 300PX);
-  /* 淡蓝色光晕: 非常淡, 沿猫轮廓柔光扩散 (双层, 内实外虚) */
-  filter: drop-shadow(0 0 20rpx rgba(127, 165, 214, 0.28))
-          drop-shadow(0 0 52rpx rgba(127, 165, 214, 0.14));
+  height: 560rpx;
+}
+
+/* play2 素材里猫画得偏小, 放大一档 */
+.ask-cat--large {
+  width: 480rpx;
+  height: 640rpx;
+}
+
+/* 一层很淡的白色蒙版, 向外围渐隐, 让动图和背景更融合 */
+.ask-cat-mask {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.12) 0%, rgba(255, 255, 255, 0.08) 45%, rgba(255, 255, 255, 0) 80%);
+  pointer-events: none;
+}
+
+/* --- AI 生成回答时左下角播放的动图 ---
+   贴着会话区左下角, 底部会插到输入框下面一点(输入框 z-index 更高会盖住), 不拦截点击 */
+.ask-answer-cat {
+  position: absolute;
+  left: 0;
+  bottom: -48rpx;
+  width: 210rpx;
+  height: 280rpx;
+  pointer-events: none;
 }
 
 /* --- 预设问题(贴在猫精灵下方,不贴输入框) --- */

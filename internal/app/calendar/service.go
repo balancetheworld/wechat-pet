@@ -19,12 +19,21 @@ type Repository interface {
 	UpdateRecord(context.Context, string, string, string, UpdateRecordRequest, *time.Time) (RecordDTO, error)
 	DeleteRecord(context.Context, string, string, string) error
 	CompleteReminder(context.Context, string, string, string, CompleteReminderRequest, time.Time) (CompleteReminderDTO, error)
+	RecordSubscriptionGrant(context.Context, string, string, bool) (int, error)
+	SubscriptionRemaining(context.Context, string, string) (int, error)
+	ConsumeSubscriptionGrant(context.Context, string, string) (bool, error)
+	ListDuePushReminders(context.Context, string, time.Time, int) ([]PushReminder, error)
+	ClaimReminderNotification(context.Context, string, time.Time, time.Time) (bool, error)
+	FinishReminderNotification(context.Context, string, string, *time.Time) error
 }
 
 type Service struct {
-	repository Repository
-	assetURLs  AssetURLResolver
-	assetAuth  interface {
+	repository         Repository
+	assetURLs          AssetURLResolver
+	reminderNotifier   ReminderNotifier
+	reminderTemplateID string
+	reminderSendHour   int
+	assetAuth          interface {
 		AuthorizeFamily(context.Context, string, string) error
 	}
 }
@@ -41,7 +50,7 @@ func NewService(repository Repository, assetURLs ...AssetURLResolver) (*Service,
 	if len(assetURLs) > 0 {
 		assetURLResolver = assetURLs[0]
 	}
-	return &Service{repository: repository, assetURLs: assetURLResolver}, nil
+	return &Service{repository: repository, assetURLs: assetURLResolver, reminderSendHour: DefaultReminderSendHour}, nil
 }
 
 func (s *Service) SetAssetAuthorizer(value interface {
@@ -246,7 +255,7 @@ func validateCreateRequest(request *CreateRecordRequest) error {
 		}
 		return nil
 	}
-	if request.MedicalType != "" && !isMedicalType(request.MedicalType) {
+	if request.MedicalType != "" && !ValidMedicalType(request.MedicalType) {
 		return appErrors.InvalidParam("医疗类型无效")
 	}
 	if request.MedicalType != "other" && request.CustomMedicalType != "" {
@@ -293,6 +302,9 @@ func validateReminder(request *CreateReminderRequest) error {
 	if *request.AdvanceDays < 0 {
 		return appErrors.InvalidParam("提前提醒天数不能小于 0")
 	}
+	if *request.AdvanceDays > MaxReminderAdvanceDays {
+		return appErrors.InvalidParam("提前提醒天数不能超过 30 天")
+	}
 	if len(request.NotificationChannels) == 0 {
 		request.NotificationChannels = []string{"in_app"}
 	}
@@ -316,7 +328,7 @@ func validateMedia(assetIDs []string) error {
 	return nil
 }
 
-func isMedicalType(value string) bool {
+func ValidMedicalType(value string) bool {
 	switch value {
 	case "vaccine", "deworming", "checkup", "visit", "medication", "other":
 		return true

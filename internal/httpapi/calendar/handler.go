@@ -102,6 +102,28 @@ func (h *Handler) DeleteRecord(c *gin.Context) {
 	response.Success(c, struct{}{})
 }
 
+func (h *Handler) RecordReminderSubscription(c *gin.Context) {
+	familyID, familyOK := middleware.GetCurrentFamilyID(c)
+	userID, userOK := middleware.GetCurrentUserID(c)
+	if !familyOK || !userOK {
+		response.Fail(c, appErrors.Forbidden())
+		return
+	}
+	var request calendarapp.ReminderSubscriptionRequest
+	if c.Request.ContentLength != 0 {
+		if err := c.ShouldBindJSON(&request); err != nil {
+			response.Fail(c, appErrors.InvalidParam("订阅结果参数无效"))
+			return
+		}
+	}
+	remaining, err := h.service.RecordReminderSubscription(c.Request.Context(), familyID, userID, request.Accepted)
+	if err != nil {
+		response.Fail(c, asAppError(err))
+		return
+	}
+	response.Success(c, calendarapp.ReminderSubscriptionDTO{Remaining: remaining})
+}
+
 func (h *Handler) CompleteReminder(c *gin.Context) {
 	familyID, familyOK := middleware.GetCurrentFamilyID(c)
 	userID, userOK := middleware.GetCurrentUserID(c)

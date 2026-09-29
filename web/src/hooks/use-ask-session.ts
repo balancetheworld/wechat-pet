@@ -377,7 +377,16 @@ export function useAskSession() {
     if (!activeSessionId || !activeRunId || !runtime.run) {
       return
     }
-    restoreSnapshot(await stopAskRun(activeSessionId, activeRunId, runtime.run.row_version))
+    try {
+      restoreSnapshot(await stopAskRun(activeSessionId, activeRunId, runtime.run.row_version))
+    }
+    catch (error) {
+      /* 409 表示运行已进入终态(完成/失败/已停止), 拉一次快照对齐即可, 不当作失败 */
+      if (!(error instanceof ApiError) || error.statusCode !== 409) {
+        throw error
+      }
+      restoreFullSnapshot(await getAskSnapshot(activeSessionId))
+    }
   }
 
   async function retry() {

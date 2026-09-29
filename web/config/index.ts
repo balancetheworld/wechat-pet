@@ -8,6 +8,8 @@ import prodConfig from './prod'
 // https://taro-docs.jd.com/docs/next/config#defineconfig-辅助函数
 export default defineConfig<'webpack5'>(async (merge, { command: _command, mode: _mode }) => {
   const apiBaseURL = process.env.TARO_APP_API_BASE_URL || (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:8080' : '')
+  const askLandingGIFs = process.env.TARO_APP_ASK_LANDING_GIFS || ''
+  const askAnswerGIF = process.env.TARO_APP_ASK_ANSWER_GIF || ''
   const baseConfig: UserConfigExport<'webpack5'> = {
     projectName: 'web',
     date: '2026-8-19',
@@ -26,6 +28,9 @@ export default defineConfig<'webpack5'>(async (merge, { command: _command, mode:
     defineConstants: {
       TARO_APP_API_BASE_URL: JSON.stringify(apiBaseURL),
       TARO_APP_DEBUG: JSON.stringify(process.env.NODE_ENV !== 'production'),
+      TARO_APP_REMINDER_TEMPLATE_ID: JSON.stringify(process.env.TARO_APP_REMINDER_TEMPLATE_ID || ''),
+      TARO_APP_ASK_LANDING_GIFS: JSON.stringify(askLandingGIFs),
+      TARO_APP_ASK_ANSWER_GIF: JSON.stringify(askAnswerGIF),
     },
     copy: {
       patterns: [

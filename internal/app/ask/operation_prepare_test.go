@@ -3,6 +3,7 @@ package ask
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -114,6 +115,85 @@ func prepareOperationFor(t *testing.T, toolName, arguments string) Operation {
 		t.Fatalf("operations = %d, want 1", len(operations))
 	}
 	return operations[0]
+}
+
+func TestProcessRunPreparesCustomMedicalTypeRecord(t *testing.T) {
+	operation := prepareOperationFor(t, "create_calendar_record", `{"pet_id":"pet-1","category":"medical","medical_type":"other","custom_medical_type":"过敏复查","content":"皮肤过敏复查","occurred_at":"2026-09-23T20:00:00+08:00"}`)
+	if operation.Target != operationTargetCalendarRecordCreate || operation.Status != OperationPending {
+		t.Fatalf("operation = %+v, want pending calendar record create", operation)
+	}
+	if !strings.Contains(operation.Preview, "过敏复查") {
+		t.Fatalf("preview = %q, want custom medical type", operation.Preview)
+	}
+	var payload struct {
+		MedicalType       string `json:"medical_type"`
+		CustomMedicalType string `json:"custom_medical_type"`
+	}
+	if err := json.Unmarshal([]byte(operation.Payload), &payload); err != nil {
+		t.Fatalf("payload = %s: %v", operation.Payload, err)
+	}
+	if payload.MedicalType != "other" || payload.CustomMedicalType != "过敏复查" {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestPrepareCalendarRecordMedicalType(t *testing.T) {
+	base := func(overrides map[string]any) map[string]any {
+		args := map[string]any{
+			"pet_id":      "pet-1",
+			"category":    "medical",
+			"content":     "皮肤过敏复查",
+			"occurred_at": "2026-09-23T20:00:00+08:00",
+		}
+		for key, value := range overrides {
+			args[key] = value
+		}
+		return args
+	}
+
+	input, err := prepareInputForTool("create_calendar_record", base(map[string]any{"medical_type": "other", "custom_medical_type": "过敏复查"}))
+	if err != nil {
+		t.Fatalf("prepareInputForTool: %v", err)
+	}
+	raw, err := json.Marshal(input.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		MedicalType       string `json:"medical_type"`
+		CustomMedicalType string `json:"custom_medical_type"`
+	}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.MedicalType != "other" || payload.CustomMedicalType != "过敏复查" {
+		t.Fatalf("payload = %s", raw)
+	}
+	if !strings.Contains(input.Summary, "过敏复查") {
+		t.Fatalf("summary = %q, want custom medical type", input.Summary)
+	}
+
+	rejected := map[string]map[string]any{
+		"非枚举医疗类型":        base(map[string]any{"medical_type": "疫苗"}),
+		"other 缺自定义名称":   base(map[string]any{"medical_type": "other"}),
+		"非 other 带自定义名称": base(map[string]any{"medical_type": "vaccine", "custom_medical_type": "过敏复查"}),
+		"日常记录带医疗类型":      base(map[string]any{"category": "daily", "medical_type": "vaccine"}),
+		"自定义名称超长":        base(map[string]any{"medical_type": "other", "custom_medical_type": strings.Repeat("a", 51)}),
+	}
+	for name, args := range rejected {
+		if _, err := prepareInputForTool("create_calendar_record", args); err == nil {
+			t.Fatalf("%s should be rejected before freezing the preview", name)
+		}
+	}
+
+	for name, args := range map[string]map[string]any{
+		"枚举医疗类型":   base(map[string]any{"medical_type": "vaccine"}),
+		"医疗记录不带类型": base(nil),
+	} {
+		if _, err := prepareInputForTool("create_calendar_record", args); err != nil {
+			t.Fatalf("%s should be accepted: %v", name, err)
+		}
+	}
 }
 
 func TestProcessRunPreparesCalendarRecordUpdate(t *testing.T) {

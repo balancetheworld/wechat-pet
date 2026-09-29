@@ -133,6 +133,17 @@ func (c *Catalog) RecallTools(query string, filter Filter, limit int) ToolRecall
 	return ToolRecallResult{}
 }
 
+// ToolByName 返回通过过滤的指定工具，用于把关键工具固定在候选集合内（文档 7.3）。
+// 未注册或未通过权限、能力、紧急禁用过滤时返回 false。
+func (c *Catalog) ToolByName(name string, filter Filter) (Tool, bool) {
+	for _, tool := range c.tools {
+		if tool.Name == name && filter.allowTool(tool) {
+			return tool, true
+		}
+	}
+	return Tool{}, false
+}
+
 // RecallSkills 对查询做 Skill 候选召回：trigger_examples 词法匹配，命中
 // negative_examples 的 Skill 排除；通过过滤后按固定 scope 顺序排序。允许一次
 // 命中多个领域 Skill。

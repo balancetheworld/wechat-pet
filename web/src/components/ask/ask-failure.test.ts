@@ -2,6 +2,7 @@ import { expect, it } from 'vitest'
 import { askFailureTitle } from './ask-failure'
 
 it('returns a specific title for known ask failures', () => {
+  expect(askFailureTitle('agent_output_unparsable')).toBe('AI 返回内容格式异常')
   expect(askFailureTitle('provider_timeout')).toBe('AI 服务响应超时')
   expect(askFailureTitle('provider_auth_failed')).toBe('AI 模型访问失败')
   expect(askFailureTitle('provider_quota_exhausted')).toBe('AI 服务额度不可用')

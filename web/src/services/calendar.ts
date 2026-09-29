@@ -47,6 +47,15 @@ export function completeCalendarReminder(reminderID: string, data: CompleteCalen
   })
 }
 
+/* 记录一次订阅消息授权结果: accepted 为 true 时后端累加一条提醒额度 */
+export function recordReminderSubscription(accepted: boolean) {
+  return request<{ remaining: number }>({
+    path: '/api/v1/calendar/subscriptions',
+    method: 'POST',
+    data: { accepted },
+  })
+}
+
 export function uploadCalendarImage(filePath: string) {
   return uploadFile<{ asset_id: string }>({
     path: '/api/v1/assets/upload',

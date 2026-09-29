@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { FloatingGuide } from '../../components/floating-guide'
 import PageBackground from '../../components/page-background'
 import { routes } from '../../constants/routes'
-import { completeCalendarReminder, createCalendarRecord, deleteCalendarRecord, getCalendarDay, getCalendarMonth, updateCalendarRecord, uploadCalendarImage } from '../../services/calendar'
+import { completeCalendarReminder, createCalendarRecord, deleteCalendarRecord, getCalendarDay, getCalendarMonth, recordReminderSubscription, updateCalendarRecord, uploadCalendarImage } from '../../services/calendar'
 import { createPetResource, getPetProfile, getPets } from '../../services/pet'
 import { assetURL, authorizedAssetURL } from '../../services/request'
 import { useAppStore } from '../../stores/app-store'
@@ -14,6 +14,9 @@ import { navigateTo } from '../../utils/navigation'
 import './index.scss'
 
 const weekDays = ['日', '一', '二', '三', '四', '五', '六']
+
+/* 构建常量缺失(例如改了 config 没重启编译)时退化为不弹订阅, 避免保存流程报错 */
+const reminderTemplateID = typeof TARO_APP_REMINDER_TEMPLATE_ID === 'string' ? TARO_APP_REMINDER_TEMPLATE_ID : ''
 
 function pad(value: number) {
   return String(value).padStart(2, '0')
@@ -107,6 +110,21 @@ function recordMedia(record: CalendarDay['records'][number]) {
 
 function recordReminders(record: CalendarDay['records'][number]) {
   return record.reminders || (record.reminder ? [record.reminder] : [])
+}
+
+/* 订阅消息授权只能在用户点击事件里发起, 必须在任何 await 之前同步调用 */
+function requestReminderSubscription() {
+  if (!reminderTemplateID) {
+    return Promise.resolve(false)
+  }
+  return new Promise<boolean>((resolve) => {
+    /* Taro 4.2 的 Option 类型把支付宝专用字段 entityIds 标成必填, weapp 只传 tmplIds */
+    Taro.requestSubscribeMessage({
+      tmplIds: [reminderTemplateID],
+      success: result => resolve(result[reminderTemplateID] === 'accept'),
+      fail: () => resolve(false),
+    } as unknown as Taro.requestSubscribeMessage.Option)
+  })
 }
 
 export default function Calendar() {
@@ -424,6 +442,9 @@ export default function Calendar() {
     if (!recordPetIDs.length || (category === 'daily' && !content.trim() && mediaAssetIDs.length === 0) || uploading || submitting || (category === 'medical' && medicalType === 'other' && !customMedicalType.trim()) || reminders.some(reminder => reminder.repeatType === 'custom_days' && Number(reminder.repeatIntervalDays) <= 0)) {
       return
     }
+    const remindersRequested = category === 'medical' && reminderEnabled && reminders.length > 0
+    /* 订阅弹窗必须在点击事件里同步发起, 结果留到保存成功后回传后端 */
+    const subscriptionRequest = remindersRequested ? requestReminderSubscription() : Promise.resolve(false)
     setSubmitting(true)
     try {
       /* 保存目标日 = 打开表单时选中的那天 (表单打开瞬间锁定, 不受中途页面 onShow 影响) */
@@ -502,7 +523,31 @@ export default function Calendar() {
       setFormVisible(false)
       /* 刷新回表单所属的那一天, 保证保存后视图仍停留在用户选中的天 */
       await refreshCurrentData(formDate, monthOf(formDate))
-      await Taro.showToast({ title: syncFailed ? '日历已保存，档案同步失败' : '记录已保存', icon: syncFailed ? 'none' : 'success' })
+      const subscriptionAccepted = await subscriptionRequest
+      let subscriptionRecorded = true
+      if (subscriptionAccepted) {
+        try {
+          await recordReminderSubscription(true)
+        }
+        catch {
+          subscriptionRecorded = false
+        }
+      }
+      let toastTitle = '记录已保存'
+      let toastIcon: 'success' | 'none' = 'success'
+      if (syncFailed) {
+        toastTitle = '日历已保存，档案同步失败'
+        toastIcon = 'none'
+      }
+      else if (!subscriptionRecorded) {
+        toastTitle = '已保存，微信提醒设置失败，请重试'
+        toastIcon = 'none'
+      }
+      else if (remindersRequested && !subscriptionAccepted) {
+        toastTitle = '已保存，未开启微信提醒'
+        toastIcon = 'none'
+      }
+      await Taro.showToast({ title: toastTitle, icon: toastIcon })
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '保存记录失败'

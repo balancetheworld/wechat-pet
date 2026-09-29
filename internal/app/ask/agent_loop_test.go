@@ -3,6 +3,7 @@ package ask
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -16,6 +17,18 @@ type scriptedModel struct {
 type failingModel struct {
 	err     error
 	records []ProtocolRecord
+	inputs  []StepInput
+}
+
+// sequencedModel 按脚本依次返回失败或记录，用于覆盖修复重试的完整顺序。
+type sequencedModel struct {
+	steps  []scriptedStep
+	inputs []StepInput
+}
+
+type scriptedStep struct {
+	records []ProtocolRecord
+	err     error
 }
 
 type blockingModel struct{}
@@ -41,13 +54,27 @@ func (m *scriptedModel) Step(_ context.Context, input StepInput) (ModelStepResul
 	return ModelStepResult{Records: r, Usage: ModelUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, Complete: true}}, nil
 }
 
-func (m *failingModel) Step(_ context.Context, _ StepInput) (ModelStepResult, error) {
+func (m *failingModel) Step(_ context.Context, input StepInput) (ModelStepResult, error) {
+	m.inputs = append(m.inputs, input)
 	if m.err != nil {
 		err := m.err
 		m.err = nil
 		return ModelStepResult{}, err
 	}
 	return ModelStepResult{Records: m.records, Usage: ModelUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, Complete: true}}, nil
+}
+
+func (m *sequencedModel) Step(_ context.Context, input StepInput) (ModelStepResult, error) {
+	m.inputs = append(m.inputs, input)
+	if len(m.steps) == 0 {
+		return ModelStepResult{}, errors.New("sequencedModel: no scripted step left")
+	}
+	step := m.steps[0]
+	m.steps = m.steps[1:]
+	if step.err != nil {
+		return ModelStepResult{}, step.err
+	}
+	return ModelStepResult{Records: step.records, Usage: ModelUsage{InputTokens: 10, OutputTokens: 5, TotalTokens: 15, Complete: true}}, nil
 }
 
 // fakeToolExecutor 直接返回空结果，记录收到的批次。
@@ -146,6 +173,64 @@ func TestRunDecisionLoopStopsAfterOneInvalidResponseRetry(t *testing.T) {
 	_, err := RunDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{}, 3)
 	if err == nil || !strings.Contains(err.Error(), "not allowed") || len(model.inputs) != 2 {
 		t.Fatalf("error = %v, calls = %d", err, len(model.inputs))
+	}
+}
+
+func TestRunDecisionLoopRepairsUnparsableOutput(t *testing.T) {
+	parseErr := NewExecutorError(ErrAgentOutputUnparsable, false, 0, fmt.Errorf("agent_model: record_array_v1: response is neither array nor object, got 'h' (len=42, head=%q, tail=%q)", "hello", "world"))
+	model := &failingModel{err: parseErr, records: finalAnswerRecords()}
+	outcome, err := RunDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{}, 3)
+	if err != nil || outcome.Action != ActionFinalAnswer || len(model.inputs) != 2 {
+		t.Fatalf("outcome = %+v, error = %v, calls = %d", outcome, err, len(model.inputs))
+	}
+	feedback := ""
+	for _, block := range model.inputs[1].Blocks {
+		if block.ObjectID == "validation_feedback" {
+			feedback = block.Text
+		}
+	}
+	if !strings.Contains(feedback, "neither array nor object") {
+		t.Fatalf("repair feedback missing reason: %q", feedback)
+	}
+	if strings.Contains(feedback, "hello") || strings.Contains(feedback, "tail=") {
+		t.Fatalf("repair feedback leaks model text: %q", feedback)
+	}
+}
+
+func TestRunDecisionLoopStopsAfterOneUnparsableRetry(t *testing.T) {
+	parseErr := func() error {
+		return NewExecutorError(ErrAgentOutputUnparsable, false, 0, fmt.Errorf("agent_model: record_array_v1: empty response (len=0, head=%q, tail=%q)", "", ""))
+	}
+	model := &sequencedModel{steps: []scriptedStep{{err: parseErr()}, {err: parseErr()}}}
+	_, err := RunDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{}, 3)
+	if err == nil || !strings.Contains(err.Error(), "empty response") || len(model.inputs) != 2 {
+		t.Fatalf("error = %v, calls = %d", err, len(model.inputs))
+	}
+}
+
+func TestRunDecisionLoopRepairsUnparsableOutputAfterValidationFailure(t *testing.T) {
+	invalid := finalAnswerRecords()
+	invalid[2].Segment.Field = "greeting"
+	model := &sequencedModel{steps: []scriptedStep{
+		{records: invalid},
+		{err: NewExecutorError(ErrAgentOutputUnparsable, false, 0, fmt.Errorf("agent_model: record_array_v1: response is neither array nor object, got '`' (len=12, head=%q, tail=%q)", "```json", "```"))},
+		{records: finalAnswerRecords()},
+	}}
+	outcome, err := RunDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{}, 4)
+	if err != nil || outcome.Action != ActionFinalAnswer || len(model.inputs) != 3 {
+		t.Fatalf("outcome = %+v, error = %v, calls = %d", outcome, err, len(model.inputs))
+	}
+	feedback := ""
+	for _, block := range model.inputs[2].Blocks {
+		if block.ObjectID == "validation_feedback" {
+			feedback = block.Text
+		}
+	}
+	if !strings.Contains(feedback, "neither array nor object") {
+		t.Fatalf("second repair feedback missing reason: %q", feedback)
+	}
+	if strings.Contains(feedback, "```") {
+		t.Fatalf("second repair feedback leaks model text: %q", feedback)
 	}
 }
 

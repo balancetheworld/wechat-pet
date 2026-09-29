@@ -142,6 +142,25 @@ func TestCatalogNoMatchReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestToolByNameRespectsFilter(t *testing.T) {
+	catalog, err := DefaultCatalog(DefaultToolVersion)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool, ok := catalog.ToolByName(petRosterToolName, readOnlyFilter())
+	if !ok || tool.OperationID != "read.pet.list" {
+		t.Fatalf("tool = %+v, ok = %v", tool, ok)
+	}
+	if _, ok := catalog.ToolByName("unknown_tool", readOnlyFilter()); ok {
+		t.Fatal("未注册工具不应命中")
+	}
+	disabled := readOnlyFilter()
+	disabled.DisabledTools = map[string]struct{}{petRosterToolName: {}}
+	if _, ok := catalog.ToolByName(petRosterToolName, disabled); ok {
+		t.Fatal("禁用工具不应命中")
+	}
+}
+
 func TestCatalogDigestStableAndVersionSensitive(t *testing.T) {
 	tools := []Tool{
 		{Name: "read_pet", OperationID: "read_pet", ResourceType: ResourcePet, ActionType: ActionRead, Version: "1.0"},

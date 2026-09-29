@@ -13,6 +13,44 @@ import (
 	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
 )
 
+func TestCalendarRoutesReminderSubscription(t *testing.T) {
+	familyRepository, db := newFamilyRouteRepository(t)
+	if _, err := db.Exec(calendarRouteSchema); err != nil {
+		t.Fatal(err)
+	}
+	familyService, err := familyapp.NewService(familyRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedFamilyRouteUser(t, db, "owner-push", "推送成员")
+	if _, err := familyService.Create(context.Background(), "owner-push", familyapp.CreateFamilyRequest{Name: "推送家庭"}); err != nil {
+		t.Fatal(err)
+	}
+	calendarRepository, err := calendarapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	calendarService, err := calendarapp.NewService(calendarRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calendarService.SetReminderPush(nil, "template-1")
+	signer, err := jwtpkg.NewSigner("test-secret", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewWithDependencies(Dependencies{FamilyRepository: familyRepository, FamilyService: familyService, CalendarService: calendarService, TokenSigner: signer})
+
+	accepted := petRouteRequest(t, router, signer, http.MethodPost, "/api/v1/calendar/subscriptions", "owner-push", `{"accepted":true}`)
+	if accepted.Code != http.StatusOK || !strings.Contains(accepted.Body.String(), `"remaining":1`) {
+		t.Fatalf("accepted = %d %s", accepted.Code, accepted.Body.String())
+	}
+	rejected := petRouteRequest(t, router, signer, http.MethodPost, "/api/v1/calendar/subscriptions", "owner-push", `{"accepted":false}`)
+	if rejected.Code != http.StatusOK || !strings.Contains(rejected.Body.String(), `"remaining":1`) {
+		t.Fatalf("rejected = %d %s", rejected.Code, rejected.Body.String())
+	}
+}
+
 func TestCalendarRoutesRecordReminderFlow(t *testing.T) {
 	familyRepository, db := newFamilyRouteRepository(t)
 	if _, err := db.Exec("ALTER TABLE pets ADD COLUMN avatar_asset_id TEXT"); err != nil {
@@ -122,4 +160,5 @@ func extractCalendarReminderID(body string) string {
 
 const calendarRouteSchema = `CREATE TABLE calendar_records (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, category TEXT NOT NULL, medical_type TEXT, custom_medical_type TEXT NOT NULL DEFAULT '', content TEXT NOT NULL, occurred_at TIMESTAMP NOT NULL, occurred_on DATE NOT NULL, created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP);
 CREATE TABLE calendar_record_media (id TEXT PRIMARY KEY, record_id TEXT NOT NULL, family_id TEXT NOT NULL, asset_id TEXT NOT NULL, sort_order INTEGER NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE calendar_reminders (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, source_record_id TEXT NOT NULL, previous_reminder_id TEXT, reminder_date DATE NOT NULL, repeat_type TEXT NOT NULL, repeat_interval_days INTEGER, advance_days INTEGER NOT NULL, notification_channels TEXT NOT NULL, status TEXT NOT NULL, completed_at TIMESTAMP, completed_by TEXT, completed_record_id TEXT, created_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);`
+CREATE TABLE calendar_reminders (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL, source_record_id TEXT NOT NULL, previous_reminder_id TEXT, reminder_date DATE NOT NULL, repeat_type TEXT NOT NULL, repeat_interval_days INTEGER, advance_days INTEGER NOT NULL, notification_channels TEXT NOT NULL, status TEXT NOT NULL, completed_at TIMESTAMP, completed_by TEXT, completed_record_id TEXT, created_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, notify_status TEXT NOT NULL DEFAULT 'pending', notify_attempts INTEGER NOT NULL DEFAULT 0, notified_at TIMESTAMP);
+CREATE TABLE wechat_subscribe_grants (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, openid TEXT NOT NULL, template_id TEXT NOT NULL, remaining INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE (user_id, template_id));`

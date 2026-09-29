@@ -32,7 +32,7 @@ CREATE TABLE pets (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   deleted_at TIMESTAMP
 );
-CREATE TABLE users (id TEXT PRIMARY KEY, nickname TEXT, avatar_asset_id TEXT);
+CREATE TABLE users (id TEXT PRIMARY KEY, openid TEXT NOT NULL DEFAULT '', nickname TEXT, avatar_asset_id TEXT);
 CREATE TABLE calendar_record_media (
   id TEXT PRIMARY KEY, record_id TEXT NOT NULL, family_id TEXT NOT NULL,
   asset_id TEXT NOT NULL, sort_order INTEGER NOT NULL
@@ -41,7 +41,14 @@ CREATE TABLE calendar_reminders (
   id TEXT PRIMARY KEY, family_id TEXT NOT NULL, pet_id TEXT NOT NULL,
   source_record_id TEXT NOT NULL, reminder_date TEXT, repeat_type TEXT,
   repeat_interval_days INTEGER, advance_days INTEGER, notification_channels TEXT,
-  status TEXT, created_at TIMESTAMP, created_by TEXT
+  status TEXT, created_at TIMESTAMP, created_by TEXT,
+  notify_status TEXT NOT NULL DEFAULT 'pending', notify_attempts INTEGER NOT NULL DEFAULT 0,
+  notified_at TIMESTAMP, updated_at TIMESTAMP
+);
+CREATE TABLE wechat_subscribe_grants (
+  id TEXT PRIMARY KEY, user_id TEXT NOT NULL, openid TEXT NOT NULL, template_id TEXT NOT NULL,
+  remaining INTEGER NOT NULL DEFAULT 0, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+  UNIQUE (user_id, template_id)
 );
 `
 	if _, err := db.Exec(schema); err != nil {

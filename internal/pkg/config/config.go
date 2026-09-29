@@ -13,35 +13,37 @@ import (
 )
 
 type Config struct {
-	AppEnv            string `yaml:"app_env"`
-	HTTPAddr          string `yaml:"http_addr"`
-	DatabaseDriver    string `yaml:"database_driver"`
-	DatabaseDSN       string `yaml:"database_dsn"`
-	JWTSecret         string `yaml:"jwt_secret"`
-	JWTExpireMinutes  int    `yaml:"jwt_expire_minutes"`
-	WeChatAppID       string `yaml:"wechat_app_id"`
-	WeChatAppSecret   string `yaml:"wechat_app_secret"`
-	StorageDriver     string `yaml:"storage_driver"`
-	LocalUploadDir    string `yaml:"local_upload_dir"`
-	PublicBaseURL     string `yaml:"public_base_url"`
-	COSSecretID       string `yaml:"cos_secret_id"`
-	COSSecretKey      string `yaml:"cos_secret_key"`
-	COSBucket         string `yaml:"cos_bucket"`
-	RedisAddr         string `yaml:"redis_addr"`
-	AIEnabled         bool   `yaml:"ai_enabled"`
-	AIProvider        string `yaml:"ai_provider"`
-	AIAPIKey          string `yaml:"ai_api_key"`
-	AIBaseURL         string `yaml:"ai_base_url"`
-	AIModel           string `yaml:"ai_model"`
-	AITimeoutSeconds  int    `yaml:"ai_timeout_seconds"`
-	AIReasoningEffort string `yaml:"ai_reasoning_effort"`
+	AppEnv                   string `yaml:"app_env"`
+	HTTPAddr                 string `yaml:"http_addr"`
+	DatabaseDriver           string `yaml:"database_driver"`
+	DatabaseDSN              string `yaml:"database_dsn"`
+	JWTSecret                string `yaml:"jwt_secret"`
+	JWTExpireMinutes         int    `yaml:"jwt_expire_minutes"`
+	WeChatAppID              string `yaml:"wechat_app_id"`
+	WeChatAppSecret          string `yaml:"wechat_app_secret"`
+	WeChatReminderTemplateID string `yaml:"wechat_reminder_template_id"`
+	ReminderSendHour         int    `yaml:"reminder_send_hour"`
+	StorageDriver            string `yaml:"storage_driver"`
+	LocalUploadDir           string `yaml:"local_upload_dir"`
+	PublicBaseURL            string `yaml:"public_base_url"`
+	COSSecretID              string `yaml:"cos_secret_id"`
+	COSSecretKey             string `yaml:"cos_secret_key"`
+	COSBucket                string `yaml:"cos_bucket"`
+	RedisAddr                string `yaml:"redis_addr"`
+	AIEnabled                bool   `yaml:"ai_enabled"`
+	AIProvider               string `yaml:"ai_provider"`
+	AIAPIKey                 string `yaml:"ai_api_key"`
+	AIBaseURL                string `yaml:"ai_base_url"`
+	AIModel                  string `yaml:"ai_model"`
+	AITimeoutSeconds         int    `yaml:"ai_timeout_seconds"`
+	AIReasoningEffort        string `yaml:"ai_reasoning_effort"`
 }
 
 func Load(yamlPaths ...string) (Config, error) {
 	if err := loadDotEnv(); err != nil {
 		return Config{}, err
 	}
-	cfg := Config{AppEnv: "development", HTTPAddr: ":8080", DatabaseDriver: "postgres", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads", AIProvider: "openai", AIBaseURL: "https://api.openai.com/v1", AITimeoutSeconds: 30}
+	cfg := Config{AppEnv: "development", HTTPAddr: ":8080", DatabaseDriver: "postgres", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads", AIProvider: "openai", AIBaseURL: "https://api.openai.com/v1", AITimeoutSeconds: 30, ReminderSendHour: 9}
 	yamlPath := ""
 	if len(yamlPaths) > 0 {
 		yamlPath = yamlPaths[0]
@@ -99,6 +101,14 @@ func applyEnvironment(cfg *Config) error {
 	setString("JWT_SECRET", &cfg.JWTSecret)
 	setString("WECHAT_APP_ID", &cfg.WeChatAppID)
 	setString("WECHAT_APP_SECRET", &cfg.WeChatAppSecret)
+	setString("WECHAT_REMINDER_TEMPLATE_ID", &cfg.WeChatReminderTemplateID)
+	if value, ok := os.LookupEnv("REMINDER_SEND_HOUR"); ok {
+		hour, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil {
+			return fmt.Errorf("REMINDER_SEND_HOUR must be an integer: %w", err)
+		}
+		cfg.ReminderSendHour = hour
+	}
 	setString("STORAGE_DRIVER", &cfg.StorageDriver)
 	setString("LOCAL_UPLOAD_DIR", &cfg.LocalUploadDir)
 	setString("PUBLIC_BASE_URL", &cfg.PublicBaseURL)
@@ -156,6 +166,9 @@ func (c Config) Validate() error {
 	}
 	if c.JWTExpireMinutes <= 0 {
 		return errors.New("JWT_EXPIRE_MINUTES must be greater than zero")
+	}
+	if c.ReminderSendHour < 0 || c.ReminderSendHour > 23 {
+		return errors.New("REMINDER_SEND_HOUR must be between 0 and 23")
 	}
 	if c.StorageDriver == "local" && strings.TrimSpace(c.LocalUploadDir) == "" {
 		return errors.New("LOCAL_UPLOAD_DIR is required for local storage")

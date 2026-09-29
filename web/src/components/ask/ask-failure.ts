@@ -1,4 +1,5 @@
 const failureTitles: Record<string, string> = {
+  agent_output_unparsable: 'AI 返回内容格式异常',
   executor_failed: '问问执行器运行失败',
   invalid_analysis_output: '健康建议校验未通过',
   invalid_event_data: '回答保存失败',

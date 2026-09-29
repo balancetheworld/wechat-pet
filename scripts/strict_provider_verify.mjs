@@ -1,6 +1,7 @@
 // record_array_v1 strict 结构化输出验证脚本：验证 Provider 是否按
 // object 根 + records 数组（anyOf 八种记录）强制约束模型输出。
-// 用法：node scripts/strict_provider_verify.mjs [每场景调用次数，默认 2]
+// 用法：node scripts/strict_provider_verify.mjs [每场景调用次数，默认 2] [--stream]
+// 默认走非流式；加 --stream 走流式，用于核对生产决策循环所用的流式通道是否同样受 strict 约束。
 // 从项目根目录 .env 读取 AI_API_KEY / AI_BASE_URL / AI_MODEL，不回显密钥。
 // 依赖 go 工具链：通过 scripts/dump_record_schema.go 读取服务端固定 Schema，避免脚本内重复维护。
 import { execFileSync } from 'node:child_process';
@@ -8,7 +9,9 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ROOT = process.cwd();
-const ROUNDS = Number(process.argv[2] || 2);
+const args = process.argv.slice(2);
+const STREAM = args.includes('--stream');
+const ROUNDS = Number(args.find(value => !value.startsWith('--')) || 2);
 
 function loadEnv() {
   const env = {};
@@ -57,6 +60,7 @@ function buildBody(scenario) {
   return {
     model: MODEL,
     store: false,
+    stream: STREAM,
     text: { format: { type: 'json_schema', name: 'pet_ask', strict: true, schema } },
     instructions: text,
     input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: scenario.input }] }],
@@ -70,6 +74,38 @@ function outputText(payload) {
     .filter(content => content.type === 'output_text')
     .map(content => content.text || '')
     .join('');
+}
+
+// collectStream 读取 Responses API 的 SSE 流，拼接正文增量并记录未完成或失败原因。
+async function collectStream(response) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let text = '';
+  let incompleteReason = '';
+  let failedReason = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (!data || data === '[DONE]') continue;
+      let event;
+      try {
+        event = JSON.parse(data);
+      } catch {
+        continue;
+      }
+      if (event.type === 'response.output_text.delta') text += event.delta || '';
+      if (event.type === 'response.incomplete') incompleteReason = event.response?.incomplete_details?.reason || 'unknown';
+      if (event.type === 'response.failed') failedReason = event.response?.error?.message || 'failed';
+    }
+  }
+  return { text, incompleteReason, failedReason };
 }
 
 function inspect(scenario, text) {
@@ -116,13 +152,21 @@ for (const scenario of scenarios) {
       console.log(`[FAIL] ${label} status=${response.status} ${body.slice(0, 200)}`);
       continue;
     }
-    const payload = await response.json();
-    const result = inspect(scenario, outputText(payload));
+    let result;
+    let note = '';
+    if (STREAM) {
+      const streamed = await collectStream(response);
+      result = inspect(scenario, streamed.text);
+      note = `${streamed.failedReason ? ` failed=${streamed.failedReason}` : ''}${streamed.incompleteReason ? ` incomplete=${streamed.incompleteReason}` : ''}`;
+    } else {
+      const payload = await response.json();
+      result = inspect(scenario, outputText(payload));
+    }
     const ok = result.valid_json && result.arguments_ok !== false && !result.error;
     if (!ok) failed += 1;
-    console.log(`[${ok ? 'PASS' : 'FAIL'}] ${label} elapsed=${elapsed}ms records=${JSON.stringify(result.records)} arguments_ok=${result.arguments_ok}${result.error ? ` error=${result.error}` : ''}`);
+    console.log(`[${ok ? 'PASS' : 'FAIL'}] ${label} stream=${STREAM} elapsed=${elapsed}ms records=${JSON.stringify(result.records)} arguments_ok=${result.arguments_ok}${result.error ? ` error=${result.error}` : ''}${note}`);
   }
 }
 
-console.log(failed === 0 ? 'strict 验证通过：全部调用都符合 record_array_v1' : `strict 验证失败：${failed} 次调用不符合契约`);
+console.log(failed === 0 ? `strict 验证通过（stream=${STREAM}）：全部调用都符合 record_array_v1` : `strict 验证失败（stream=${STREAM}）：${failed} 次调用不符合契约`);
 process.exit(failed === 0 ? 0 : 1);

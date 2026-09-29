@@ -2,8 +2,7 @@ import type { AskOperation } from '../../types/ask'
 import { Button, Image, Input, ScrollView, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import askBackground from '../../assets/ai-bg.jpg'
-import catImage from '../../assets/ai-cat.png'
+import askBackground from '../../assets/nocat.png'
 import AskEventView from '../../components/ask/ask-event'
 import AskOperationCard from '../../components/ask/ask-operation'
 import { askErrorReport } from '../../components/ask/ask-report'
@@ -16,6 +15,32 @@ import { reLaunch } from '../../utils/navigation'
 import './index.scss'
 
 const nearBottomPx = 80
+
+interface LandingImage {
+  src: string
+  large: boolean
+}
+
+/* play2 素材里猫画得偏小, 展示时放大一档 */
+const largeLandingPattern = /play2/i
+
+/* 构建常量缺失(例如改了 config 没重启编译)时退化为不展示, 避免整个页面报错 */
+const askLandingGIFs = typeof TARO_APP_ASK_LANDING_GIFS === 'string' ? TARO_APP_ASK_LANDING_GIFS : ''
+const askAnswerGIF = typeof TARO_APP_ASK_ANSWER_GIF === 'string' ? TARO_APP_ASK_ANSWER_GIF : ''
+
+/* 未发起会话时随机展示一张 GIF: 模块级只求值一次, 本次小程序运行内保持不变 */
+const cdnLandingImages: LandingImage[] = askLandingGIFs.split(',').map(url => url.trim()).filter(Boolean).map(src => ({ src, large: largeLandingPattern.test(src) }))
+
+/* eslint-disable ts/no-require-imports -- 本地素材只在开发构建里兜底, 生产构建中该分支为常量 false, webpack 会连同大图一起丢弃 */
+const localLandingImages: LandingImage[] = TARO_APP_DEBUG
+  ? [{ src: require('../../assets/play2.gif'), large: true }, { src: require('../../assets/sleepy.gif'), large: false }]
+  : []
+const localAnswerGif: string = TARO_APP_DEBUG ? require('../../assets/answer.gif') : ''
+/* eslint-enable ts/no-require-imports */
+
+const landingImages = cdnLandingImages.length ? cdnLandingImages : localLandingImages
+const landingImage = landingImages.length ? landingImages[Math.floor(Math.random() * landingImages.length)] : null
+const answerGif = askAnswerGIF || localAnswerGif
 
 export default function Ask() {
   const token = useAuthStore(state => state.token)
@@ -159,6 +184,8 @@ export default function Ask() {
   const busy = phase === 'creating' || phase === 'thinking' || phase === 'reconnecting' || phase === 'replying'
   const hasError = Boolean(error) && (phase === 'input_error' || phase === 'ambiguous' || phase === 'network_error' || phase === 'failed')
   const hasConversation = conversation.length > 0 || hasError
+  const answerCatImage = hasConversation ? answerGif : ''
+
   async function handleSend() {
     if (!token) {
       await Taro.showToast({ title: '请先登录后使用问问', icon: 'none' })
@@ -254,7 +281,12 @@ export default function Ask() {
         {!hasConversation && (
           <>
             <View className="ask-cat-wrap">
-              <Image className="ask-cat" src={catImage} mode="aspectFit" />
+              {!!landingImage && (
+                <View className="ask-cat-stage">
+                  <Image className={`ask-cat${landingImage.large ? ' ask-cat--large' : ''}`} src={landingImage.src} mode="aspectFit" />
+                  <View className="ask-cat-mask" />
+                </View>
+              )}
             </View>
             <View className="preset-row">
               <View className="preset-chip" onClick={() => handlePreset('上次打疫苗是什么时候')}>疫苗记录</View>
@@ -317,6 +349,9 @@ export default function Ask() {
               )}
             </View>
           </ScrollView>
+        )}
+        {!!answerCatImage && (
+          <Image className="ask-answer-cat" src={answerCatImage} mode="aspectFit" />
         )}
       </View>
       <View className="ask-input-bar">

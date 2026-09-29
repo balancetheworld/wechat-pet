@@ -6,6 +6,8 @@ jwt_secret: invalid-development-secret
 jwt_expire_minutes: 120
 wechat_app_id: wx-invalid-app-id
 wechat_app_secret: invalid-wechat-app-secret
+wechat_reminder_template_id: ""
+reminder_send_hour: 9
 storage_driver: local
 local_upload_dir: data/uploads
 cos_secret_id: invalid-cos-secret-id

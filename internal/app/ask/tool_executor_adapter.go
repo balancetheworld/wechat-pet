@@ -219,10 +219,29 @@ func prepareInputForTool(toolName string, args map[string]any) (OperationPreview
 		if _, err := time.Parse(time.RFC3339, occurredAt); err != nil {
 			return OperationPreviewInput{}, fmt.Errorf("occurred_at must be RFC3339")
 		}
-		request := calendarapp.CreateRecordRequest{PetID: petID, Category: category, Content: content, OccurredAt: occurredAt}
-		if medicalType, ok := args["medical_type"].(string); ok {
-			request.MedicalType = medicalType
+		medicalType, _ := args["medical_type"].(string)
+		medicalType = strings.TrimSpace(medicalType)
+		customMedicalType, _ := args["custom_medical_type"].(string)
+		customMedicalType = strings.TrimSpace(customMedicalType)
+		if category == "daily" {
+			if medicalType != "" || customMedicalType != "" {
+				return OperationPreviewInput{}, fmt.Errorf("daily records cannot set medical_type or custom_medical_type")
+			}
+		} else {
+			if medicalType != "" && !calendarapp.ValidMedicalType(medicalType) {
+				return OperationPreviewInput{}, fmt.Errorf("medical_type must be one of vaccine/deworming/checkup/visit/medication/other")
+			}
+			if medicalType != "other" && customMedicalType != "" {
+				return OperationPreviewInput{}, fmt.Errorf("custom_medical_type requires medical_type=other")
+			}
+			if medicalType == "other" && customMedicalType == "" {
+				return OperationPreviewInput{}, fmt.Errorf("custom_medical_type is required when medical_type=other")
+			}
+			if len(customMedicalType) > 50 {
+				return OperationPreviewInput{}, fmt.Errorf("custom_medical_type must be at most 50 characters")
+			}
 		}
+		request := calendarapp.CreateRecordRequest{PetID: petID, Category: category, Content: content, OccurredAt: occurredAt, MedicalType: medicalType, CustomMedicalType: customMedicalType}
 		return OperationPreviewInput{Target: operationTargetCalendarRecordCreate, Summary: calendarRecordSummary(request), Payload: request}, nil
 	case "update_calendar_record":
 		recordID, _ := args["record_id"].(string)
@@ -374,7 +393,10 @@ func calendarRecordSummary(request calendarapp.CreateRecordRequest) string {
 	if request.Category == "medical" {
 		label = "医疗记录"
 	}
-	if request.MedicalType != "" {
+	switch {
+	case request.CustomMedicalType != "":
+		label += "（" + request.CustomMedicalType + "）"
+	case request.MedicalType != "":
 		label += "（" + request.MedicalType + "）"
 	}
 	occurred := request.OccurredAt

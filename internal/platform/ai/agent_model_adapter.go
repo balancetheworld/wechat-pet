@@ -92,7 +92,7 @@ func (a *AgentModelAdapter) Step(ctx context.Context, input askapp.StepInput) (a
 	}
 	records, err := parseRecordArray(response.Text)
 	if err != nil {
-		executorErr := askapp.NewExecutorError(ErrProviderOutputInvalid, false, 0, fmt.Errorf("%w (len=%d, head=%q, tail=%q)", err, len(response.Text), headSnippet(response.Text), tailSnippet(response.Text)))
+		executorErr := askapp.NewExecutorError(askapp.ErrAgentOutputUnparsable, false, 0, fmt.Errorf("%w (len=%d, head=%q, tail=%q)", err, len(response.Text), headSnippet(response.Text), tailSnippet(response.Text)))
 		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, response); transitionErr != nil {
 			return result, transitionErr
 		}

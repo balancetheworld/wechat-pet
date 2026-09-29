@@ -125,6 +125,24 @@ func main() {
 		os.Exit(1)
 	}
 	calendarService.SetAssetAuthorizer(fileService)
+	if templateID := strings.TrimSpace(cfg.WeChatReminderTemplateID); templateID != "" {
+		miniprogramState := "formal"
+		if cfg.AppEnv != "production" {
+			miniprogramState = "developer"
+		}
+		subscribeClient, subscribeErr := wechat.NewSubscribeClient(cfg.WeChatAppID, cfg.WeChatAppSecret, miniprogramState, 5*time.Second)
+		if subscribeErr != nil {
+			logger.Error("create wechat subscribe client", "error", subscribeErr)
+			os.Exit(1)
+		}
+		reminderNotifier, notifierErr := wechat.NewReminderNotifier(subscribeClient, templateID)
+		if notifierErr != nil {
+			logger.Error("create wechat reminder notifier", "error", notifierErr)
+			os.Exit(1)
+		}
+		calendarService.SetReminderPush(reminderNotifier, templateID)
+	}
+	calendarService.SetReminderSendHour(cfg.ReminderSendHour)
 	askRepository, err := askapp.NewRepository(db, cfg.DatabaseDriver)
 	if err != nil {
 		logger.Error("create ask repository", "error", err)
@@ -208,6 +226,25 @@ func main() {
 	}()
 	shutdownSignal, stopSignals := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSignals()
+	go func() {
+		ticker := time.NewTicker(time.Minute)
+		defer ticker.Stop()
+		for {
+			dispatchCtx, cancelDispatch := context.WithTimeout(shutdownSignal, 30*time.Second)
+			result, dispatchErr := calendarService.DispatchReminderNotifications(dispatchCtx, time.Now())
+			cancelDispatch()
+			if dispatchErr != nil {
+				logger.Error("dispatch reminder notifications", "error", dispatchErr)
+			} else if result.Scanned > 0 || result.Retried > 0 {
+				logger.Info("dispatch reminder notifications", "scanned", result.Scanned, "sent", result.Sent, "skipped", result.Skipped, "failed", result.Failed, "retried", result.Retried)
+			}
+			select {
+			case <-shutdownSignal.Done():
+				return
+			case <-ticker.C:
+			}
+		}
+	}()
 	select {
 	case <-shutdownSignal.Done():
 		logger.Info("api server stopping")
