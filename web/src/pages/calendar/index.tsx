@@ -649,7 +649,13 @@ export default function Calendar() {
               </Text>
               <Text className="cal-day-summary">{calendarDay ? `${dayRecords.length} 条记录 · ${dayReminders.length} 条待办提醒` : '加载中'}</Text>
             </View>
-            {loading && <Text className="cal-loading">加载中</Text>}
+            <View className="cal-day-side">
+              {loading && <Text className="cal-loading">加载中</Text>}
+              {/* 正在看非当天的记录时提供一键回到今天 */}
+              {selectedDate !== today && (
+                <View className="cal-back-today" hoverClass="cal-back-today-hover" onClick={handleToday}>回到当天</View>
+              )}
+            </View>
           </View>
           <View className="cal-day-body">
             {dayReminders.map(reminder => (

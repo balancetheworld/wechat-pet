@@ -216,12 +216,29 @@
   background-size: 100% 100% !important;
 }
 
+/* 封面: 宠物头像嵌进封面上的爪印虚线圆内并占满圆
+   (按封面图逐像素实测: 圆心 (345,272)/677×994, 即 50.96% 宽 / 27.36% 高;
+    直径 317px ≈ 宽 46.82% / 高 32.29%。背景图 100%×100% 拉伸,
+    圆心与宽高都按图片自身百分比定位, 拉伸后与虚线圆逐像素贴合) */
+.cover-avatar {
+  position: absolute;
+  left: 50.96%;
+  top: 27.36%;
+  width: 46.82%;
+  height: 32.29%;
+  display: block;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  overflow: hidden;
+}
+
 /* 内容页：固定一屏，不滚动（超出内容由多页承载) */
 .content-page {
   background: #FFFEFB;
 }
 
 .page-body {
+  position: relative;
   flex: 1;
   box-sizing: border-box;
   /* 顶部 padding 收窄: 52rpx → 24rpx (让标题更靠近档案顶部) */
@@ -506,6 +523,26 @@
   line-height: 1.8;
 }
 
+/* --- 证件章节收起/展开开关: 绝对定位贴到书页下边沿, 右对齐 ---
+   注意: .page-body 只是 flex 子项、不是 flex 容器, 用 margin-top:auto 推不下去, 必须绝对定位 */
+.identity-certs-toggle {
+  position: absolute;
+  right: 40rpx;
+  bottom: 6rpx;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 16rpx 8rpx 4rpx;
+  font-size: 22rpx;
+  color: #8B95A6;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.identity-certs-toggle-hover {
+  transform: scale(0.96);
+  opacity: 0.75;
+}
+
 /* --- 统计行 --- */
 .stat-row {
   display: flex;
@@ -687,6 +724,13 @@
   background: rgba(255, 255, 255, 0.85);
 }
 
+/* 详情卡正文: 保留 \n 换行 (体重记录等需要逐条换行的内容) */
+.detail-body-multiline {
+  display: block;
+  white-space: pre-wrap;
+  line-height: 1.8;
+}
+
 /* 详情卡标题输入框: 编辑提问时呈现 (参考弹窗卡片: 白底 + 下划线) */
 .detail-title-input {
   width: 100%;
@@ -775,6 +819,7 @@
 }
 
 .manual-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16rpx;
@@ -833,16 +878,17 @@
 }
 
 /* --- 健康资料 --- */
+/* 用户要求: 蓝色卡片底全部改透明; 蓝色边框也一并去掉, 只留文字排版 */
 .health-lead {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 18rpx 22rpx;
   margin-bottom: 20rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.6);
-  border-left: 6rpx solid rgba(91, 132, 190, 0.85);
+  border: none;
   border-radius: 14rpx;
-  background: rgba(127, 165, 214, 0.22);
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
 .health-lead-main {
@@ -863,7 +909,7 @@
   margin-bottom: 18rpx;
 }
 
-/* 卡片: 每行两个, 近正方形长方形; 主题蓝由浅到深四档保留错落色彩感 */
+/* 卡片: 每行两个, 近正方形长方形; 底色透明(用户要求), 仅保留左侧色条错落色彩感 */
 .health-item {
   display: flex;
   flex-direction: column;
@@ -876,32 +922,29 @@
   border: 1rpx solid rgba(255, 255, 255, 0.55);
   border-radius: 20rpx;
   text-align: left;
-  box-shadow: 0 6rpx 16rpx rgba(74, 100, 137, 0.10);
+  background: transparent !important;
+  box-shadow: none !important;
 }
 
-/* 第 1 张: 最浅蓝 */
+/* 蓝色边框已按用户要求全部移除, tone 类仅保留 JSX 类名占位 */
 .health-tone-1 {
-  background: rgba(207, 222, 240, 0.38);
-  border-left: 6rpx solid rgba(169, 196, 228, 0.95);
 }
 
-/* 第 2 张: 浅蓝 */
+/* 蓝色边框已移除 */
 .health-tone-2 {
-  background: rgba(169, 196, 228, 0.42);
-  border-left: 6rpx solid rgba(127, 165, 214, 0.95);
 }
 
-/* 第 3 张: 中蓝 */
+/* 蓝色边框已移除 */
 .health-tone-3 {
-  background: rgba(127, 165, 214, 0.36);
-  border-left: 6rpx solid rgba(91, 132, 190, 0.95);
 }
 
-/* 第 4 张: 最深蓝(白字) */
+/* 蓝色边框已移除 */
 .health-tone-4 {
-  background: rgba(91, 132, 190, 0.62);
-  border-left: 6rpx solid rgba(64, 100, 156, 0.95);
 }
+
+.health-tone-4 .health-label { color: #6B655C; }
+.health-tone-4 .health-value { color: #2A2520; }
+.health-tone-4 .health-note { color: #8A8278; }
 
 .health-label {
   display: block;
@@ -915,6 +958,11 @@
   color: #2A2520;
   font-weight: 600;
   font-family: 'Ma Shan Zheng', cursive;
+  /* 保存的备注可能较长: 卡片内最多两行, 超出省略 (完整内容在详情卡里看) */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
 }
 
 .health-note {
@@ -923,10 +971,7 @@
   color: #8A8278;
 }
 
-/* 最深卡片: 白字保证对比度 */
-.health-tone-4 .health-label { color: rgba(255, 255, 255, 0.82); }
-.health-tone-4 .health-value { color: #FFFFFF; }
-.health-tone-4 .health-note { color: rgba(255, 255, 255, 0.68); }
+/* 最深卡片原白字规则已随卡片透明化移除 (文字统一深色) */
 
 .updated {
   display: block;
@@ -1017,6 +1062,7 @@
 }
 
 .year-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 18rpx;
@@ -1067,8 +1113,9 @@
   margin-bottom: 20rpx;
   border: 1rpx solid rgba(255, 255, 255, 0.72);
   border-radius: 18rpx;
-  background: rgba(127, 165, 214, 0.24);
-  box-shadow: 0 8rpx 26rpx rgba(74, 100, 137, 0.12), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
+  /* 底色透明 (用户要求蓝色卡片底改为透明), 仅留淡边框与轻投影 */
+  background: transparent !important;
+  box-shadow: 0 8rpx 26rpx rgba(74, 100, 137, 0.08), inset 0 1rpx 0 rgba(255, 255, 255, 0.5);
   cursor: pointer;
 }
 
@@ -1221,6 +1268,9 @@
   font-size: 26rpx;
   color: #2A2520;
   line-height: 1.5;
+  /* 长内容不撑破书页: 超宽折行, 超高裁切(多余内容由分页承载) */
+  word-break: break-word;
+  overflow: hidden;
 }
 
 /* --- 加载占位 --- */
@@ -1649,6 +1699,50 @@
   box-shadow: 0 4rpx 12rpx rgba(74, 100, 137, 0.08);
 }
 
+/* 表单内图片缩略图预览: 添加/更换后立即在按钮右侧可见, 点击可全屏 */
+.archive-page .cal-image-thumb {
+  width: 120rpx;
+  height: 160rpx;
+  border: 1rpx solid rgba(163, 194, 232, 0.6);
+  border-radius: 10rpx;
+  background: rgba(232, 244, 248, 0.62);
+}
+
+.archive-page .cal-image-hint {
+  color: #A8A096;
+  font-size: 22rpx;
+}
+
+/* ============================================
+   修改态: 各章节记录右上角的删除小×
+   纯叉无底框无圆圈 (用户要求: ×的下层不要有框, 直接放个小×; 位置右上角, 颜色蓝色)
+   ============================================ */
+.archive-page .record-del-x {
+  position: absolute;
+  z-index: 3;
+  top: 2rpx;
+  right: 2rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48rpx;
+  height: 48rpx;
+  padding: 0;
+  margin: 0;
+  font-size: 36rpx;
+  line-height: 1;
+  color: #5B84BE;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+.archive-page .record-del-x:active {
+  opacity: 0.6;
+}
+
 .archive-page .cal-sheet-actions {
   display: flex;
   align-items: center;
@@ -1735,6 +1829,7 @@
 }
 
 .cert-cell {
+  position: relative;
   width: 100%;
   margin-bottom: 20rpx;
 }
@@ -1804,7 +1899,8 @@
 
 .cert-time {
   color: #5B84BE;
-  font-size: 20rpx;
+  /* 20 → 26 → 30rpx: 用户要求证明右侧文字再大些 */
+  font-size: 30rpx;
   font-weight: 700;
   line-height: 1.4;
 }
@@ -1812,7 +1908,8 @@
 .cert-details {
   margin-top: 4rpx;
   color: #6B655C;
-  font-size: 20rpx;
+  /* 20 → 24 → 28rpx: 与时间行同步放大 */
+  font-size: 28rpx;
   line-height: 1.5;
   display: -webkit-box;
   -webkit-box-orient: vertical;

@@ -31,3 +31,7 @@ coverage.out
 
 
 web/src/assets/passport.original.jpg
+
+# 后端本地编译产物
+api.exe
+*.exe

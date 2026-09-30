@@ -23,3 +23,130 @@
 .family-members-list {
   margin-top: 8rpx;
 }
+
+/* ============ 成员卡片 ============ */
+.family-member-card {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 26rpx 28rpx;
+  margin-bottom: 20rpx;
+  background: rgba(255, 254, 251, 0.78);
+  border: var(--glass-border);
+  border-radius: 12rpx;
+  box-shadow: var(--glass-shadow);
+}
+
+.family-member-card__avatar {
+  width: 88rpx;
+  height: 88rpx;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.family-member-card__avatar--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4A6489;
+  background: rgba(127, 165, 214, 0.24);
+  font-size: 34rpx;
+  font-weight: 600;
+}
+
+.family-member-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 8rpx;
+  flex: 1;
+  min-width: 0;
+}
+
+.family-member-card__name {
+  color: var(--ink);
+  font-size: 30rpx;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.family-member-card__role {
+  align-self: flex-start;
+  padding: 2rpx 16rpx;
+  border-radius: 999rpx;
+  color: #4A6489;
+  background: rgba(127, 165, 214, 0.2);
+  font-size: 22rpx;
+}
+
+.family-member-card__role--owner {
+  color: #8A6D3B;
+  background: rgba(230, 184, 104, 0.28);
+}
+
+.family-member-card__actions {
+  display: flex;
+  gap: 14rpx;
+}
+
+/* ============ 待审申请分区 ============ */
+.family-applications {
+  margin-top: 36rpx;
+}
+
+.family-applications__title {
+  display: block;
+  margin: 0 8rpx 18rpx;
+  color: var(--primary-deep);
+  font-size: 30rpx;
+  font-weight: 600;
+}
+
+.family-members-empty {
+  display: block;
+  margin-top: 48rpx;
+  color: var(--muted);
+  font-size: 26rpx;
+  text-align: center;
+}
+
+/* ============ 玻璃胶囊按钮: 统一参考登录页按钮样式 ============ */
+.themed-page .family-capsule,
+.family-members-header .family-members-back,
+.family-members-header .family-members-refresh {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 72rpx;
+  margin: 0;
+  padding: 0 32rpx;
+  border: 1px solid rgba(163, 194, 232, 0.75) !important;
+  border-radius: 999px !important;
+  font-size: 26rpx;
+  letter-spacing: 2rpx;
+  color: #4A6489 !important;
+  background: linear-gradient(135deg, #E7EFFA, #C9DBF0) !important;
+  box-shadow: 0 6px 16px rgba(74, 100, 137, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+/* 危险操作: 珊瑚色区分 */
+.themed-page .family-capsule--danger {
+  color: #B4543E !important;
+  background: linear-gradient(135deg, #FBEAE4, #F3D5CB) !important;
+  border-color: rgba(214, 138, 117, 0.6) !important;
+}
+
+.themed-page .family-capsule::after,
+.family-members-header button::after {
+  border: none !important;
+}
+
+/* 按压反馈 */
+.family-capsule-press {
+  transform: scale(0.96);
+  opacity: 0.92;
+}
