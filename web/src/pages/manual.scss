@@ -359,7 +359,17 @@
   word-break: break-word;
 }
 
-/* 详情卡照片块: 展示记录关联的单张照片, 点击可全屏预览 */
+/* 详情卡照片块: 单张通栏, 多张两列网格, 点击可全屏预览 */
+.detail-image-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12rpx;
+}
+
+.detail-image-grid .detail-image:only-child {
+  grid-column: 1 / -1;
+}
+
 .detail-block--media .detail-image {
   width: 100%;
   height: 360rpx;

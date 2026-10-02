@@ -385,20 +385,22 @@ func validateResourcePayload(resource, method string, payload map[string]any) er
 
 func (r *SQLRepository) health(ctx context.Context, familyID, petID, method string, p map[string]any) (any, error) {
 	if method == "GET" {
-		var status, allergy, med string
-		e := r.db.QueryRowContext(ctx, r.query("SELECT status,allergies,long_term_medication FROM pet_health WHERE pet_id=? AND family_id=?"), petID, familyID).Scan(&status, &allergy, &med)
+		var status, allergy, disease, med, vaccine string
+		e := r.db.QueryRowContext(ctx, r.query("SELECT status,allergies,disease,long_term_medication,vaccine FROM pet_health WHERE pet_id=? AND family_id=?"), petID, familyID).Scan(&status, &allergy, &disease, &med, &vaccine)
 		if errors.Is(e, sql.ErrNoRows) {
-			return map[string]any{"status": "", "allergies": "", "long_term_medication": ""}, nil
+			return map[string]any{"status": "", "allergies": "", "disease": "", "long_term_medication": "", "vaccine": ""}, nil
 		}
-		return map[string]any{"status": status, "allergies": allergy, "long_term_medication": med}, e
+		return map[string]any{"status": status, "allergies": allergy, "disease": disease, "long_term_medication": med, "vaccine": vaccine}, e
 	}
 	if method != "PUT" {
 		return nil, appErrors.InvalidParam("不支持的操作")
 	}
 	status, _ := p["status"].(string)
 	allergies, _ := p["allergies"].(string)
+	disease, _ := p["disease"].(string)
 	med, _ := p["long_term_medication"].(string)
-	_, e := r.db.ExecContext(ctx, r.query("INSERT INTO pet_health(pet_id,family_id,status,allergies,long_term_medication) VALUES(?,?,?,?,?) ON CONFLICT(pet_id) DO UPDATE SET status=excluded.status,allergies=excluded.allergies,long_term_medication=excluded.long_term_medication,updated_at=CURRENT_TIMESTAMP"), petID, familyID, status, allergies, med)
+	vaccine, _ := p["vaccine"].(string)
+	_, e := r.db.ExecContext(ctx, r.query("INSERT INTO pet_health(pet_id,family_id,status,allergies,disease,long_term_medication,vaccine) VALUES(?,?,?,?,?,?,?) ON CONFLICT(pet_id) DO UPDATE SET status=excluded.status,allergies=excluded.allergies,disease=excluded.disease,long_term_medication=excluded.long_term_medication,vaccine=excluded.vaccine,updated_at=CURRENT_TIMESTAMP"), petID, familyID, status, allergies, disease, med, vaccine)
 	return p, e
 }
 

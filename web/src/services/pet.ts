@@ -82,3 +82,18 @@ export function createPetResource(petID: string, resource: string, data: Record<
     data,
   })
 }
+
+/* 健康资料四项: 后端 pet_health 表持久化 (GET/PUT /pets/:id/health) */
+export function getPetHealth(petID: string) {
+  return request<Record<string, string>>({
+    path: `/api/v1/pets/${encodeURIComponent(petID)}/health`,
+  })
+}
+
+export function putPetHealth(petID: string, data: Record<string, string>) {
+  return request<Record<string, string>>({
+    path: `/api/v1/pets/${encodeURIComponent(petID)}/health`,
+    method: 'PUT',
+    data,
+  })
+}

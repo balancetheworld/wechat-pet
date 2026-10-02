@@ -3,7 +3,8 @@
   overflow: hidden;
   min-height: 100vh;
   box-sizing: border-box;
-  padding: 32rpx 24rpx 160rpx;
+  /* 标题与内容整体下移: 顶部留出状态栏 + 呼吸空间 */
+  padding: calc(96rpx + env(safe-area-inset-top)) 24rpx 160rpx;
   color: var(--ink);
   background: #F5EFE6;
 }
@@ -85,13 +86,265 @@
   font-weight: 600;
 }
 
+/* 小标题行: 标题居左, "管理"按钮贴最右 */
+.account-section__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.account-section__head .account-section__title {
+  margin-bottom: 18rpx;
+}
+
+/* "管理/完成"按钮: 文字按钮贴标题行最右侧 */
+.account-members__manage {
+  margin-bottom: 18rpx;
+  padding: 6rpx 22rpx;
+  font-size: 24rpx;
+  color: #4A6489;
+  border: 1rpx solid rgba(163, 194, 232, 0.85);
+  border-radius: 999rpx;
+  background: rgba(231, 239, 250, 0.55);
+}
+
+.account-members__manage--active {
+  color: #FFFFFF;
+  border-color: rgba(91, 132, 190, 0.9);
+  background: rgba(91, 132, 190, 0.85);
+}
+
 .account-family {
   justify-content: space-between;
+}
+
+.account-family__main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16rpx;
 }
 
 .account-family__name {
   font-size: 30rpx;
   font-weight: 600;
+}
+
+/* 家庭码: "家庭码"小标题在码框左侧同一行, 码值单独在虚框内, "复制"是框外右侧的独立按钮 */
+.account-family__code-label {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: 22rpx;
+  letter-spacing: 1rpx;
+}
+
+.account-code {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+  width: 100%;
+}
+
+.account-code__box {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12rpx 28rpx;
+  border: 1rpx dashed rgba(94, 139, 200, 0.55);
+  border-radius: 12rpx;
+  background: rgba(231, 239, 250, 0.55);
+}
+
+.account-code__value {
+  color: #4A6489;
+  font-size: 28rpx;
+  font-weight: 600;
+  letter-spacing: 4rpx;
+  white-space: nowrap;
+}
+
+.account-page .account-code__copy {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  min-height: 56rpx;
+  min-width: 96rpx;
+  margin: 0;
+  padding: 0 26rpx;
+  border: 1px solid rgba(163, 194, 232, 0.85) !important;
+  border-radius: 999px !important;
+  font-size: 22rpx;
+  line-height: 1;
+  letter-spacing: 1rpx;
+  /* 关键: 禁止按钮文字竖排折行 (此前"复/制"两字被挤成两行) */
+  white-space: nowrap;
+  color: #4A6489 !important;
+  background: linear-gradient(135deg, #E7EFFA, #C9DBF0) !important;
+  box-shadow: 0 6rpx 16rpx rgba(74, 100, 137, 0.14), inset 0 1rpx 0 rgba(255, 255, 255, 0.85);
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.account-page .account-code__copy::after {
+  border: none !important;
+}
+
+/* 家庭名: 放在用户卡右侧 */
+.account-user__family {
+  flex-shrink: 0;
+  max-width: 220rpx;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--primary-deep);
+  font-size: 26rpx;
+  font-weight: 600;
+}
+
+/* 家庭成员: 内嵌列表 (不再跳转成员管理页) */
+.account-members {
+  padding: 8rpx 30rpx;
+  background: rgba(255, 254, 251, 0.78);
+  border: var(--glass-border);
+  border-radius: 12rpx;
+  box-shadow: var(--glass-shadow);
+}
+
+.account-member {
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 20rpx 0;
+}
+
+.account-member + .account-member {
+  border-top: 1rpx solid rgba(163, 194, 232, 0.25);
+}
+
+.account-member__avatar {
+  flex-shrink: 0;
+  width: 72rpx;
+  height: 72rpx;
+  border-radius: 50%;
+}
+
+.account-member__avatar--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #4A6489;
+  background: rgba(127, 165, 214, 0.2);
+  font-size: 28rpx;
+}
+
+.account-member__name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 28rpx;
+}
+
+.account-member__role {
+  flex-shrink: 0;
+  padding: 6rpx 18rpx;
+  border-radius: 999rpx;
+  color: #4A6489;
+  background: rgba(127, 165, 214, 0.18);
+  font-size: 20rpx;
+}
+
+/* 管理态: 行尾移除小×(蓝色纯叉无底框, 与档案页删除×同风格) */
+.account-member__del {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48rpx;
+  height: 48rpx;
+  padding: 0;
+  margin-left: 4rpx;
+  font-size: 36rpx;
+  line-height: 1;
+  color: #5B84BE;
+}
+
+.account-member__del:active {
+  opacity: 0.6;
+}
+
+.account-member__role--owner {
+  color: #8A6420;
+  background: rgba(255, 216, 110, 0.4);
+}
+
+.account-members__empty {
+  padding: 28rpx 0;
+  color: var(--muted);
+  font-size: 24rpx;
+  text-align: center;
+}
+
+/* 待审申请: 仅拥有者可见, 通过后成员立即进入列表 */
+.account-pending {
+  padding-top: 8rpx;
+  border-top: 1rpx dashed rgba(94, 139, 200, 0.45);
+}
+
+.account-pending__title {
+  display: block;
+  padding: 12rpx 0 4rpx;
+  color: var(--muted);
+  font-size: 22rpx;
+}
+
+.account-pending__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 14rpx;
+}
+
+.account-page .account-pending__btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56rpx;
+  margin: 0;
+  padding: 0 24rpx;
+  border-radius: 999px !important;
+  font-size: 22rpx;
+  line-height: 1;
+  white-space: nowrap;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.account-page .account-pending__btn::after {
+  border: none !important;
+}
+
+.account-pending__btn--ok {
+  border: 1px solid rgba(163, 194, 232, 0.85) !important;
+  color: #4A6489 !important;
+  background: linear-gradient(135deg, #E7EFFA, #C9DBF0) !important;
+}
+
+.account-pending__btn--no {
+  border: 1px solid rgba(224, 122, 95, 0.55) !important;
+  color: #C0564A !important;
+  background: linear-gradient(135deg, #FFEFEA, #FFDCCF) !important;
+}
+
+/* 退出登录: 珊瑚色危险胶囊 (位于"返回日历"下方) */
+.account-page .account-btn--danger {
+  border: 1px solid rgba(224, 122, 95, 0.6) !important;
+  color: #C0564A !important;
+  background: linear-gradient(135deg, #FFEFEA, #FFD9CC) !important;
+  box-shadow: 0 8px 22px rgba(192, 86, 74, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
 .account-family--empty {
@@ -101,19 +354,43 @@
 
 .account-family__actions {
   display: flex;
-  gap: 16rpx;
-  margin-top: 24rpx;
+  flex-direction: column;
+  gap: 20rpx;
+  margin-top: 28rpx;
+  padding: 0 24rpx;
 }
 
-.account-family__actions button {
-  flex: 1;
-  padding: 0 8rpx;
-  font-size: 24rpx;
+/* ============ 玻璃胶囊按钮: 统一参考登录页"微信一键登录"样式 ============ */
+.account-page .account-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 92rpx;
+  margin: 0;
+  padding: 0 44rpx;
+  border: 1px solid rgba(163, 194, 232, 0.75) !important;
+  border-radius: 999px !important;
+  font-size: 28rpx;
+  letter-spacing: 2rpx;
+  color: #4A6489 !important;
+  background: linear-gradient(135deg, #E7EFFA, #C9DBF0) !important;
+  box-shadow: 0 8px 22px rgba(74, 100, 137, 0.16), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  transition: transform 0.15s ease, opacity 0.15s ease;
 }
 
-.account-back-home {
+.account-page .account-btn::after {
+  border: none !important;
+}
+
+.account-page .account-btn--wide {
   width: 100%;
-  margin-top: 36rpx;
-  color: #FFFEFB !important;
-  background: rgba(127, 165, 214, 0.86) !important;
+  margin-top: 40rpx;
+}
+
+/* 按压反馈 */
+.account-press {
+  transform: scale(0.96);
+  opacity: 0.92;
 }

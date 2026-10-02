@@ -1,0 +1,2 @@
+ALTER TABLE pet_health DROP COLUMN IF EXISTS vaccine;
+ALTER TABLE pet_health DROP COLUMN IF EXISTS disease;
