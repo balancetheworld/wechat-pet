@@ -184,8 +184,8 @@ func (c Config) Validate() error {
 		if provider == "" {
 			provider = "openai"
 		}
-		if provider != "openai" && provider != "chat_completion" {
-			return errors.New("AI_PROVIDER must be openai or chat_completion")
+		if provider != "openai" {
+			return errors.New("AI_PROVIDER must be openai")
 		}
 		if strings.TrimSpace(c.AIAPIKey) == "" {
 			return errors.New("AI_API_KEY is required when AI is enabled")

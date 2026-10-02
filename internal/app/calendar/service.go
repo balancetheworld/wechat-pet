@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ type Service struct {
 	reminderNotifier   ReminderNotifier
 	reminderTemplateID string
 	reminderSendHour   int
+	debugLogger        *slog.Logger
 	assetAuth          interface {
 		AuthorizeFamily(context.Context, string, string) error
 	}
@@ -57,6 +59,10 @@ func (s *Service) SetAssetAuthorizer(value interface {
 	AuthorizeFamily(context.Context, string, string) error
 }) {
 	s.assetAuth = value
+}
+
+func (s *Service) SetDebugLogger(logger *slog.Logger) {
+	s.debugLogger = logger
 }
 
 func (s *Service) ListMonth(ctx context.Context, familyID, month, petID string) (MonthDTO, error) {

@@ -42,6 +42,11 @@ const landingImages = cdnLandingImages.length ? cdnLandingImages : localLandingI
 const landingImage = landingImages.length ? landingImages[Math.floor(Math.random() * landingImages.length)] : null
 const answerGif = askAnswerGIF || localAnswerGif
 
+const landingGreeting = `哈喽～我是你的宠物助手
+想闲聊、想问养宠的问题，都可以来找我。
+疫苗、洗澡这些记录，问我一句就知道啦。
+日历和宠物档案的改动，我也能帮你办好～`
+
 export default function Ask() {
   const token = useAuthStore(state => state.token)
   const {
@@ -285,6 +290,9 @@ export default function Ask() {
                 <View className="ask-cat-stage">
                   <Image className={`ask-cat${landingImage.large ? ' ask-cat--large' : ''}`} src={landingImage.src} mode="aspectFit" />
                   <View className="ask-cat-mask" />
+                  <View className="ask-cat-bubble">
+                    <Text className="ask-cat-bubble-text">{landingGreeting}</Text>
+                  </View>
                 </View>
               )}
             </View>
@@ -298,11 +306,6 @@ export default function Ask() {
         {hasConversation && (
           <ScrollView className="ask-conversation" scrollY enhanced showScrollbar={false} scrollTop={scrollTop} onScroll={handleConversationScroll}>
             <View className="ask-conversation-inner">
-              {!!session?.pets?.length && (
-                <View className="ask-bound-pets">
-                  {session.pets.map(pet => <Text className="ask-bound-pet" key={pet.pet_id}>{pet.pet_name}</Text>)}
-                </View>
-              )}
               {conversation.map(turn => (
                 <View className="ask-turn" key={turn.id}>
                   {turn.input && (

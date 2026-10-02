@@ -113,9 +113,12 @@ func DetectInjection(text string) []InjectionHit {
 }
 
 // IsTrustedInstruction 报告一段内容是否为受控指令层（文档 5.8、11.2）。
-// 只有服务端版本化配置产生的指令是高信任的；用户文字、记录、图片文字、
-// 旧聊天、摘要、工具返回都是低信任数据，不能覆盖系统规则。
-// 此函数由上下文组装层使用，不把低信任内容混入受控指令层。
+// 只有服务端版本化配置产生的指令是高信任的，system 档与 developer 档同属指令层；
+// 用户文字、记录、图片文字、旧聊天、摘要、工具返回都是低信任数据，不能覆盖系统规则。
+// 组装层当前按分层常量写入指令块，尚未调用本函数做入口校验；判定结果由分层契约测试断言。
 func IsTrustedInstruction(block ContextBlock) bool {
-	return block.Layer == LayerControlInstructions && block.Kind == "instruction"
+	if block.Layer != LayerControlInstructions {
+		return false
+	}
+	return block.Kind == InstructionKindSystem || block.Kind == InstructionKindDeveloper
 }

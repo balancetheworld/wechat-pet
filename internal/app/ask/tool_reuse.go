@@ -1,8 +1,9 @@
 package ask
 
-// 本文件固定只读业务查询结果的复用判定与重复阻断（对应架构设计 v2 文档
-// 7.0、7.7）。只读结果允许在同一 Session 的不同 Run 间复用，每次重新核验
-// 权限、查询范围、来源及集合版本；无法证明仍有效就重查。
+// 本文件固定只读业务查询结果的复用判定（对应架构设计 v2 文档 7.7）。
+// 只读结果允许在同一 Session 的不同 Run 间复用，每次重新核验权限、
+// 查询范围、来源及集合版本；无法证明仍有效就重查。
+// 重复调用的阻断判定由 loop_guard.go 的 LoopGuard 承担（文档 7.4）。
 
 // ReuseDecision：复用判定处置（7.7.1 输出）。
 type ReuseDecision string
@@ -56,41 +57,4 @@ func DecideReuse(input ReuseInput) ReuseDecision {
 		return ReuseReread
 	}
 	return ReuseReusable
-}
-
-// LoopGuardDecision：重复调用处置。
-type LoopGuardDecision string
-
-const (
-	LoopGuardAllow LoopGuardDecision = "allow" // 允许执行
-	LoopGuardBlock LoopGuardDecision = "block" // 阻断重复调用
-)
-
-// LoopGuardInput：重复阻断判定输入（7.0 规则 1-4）。
-type LoopGuardInput struct {
-	PriorFailure     bool        // 相同指纹是否存在确定性失败（规则 1）
-	PriorResult      *ToolResult // 相同指纹的既有成功结果（规则 2）
-	IsPoll           bool        // 是否异步状态查询（规则 3）
-	PollIntervalMet  bool        // 是否满足轮询间隔
-	PollStatusActive bool        // 状态是否仍为 pending/running
-}
-
-// DecideLoopGuard 判定是否阻断重复调用：
-// 1. 相同参数的确定性失败立即阻断；
-// 2. 相同调用且业务结果不变的重复读取阻断（回灌「没有新信息」）；
-// 3. 异步状态查询仅在满足轮询间隔、状态仍 pending/running 时允许重复；
-// 4. 相同参数不等于新写入（新写入必须新身份，不在本判定内）。
-func DecideLoopGuard(input LoopGuardInput) LoopGuardDecision {
-	if input.PriorFailure {
-		return LoopGuardBlock
-	}
-	if input.PriorResult != nil && input.PriorResult.Status == ToolResultOK {
-		return LoopGuardBlock
-	}
-	if input.IsPoll {
-		if !input.PollIntervalMet || !input.PollStatusActive {
-			return LoopGuardBlock
-		}
-	}
-	return LoopGuardAllow
 }

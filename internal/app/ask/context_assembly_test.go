@@ -1,6 +1,9 @@
 package ask
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestEstimateTokens(t *testing.T) {
 	if got := EstimateTokens("你好"); got != 2 {
@@ -125,5 +128,35 @@ func TestTrimContextErrorsWhenRequiredExceeds(t *testing.T) {
 	}
 	if _, err := TrimContext(blocks, 2); err == nil {
 		t.Fatal("expected capacity error when required blocks exceed budget")
+	}
+}
+
+func TestTrimContextKeepsFreshBlocksFirst(t *testing.T) {
+	blocks := []ContextBlock{
+		{Layer: LayerToolInteractions, Kind: "tool_result", ObjectID: "stale", Text: strings.Repeat("旧", 10)},
+		{Layer: LayerToolInteractions, Kind: "tool_result", ObjectID: "fresh", Text: strings.Repeat("新", 10), Fresh: true},
+	}
+	// 预算只够一块：本步新增的结果先保留，更早的结果先被裁掉。
+	kept, err := TrimContext(blocks, 10)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(kept) != 1 || kept[0].ObjectID != "fresh" {
+		t.Fatalf("kept = %+v, want the fresh block", kept)
+	}
+}
+
+func TestTrimContextKeepsInputOrder(t *testing.T) {
+	blocks := []ContextBlock{
+		{Layer: LayerHistory, Kind: "summary", ObjectID: "sum-1", Text: "摘要"},
+		{Layer: LayerHistory, Kind: "history", ObjectID: "msg-1", Text: "历史消息"},
+	}
+	kept, err := TrimContext(blocks, 100)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// 预算充足时两块都保留，输出维持输入顺序：优先级只决定保留哪些内容。
+	if len(kept) != 2 || kept[0].ObjectID != "sum-1" || kept[1].ObjectID != "msg-1" {
+		t.Fatalf("kept = %+v, want input order preserved", kept)
 	}
 }

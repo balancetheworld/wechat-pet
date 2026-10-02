@@ -3,6 +3,7 @@ package calendar
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -112,24 +113,30 @@ func (s *Service) DispatchReminderNotifications(ctx context.Context, now time.Ti
 		result.Scanned++
 		claimed, err := s.repository.ClaimReminderNotification(ctx, reminder.ReminderID, now.UTC(), staleBefore)
 		if err != nil {
-			return result, mapError(err)
+			s.logReminderNotificationFailure("claim reminder notification", reminder.ReminderID, mapError(err))
+			result.Failed++
+			continue
 		}
 		if !claimed {
 			continue
 		}
 		if reminder.NotifyAttempts >= reminderNotifyMaxAttempts {
 			if err := s.repository.FinishReminderNotification(ctx, reminder.ReminderID, reminderNotifyFailed, nil); err != nil {
-				return result, mapError(err)
+				s.logReminderNotificationFailure("finish reminder notification", reminder.ReminderID, mapError(err))
 			}
 			result.Failed++
 			continue
 		}
 		status, deliveredAt, err := s.deliverReminderNotification(ctx, reminder, now)
 		if err != nil {
-			return result, err
+			s.logReminderNotificationFailure("deliver reminder notification", reminder.ReminderID, err)
+			result.Failed++
+			continue
 		}
 		if err := s.repository.FinishReminderNotification(ctx, reminder.ReminderID, status, deliveredAt); err != nil {
-			return result, mapError(err)
+			s.logReminderNotificationFailure("finish reminder notification", reminder.ReminderID, mapError(err))
+			result.Failed++
+			continue
 		}
 		switch status {
 		case reminderNotifySent:
@@ -166,11 +173,23 @@ func (s *Service) deliverReminderNotification(ctx context.Context, reminder Push
 		}
 		return reminderNotifyPending, nil, nil
 	}
+	// 消息已发出，本地状态必须落定为已发送；配额扣减失败只记异常与待对账，
+	// 否则该项会被判为未完成，5 分钟后重新领取并重复推送。
 	if _, err := s.repository.ConsumeSubscriptionGrant(ctx, reminder.UserID, s.reminderTemplateID); err != nil {
-		return "", nil, mapError(err)
+		s.logReminderNotificationFailure("consume subscription grant", reminder.ReminderID, mapError(err))
 	}
 	deliveredAt := now.UTC()
 	return reminderNotifySent, &deliveredAt, nil
+}
+
+// logReminderNotificationFailure 记录提醒推送的单项异常。
+// 单项失败不得中断整批派发，其余到期提醒仍要在本次 tick 处理。
+func (s *Service) logReminderNotificationFailure(operation, reminderID string, err error) {
+	logger := s.debugLogger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Error("calendar reminder notification failed", "operation", operation, "reminder_id", reminderID, "error", err)
 }
 
 func reminderDueDate(reminder PushReminder) (time.Time, error) {

@@ -10,6 +10,7 @@ import (
 // 本文件实现旧聊天只读引用的数据层（对应架构设计 v2 文档 5.6）。
 // 检索范围限最近三次 Session（含当前），候选仅来自本人与当前家庭；
 // 读取故障与无命中分开，客户端传入的消息 ID 不构成读取授权。
+// 当前尚无生产调用方，属规划中能力：接线见 docs/pet-ask-agent-refactor-plan.md P5（T5）。
 
 const (
 	defaultReferenceLimit = 20

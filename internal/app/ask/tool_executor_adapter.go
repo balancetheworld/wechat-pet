@@ -25,11 +25,14 @@ func (f operationPreparerFunc) PrepareOperation(ctx context.Context, sessionID, 
 	return f(ctx, sessionID, runID, input)
 }
 
-// ToolExecutionScope 固定一次 Run 内写入准备所需的调用身份。
+// ToolExecutionScope 固定一次 Run 内写入准备与结果复用所需的调用身份。
+// Results 与 Sources 用于只读结果复用判定（文档 7.7）；为空时不做复用，只执行真实调用。
 type ToolExecutionScope struct {
 	SessionID  string
 	RunID      string
 	Operations operationPreparer
+	Results    ToolResultStore
+	Sources    SourceVersionRepository
 }
 
 // ToolExecutorAdapter 实现 ToolExecutor（文档 7 节）。
@@ -125,6 +128,14 @@ func (a *ToolExecutorAdapter) ExecuteBatch(ctx context.Context, batch ToolBatch)
 				}
 				if reason, blocked := a.guard.BlockReason(call, action); blocked {
 					results[index] = a.loopGuardResult(call, reason)
+					return
+				}
+				// 只读结果在同一 Session 内可复用：契约、指纹与来源版本都未变时
+				// 不重复读业务库，直接按既有结果句柄回灌（文档 7.7）。
+				if record, reused, err := reusableToolResult(ctx, a.scope.Results, a.scope.Sources, a.scope.SessionID, call, action); err == nil && reused {
+					result := reusedToolResult(call, record)
+					a.guard.Record(call, result)
+					results[index] = result
 					return
 				}
 				result := a.executeCall(ctx, call)

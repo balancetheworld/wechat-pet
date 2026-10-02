@@ -308,30 +308,6 @@ func TestDecideReuse(t *testing.T) {
 	}
 }
 
-func TestDecideLoopGuard(t *testing.T) {
-	if got := DecideLoopGuard(LoopGuardInput{}); got != LoopGuardAllow {
-		t.Fatalf("no history = %s, want allow", got)
-	}
-	if got := DecideLoopGuard(LoopGuardInput{PriorFailure: true}); got != LoopGuardBlock {
-		t.Fatalf("prior failure = %s, want block", got)
-	}
-	if got := DecideLoopGuard(LoopGuardInput{PriorResult: &ToolResult{Status: ToolResultOK}}); got != LoopGuardBlock {
-		t.Fatalf("prior success = %s, want block", got)
-	}
-	if got := DecideLoopGuard(LoopGuardInput{PriorResult: &ToolResult{Status: ToolResultError}}); got != LoopGuardAllow {
-		t.Fatalf("prior error = %s, want allow (error is not success)", got)
-	}
-	if got := DecideLoopGuard(LoopGuardInput{IsPoll: true, PollIntervalMet: true, PollStatusActive: true}); got != LoopGuardAllow {
-		t.Fatalf("valid poll = %s, want allow", got)
-	}
-	if got := DecideLoopGuard(LoopGuardInput{IsPoll: true, PollIntervalMet: false, PollStatusActive: true}); got != LoopGuardBlock {
-		t.Fatalf("poll interval not met = %s, want block", got)
-	}
-	if got := DecideLoopGuard(LoopGuardInput{IsPoll: true, PollIntervalMet: true, PollStatusActive: false}); got != LoopGuardBlock {
-		t.Fatalf("poll status terminal = %s, want block", got)
-	}
-}
-
 func TestResultHandleRoundTripAndValidation(t *testing.T) {
 	handle := ResultHandle{FamilyID: "family-1", ToolName: "search_records", QueryHash: "query-abc", Version: "v1"}
 	encoded := EncodeResultHandle(handle)

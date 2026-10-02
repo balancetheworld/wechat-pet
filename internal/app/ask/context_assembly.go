@@ -24,13 +24,17 @@ const (
 // 每块携带来源身份，用于去重与裁剪；相同文本但不同对象、时间或版本不得合并。
 type ContextBlock struct {
 	Layer        ContextLayer
-	Kind         string // instruction / task / question / profile / record / summary / history / current_turn / tool_call / tool_result / referenced_chat
+	Kind         string // instruction / developer_instruction / task / question / profile / record / summary / history / current_turn / tool_call / tool_result / referenced_chat
 	ObjectID     string // 来源对象标识（pet_id / turn_id / message_id / 记录 ID / 摘要 ID）
 	Version      string // 内容版本
 	Position     string // 实际片段位置
 	Text         string
 	EvidenceRefs []EvidenceRef
 	Required     bool // 必须保留：核心规则、当前输入、急症触发信息、必要输出约束
+	// Fresh 标记该块由最近一次工具批次产生（文档 5.9「先按权限、相关性和去重筛选」）。
+	// 预算不足时先保留本步新增内容，更早的结果先被裁掉；它只影响保留哪些内容，
+	// 不改变模型读到的先后顺序。
+	Fresh bool
 }
 
 // ContextPriority 是 5.9 已确认的裁剪优先级。数值越小越必须保留；
@@ -46,7 +50,7 @@ const (
 // blockPriority 依据 Kind 返回内容块的裁剪优先级。
 func blockPriority(block ContextBlock) int {
 	switch block.Kind {
-	case "instruction", "current_turn", "emergency":
+	case InstructionKindSystem, InstructionKindDeveloper, "current_turn", "emergency":
 		return ContextPriorityCritical
 	case "task", "question", "profile", "record", "tool_result":
 		return ContextPriorityRunState
@@ -150,49 +154,80 @@ func blockLess(a, b ContextBlock) bool {
 // 必须项（Required）与高优先级内容优先保留；超限时先移除低优先级
 // （摘要、旧引用），仍超限才压缩当前 Session 历史（由调用方在移除块后
 // 用摘要替代）。必须项仍放不下时返回容量错误，不偷偷截断用户输入或删除图片。
+// 同一优先级内本步新增的结果先保留；输出保持输入顺序，优先级只决定保留哪些内容。
 func TrimContext(blocks []ContextBlock, inputBudget int) ([]ContextBlock, error) {
 	if inputBudget < 0 {
 		inputBudget = 0
 	}
 	required := make([]ContextBlock, 0)
-	optional := make([]ContextBlock, 0)
+	optional := make([]int, 0, len(blocks))
 	requiredTokens := 0
-	for _, b := range blocks {
-		if b.Required {
-			required = append(required, b)
-			requiredTokens += EstimateTokens(b.Text)
-		} else {
-			optional = append(optional, b)
+	for index, block := range blocks {
+		if block.Required {
+			required = append(required, block)
+			requiredTokens += EstimateTokens(block.Text)
+			continue
 		}
+		optional = append(optional, index)
 	}
 	if requiredTokens > inputBudget {
 		return nil, fmt.Errorf("context: required blocks (%d tokens) exceed input budget (%d)", requiredTokens, inputBudget)
 	}
-	// 可选块按优先级从高到低保留（低数值优先）；优先级相同时按原顺序。
-	sortOptionalByPriority(optional)
+	// 可选块按优先级、本步新增、原顺序决定保留次序。
+	sortOptionalForSelection(blocks, optional)
 	remaining := inputBudget - requiredTokens
-	keptOptional := make([]ContextBlock, 0, len(optional))
-	for _, b := range optional {
-		cost := EstimateTokens(b.Text)
+	keptOptional := make([]int, 0, len(optional))
+	for _, index := range optional {
+		cost := EstimateTokens(blocks[index].Text)
 		if cost <= remaining {
-			keptOptional = append(keptOptional, b)
+			keptOptional = append(keptOptional, index)
 			remaining -= cost
 		}
 		// 超过剩余预算的块被裁剪（低优先级先被裁掉）。
 	}
-	result := append(required, keptOptional...)
+	sortOptionalByIndex(keptOptional)
+	result := make([]ContextBlock, 0, len(required)+len(keptOptional))
+	result = append(result, required...)
+	for _, index := range keptOptional {
+		result = append(result, blocks[index])
+	}
 	return result, nil
 }
 
-// sortOptionalByPriority 对可选块按优先级升序（低数值优先）稳定排序。
-func sortOptionalByPriority(blocks []ContextBlock) {
-	for i := 1; i < len(blocks); i++ {
-		cur := blocks[i]
+// sortOptionalForSelection 按优先级升序（低数值优先）、本步新增优先、原顺序稳定排序。
+func sortOptionalForSelection(blocks []ContextBlock, indexes []int) {
+	for i := 1; i < len(indexes); i++ {
+		cur := indexes[i]
 		j := i - 1
-		for j >= 0 && blockPriority(cur) < blockPriority(blocks[j]) {
-			blocks[j+1] = blocks[j]
+		for j >= 0 && optionalBefore(blocks, cur, indexes[j]) {
+			indexes[j+1] = indexes[j]
 			j--
 		}
-		blocks[j+1] = cur
+		indexes[j+1] = cur
+	}
+}
+
+// optionalBefore 报告 index 是否应排在 prior 之前保留。
+func optionalBefore(blocks []ContextBlock, index, prior int) bool {
+	current, previous := blocks[index], blocks[prior]
+	if currentPriority, previousPriority := blockPriority(current), blockPriority(previous); currentPriority != previousPriority {
+		return currentPriority < previousPriority
+	}
+	if current.Fresh != previous.Fresh {
+		return current.Fresh
+	}
+	return index < prior
+}
+
+// sortOptionalByIndex 恢复输入顺序，保证输出与模型读到的先后一致。
+func sortOptionalByIndex(indexes []int) {
+	for i := 1; i < len(indexes); i++ {
+		cur := indexes[i]
+		j := i - 1
+		for j >= 0 && cur < indexes[j] {
+			indexes[j+1] = indexes[j]
+			j--
+		}
+		indexes[j+1] = cur
 	}
 }

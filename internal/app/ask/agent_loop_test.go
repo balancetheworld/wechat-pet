@@ -157,7 +157,10 @@ func TestRunDecisionLoopRetriesInvalidAnswerFields(t *testing.T) {
 	}
 	foundFeedback := false
 	for _, block := range model.inputs[1].Blocks {
-		if block.ObjectID == "validation_feedback" && strings.Contains(block.Text, "greeting") {
+		if block.ObjectID != "validation_feedback" {
+			continue
+		}
+		if strings.Contains(block.Text, "not allowed for answer_kind") && !strings.Contains(block.Text, "greeting") {
 			foundFeedback = true
 		}
 	}
@@ -297,7 +300,7 @@ func TestRunDecisionLoopRetainsTaskKeyAndRetriesIncompleteCoverage(t *testing.T)
 		t.Fatal(err)
 	}
 	model := &scriptedModel{responses: [][]ProtocolRecord{call, incomplete, answer}}
-	outcome, err := runDecisionLoop(context.Background(), model, &fakeToolExecutor{resultData: PetListOutcome{Pets: []PetListItem{{PetID: "pet-1", Name: "团子"}}}}, StepInput{RunID: "run-pet-list"}, 3, nil, nil, "", repository, nil)
+	outcome, err := runDecisionLoop(context.Background(), model, &fakeToolExecutor{resultData: PetListOutcome{Pets: []PetListItem{{PetID: "pet-1", Name: "团子"}}}}, StepInput{RunID: "run-pet-list"}, 3, nil, nil, "", repository, nil, nil)
 	if err != nil || outcome.Action != ActionFinalAnswer || len(model.inputs) != 3 {
 		t.Fatalf("outcome = %+v, error = %v, calls = %d", outcome, err, len(model.inputs))
 	}
@@ -314,7 +317,10 @@ func TestRunDecisionLoopRetainsTaskKeyAndRetriesIncompleteCoverage(t *testing.T)
 	}
 	feedback := false
 	for _, block := range model.inputs[2].Blocks {
-		if block.ObjectID == "validation_feedback" && strings.Contains(block.Text, "task_pet_list") {
+		if block.ObjectID != "validation_feedback" {
+			continue
+		}
+		if strings.Contains(block.Text, "unresolved task") && !strings.Contains(block.Text, "task_pet_list") {
 			feedback = true
 		}
 	}
@@ -339,7 +345,7 @@ func TestRunDecisionLoopDoesNotAcceptRepeatedIncompleteCoverage(t *testing.T) {
 }
 
 func TestRunDecisionLoopReportsInvalidToolIdentity(t *testing.T) {
-	model := &scriptedModel{responses: [][]ProtocolRecord{callToolsRecords()}}
+	model := &scriptedModel{responses: [][]ProtocolRecord{callToolsRecords(), callToolsRecords()}}
 	_, err := RunDecisionLoop(context.Background(), model, validationToolExecutor{}, StepInput{}, 0)
 	var validationErr *BatchValidationError
 	if !errors.As(err, &validationErr) {
@@ -347,6 +353,38 @@ func TestRunDecisionLoopReportsInvalidToolIdentity(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "c1=read_health_records@v1") {
 		t.Fatalf("error missing tool identity: %v", err)
+	}
+	if len(model.inputs) != 2 {
+		t.Fatalf("calls = %d, want one retry", len(model.inputs))
+	}
+	feedback := ""
+	for _, block := range model.inputs[1].Blocks {
+		if block.ObjectID == "validation_feedback" {
+			feedback = block.Text
+		}
+	}
+	if !strings.Contains(feedback, "tool not found or version mismatch") {
+		t.Fatalf("retry input has no batch validation feedback: %q", feedback)
+	}
+}
+
+func TestRunDecisionLoopNormalizesCallToolVersion(t *testing.T) {
+	records := callToolsRecords()
+	records[1].Call.CatalogVersion = "pet-base-v1"
+	model := &scriptedModel{responses: [][]ProtocolRecord{records, finalAnswerRecords()}}
+	tools := &fakeToolExecutor{}
+	outcome, err := RunDecisionLoop(context.Background(), model, tools, StepInput{Tools: []Tool{{Name: "read_health_records", Version: "v1"}}}, 3)
+	if err != nil {
+		t.Fatalf("loop failed: %v", err)
+	}
+	if outcome.Action != ActionFinalAnswer {
+		t.Fatalf("action = %s, want final_answer", outcome.Action)
+	}
+	if len(tools.batches) != 1 || len(tools.batches[0].Calls) != 1 {
+		t.Fatalf("batches = %+v", tools.batches)
+	}
+	if version := tools.batches[0].Calls[0].ToolVersion; version != "v1" {
+		t.Fatalf("tool version = %q, want v1", version)
 	}
 }
 
@@ -379,7 +417,7 @@ func TestRunDecisionLoopEnforcesDurationBudget(t *testing.T) {
 	if err := repository.EnsureBudget(context.Background(), BudgetRun, "run-duration", BudgetLimits{MaxModelCalls: 1, MaxTokens: 10000, MaxDurationMillis: 1, MaxConcurrency: 1}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := runDecisionLoop(context.Background(), blockingModel{}, &fakeToolExecutor{}, StepInput{RunID: "run-duration"}, 1, nil, nil, "", repository, nil)
+	_, err := runDecisionLoop(context.Background(), blockingModel{}, &fakeToolExecutor{}, StepInput{RunID: "run-duration"}, 1, nil, nil, "", repository, nil, nil)
 	code, _ := ExecutorErrorDetails(err)
 	if code != "budget_exhausted" {
 		t.Fatalf("error = %v, code = %q, want budget_exhausted", err, code)
@@ -399,7 +437,7 @@ func TestRunDecisionLoopReleasesConcurrencyAfterUnknownUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	model := &failingModel{err: NewExecutorError("provider_timeout", true, 0, context.DeadlineExceeded)}
-	_, err := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{RunID: "run-unknown-usage"}, 1, nil, nil, "", repository, nil)
+	_, err := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{RunID: "run-unknown-usage"}, 1, nil, nil, "", repository, nil, nil)
 	code, _ := ExecutorErrorDetails(err)
 	if code != "provider_timeout" {
 		t.Fatalf("error = %v, code = %q, want provider_timeout", err, code)
@@ -415,7 +453,7 @@ func TestRunDecisionLoopReleasesConcurrencyAfterUnknownUsage(t *testing.T) {
 		t.Fatalf("used = %+v, want 1 call with non-zero tokens and duration", ledger.Used)
 	}
 	model.records = finalAnswerRecords()
-	outcome, retryErr := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{RunID: "run-unknown-usage"}, 1, nil, nil, "", repository, nil)
+	outcome, retryErr := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{RunID: "run-unknown-usage"}, 1, nil, nil, "", repository, nil, nil)
 	if retryErr != nil || outcome.Action != ActionFinalAnswer {
 		t.Fatalf("retry after failed call: outcome = %+v, error = %v", outcome, retryErr)
 	}
@@ -427,7 +465,7 @@ func TestRunDecisionLoopSettlesReportedModelUsage(t *testing.T) {
 		t.Fatal(err)
 	}
 	model := &scriptedModel{responses: [][]ProtocolRecord{finalAnswerRecords()}}
-	if _, err := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{RunID: "run-usage"}, 1, nil, nil, "", repository, nil); err != nil {
+	if _, err := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{RunID: "run-usage"}, 1, nil, nil, "", repository, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	ledger, err := repository.GetBudget(context.Background(), BudgetRun, "run-usage")
@@ -461,5 +499,110 @@ func TestToolResultText(t *testing.T) {
 	failed := ToolResult{ToolCallID: "c1", Status: ToolResultError, Error: &ToolError{Category: ToolErrServiceError, Reason: "超时"}}
 	if text := toolResultText(failed); text == "" {
 		t.Fatal("empty error text")
+	}
+}
+
+func TestSanitizeValidationFeedbackStripsModelValues(t *testing.T) {
+	referenceDecision := StepDecision{Calls: []CallRecord{{CallKey: "call-secret", TaskKeys: []string{"task-secret"}}}}
+	referenceErr := validateDecisionReferences(referenceDecision, nil, map[string]struct{}{}, map[string]struct{}{}, map[string]struct{}{}, "run-1")
+	if referenceErr == nil {
+		t.Fatal("expected reference validation error")
+	}
+	evidenceDecision := StepDecision{
+		TaskUpdates: []TaskUpdate{{TaskKey: "t1", Goal: "目标"}},
+		Groups: []AnswerGroup{{
+			GroupKey: "g1",
+			TaskKeys: []string{"t1"},
+			Segments: []SegmentRecord{{SegmentKey: "seg1", EvidenceRefs: []EvidenceRef{{SourceType: "pet_base", SourceID: "pet-secret"}}}},
+		}},
+	}
+	evidenceErr := validateDecisionReferences(evidenceDecision, nil, map[string]struct{}{}, map[string]struct{}{}, map[string]struct{}{}, "run-1")
+	if evidenceErr == nil {
+		t.Fatal("expected evidence validation error")
+	}
+	_, protocolErr := ValidateResponse([]ProtocolRecord{{Type: RecordHeader, Header: &HeaderRecord{SchemaVersion: RecordArrayV1, Action: ResponseAction("model-secret")}}})
+	if protocolErr == nil {
+		t.Fatal("expected protocol validation error")
+	}
+	cases := []struct {
+		err     error
+		leaked  string
+		keyword string
+	}{
+		{referenceErr, "call-secret", "references unknown task"},
+		{referenceErr, "task-secret", "references unknown task"},
+		{evidenceErr, "pet-secret", "references unknown evidence"},
+		{protocolErr, "model-secret", "invalid action"},
+	}
+	for _, tc := range cases {
+		text := sanitizeValidationFeedback(tc.err.Error())
+		if strings.Contains(text, tc.leaked) {
+			t.Fatalf("feedback leaked %q: %s", tc.leaked, text)
+		}
+		if !strings.Contains(text, tc.keyword) {
+			t.Fatalf("feedback lost %q: %s", tc.keyword, text)
+		}
+	}
+}
+
+func TestTaskStateBlockCarriesFullTaskState(t *testing.T) {
+	stableKey := stableTaskItemID("run-1", "t1")
+	items := []TaskItem{
+		{
+			TaskItemID:    stableKey,
+			ItemRevision:  2,
+			Goal:          "查看旺仔的疫苗记录",
+			Outcome:       OutcomeNeedsInput,
+			Subjects:      []AnswerSubject{{SubjectKey: "s1", Kind: SubjectUnresolved, Description: "哪只宠物"}},
+			MissingFields: []MissingField{{TaskKey: stableKey, Field: "pet_id", Necessity: "required"}},
+		},
+		{
+			TaskItemID:   stableTaskItemID("run-1", "t2"),
+			ItemRevision: 1,
+			Goal:         "写入疫苗记录",
+			Outcome:      OutcomePreviewProvided,
+			ResultRef:    &TaskResultRef{Kind: ResultRefOperation, RefID: "op-1", Version: "3"},
+		},
+	}
+	block, err := taskStateBlock("run-1", items)
+	if err != nil {
+		t.Fatalf("taskStateBlock error: %v", err)
+	}
+	for _, part := range []string{
+		`"task_key":"t1"`,
+		`"outcome":"needs_input"`,
+		`"missing_fields":[{"task_key":"t1","field":"pet_id","necessity":"required"}]`,
+		`"description":"哪只宠物"`,
+		`"result_ref":{"kind":"operation","ref_id":"op-1","version":"3"}`,
+	} {
+		if !strings.Contains(block.Text, part) {
+			t.Fatalf("task block missing %q: %s", part, block.Text)
+		}
+	}
+	if strings.Contains(block.Text, "run-1:t1") {
+		t.Fatalf("task block should expose short task keys: %s", block.Text)
+	}
+	if items[0].MissingFields[0].TaskKey != stableKey {
+		t.Fatalf("task item must not be mutated: %+v", items[0].MissingFields[0])
+	}
+}
+
+func TestRunDecisionLoopMarksLatestToolResultsFresh(t *testing.T) {
+	model := &scriptedModel{responses: [][]ProtocolRecord{callRecordsWithoutCoverage(petRosterToolName, `{}`), finalAnswerRecords()}}
+	if _, err := runDecisionLoop(context.Background(), model, &fakeToolExecutor{}, StepInput{SessionID: "session-1", RunID: "run-1"}, 3, nil, nil, "", nil, nil, nil); err != nil {
+		t.Fatalf("loop failed: %v", err)
+	}
+	fresh := 0
+	for _, block := range model.inputs[1].Blocks {
+		if block.Kind != "tool_result" {
+			continue
+		}
+		if !block.Fresh {
+			t.Fatalf("latest tool result should be fresh: %+v", block)
+		}
+		fresh++
+	}
+	if fresh != 1 {
+		t.Fatalf("fresh tool result blocks = %d, want 1", fresh)
 	}
 }

@@ -84,7 +84,7 @@ failed
 
 Worker 每次执行前会领取数据库租约。基础设施错误会写入 `run.retry_scheduled` 并在 `next_attempt_at` 后重试；进程中断留下的过期 `running` Run 会写入 `run.recovered` 后重新执行。超过最大尝试次数会写入 `run.failed`，`error_code` 为 `worker_attempts_exhausted`。
 
-`AI_ENABLED=false` 时使用本地确定性 Executor；`AI_ENABLED=true` 时根据 `AI_PROVIDER` 选择 OpenAI Responses API 或兼容的 Chat Completions API，并要求配置 `AI_API_KEY`、`AI_MODEL` 和正数 `AI_TIMEOUT_SECONDS`。OpenAI Responses API 使用 `AI_PROVIDER=openai`；DeepSeek、混元或其他兼容 `/chat/completions` 的服务统一使用 `AI_PROVIDER=chat_completion`，并通过 `AI_BASE_URL` 和 `AI_MODEL` 指定服务与模型。DeepSeek 可配置为 `https://api.deepseek.com` 和 `deepseek-chat`。Provider SDK 内部重试关闭，由 Worker 统一控制持久化重试。
+`AI_ENABLED=false` 时使用本地确定性 Executor；`AI_ENABLED=true` 时使用 OpenAI Responses API，并要求配置 `AI_API_KEY`、`AI_MODEL` 和正数 `AI_TIMEOUT_SECONDS`。`AI_PROVIDER` 当前只支持 `openai`，其他取值会在启动校验中直接拒绝；`AI_BASE_URL` 与 `AI_MODEL` 指定服务与模型，默认 `https://api.openai.com/v1`。仅实现 `/responses` 协议的 Provider 可用，只提供 `/chat/completions` 的服务不在当前支持范围内。Provider SDK 内部重试关闭，由 Worker 统一控制持久化重试。
 
 Provider 错误按以下规则处理：
 

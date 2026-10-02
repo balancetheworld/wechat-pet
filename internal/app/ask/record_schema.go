@@ -212,7 +212,7 @@ func callRecordSchema() map[string]any {
 			"call_key":        map[string]any{"type": "string"},
 			"task_keys":       stringArraySchema(),
 			"tool_name":       map[string]any{"type": "string"},
-			"catalog_version": map[string]any{"type": "string"},
+			"catalog_version": map[string]any{"type": "string", "description": "该工具的目录版本；必须与【可用工具】列表中同名工具的 Version 字段完全一致"},
 			"depends_on":      stringArraySchema(),
 			"arguments":       map[string]any{"type": "string", "description": "工具参数的 JSON 字符串（对象内容需转义），例如 {\"pet_id\":\"pet-1\"}"},
 		},

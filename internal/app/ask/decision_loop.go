@@ -110,10 +110,33 @@ func BuildToolBatch(calls []CallRecord, attemptID, runID, batchID string) ToolBa
 			ToolName:    call.ToolName,
 			ToolVersion: call.CatalogVersion,
 			Arguments:   call.Arguments,
+			TaskKeys:    append([]string(nil), call.TaskKeys...),
 			DependsOn:   append([]string(nil), call.DependsOn...),
 		})
 	}
 	return ToolBatch{BatchID: batchID, RunID: runID, AttemptID: attemptID, Calls: toolCalls}
+}
+
+func normalizeCallToolVersions(calls []CallRecord, tools []Tool) {
+	versions := make(map[string]string, len(tools))
+	ambiguous := make(map[string]struct{})
+	for _, tool := range tools {
+		if existing, ok := versions[tool.Name]; ok {
+			if existing != tool.Version {
+				ambiguous[tool.Name] = struct{}{}
+			}
+			continue
+		}
+		versions[tool.Name] = tool.Version
+	}
+	for index := range calls {
+		if _, ok := ambiguous[calls[index].ToolName]; ok {
+			continue
+		}
+		if version, ok := versions[calls[index].ToolName]; ok {
+			calls[index].CatalogVersion = version
+		}
+	}
 }
 
 // BuildQuestions 把 request_input 的问题记录构造为待校验的追问（文档 2.5）。

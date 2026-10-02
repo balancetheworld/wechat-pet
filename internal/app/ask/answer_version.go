@@ -44,11 +44,11 @@ func (a AnswerApplicability) Valid() bool {
 
 // AnswerVersion 定位一个回答版本（文档 5.3、8.6）。
 type AnswerVersion struct {
-	OriginTurnID string             // 回答组所属任务（origin_turn_id 关联）
-	Version      int                // 组内版本，跨 Run 单调增加
-	Completeness AnswerCompleteness // 生成完整性
+	OriginTurnID  string              // 回答组所属任务（origin_turn_id 关联）
+	Version       int                 // 组内版本，跨 Run 单调增加
+	Completeness  AnswerCompleteness  // 生成完整性
 	Applicability AnswerApplicability // 输入适用性
-	InputRevision int               // 关联输入版本
+	InputRevision int                 // 关联输入版本
 }
 
 // Valid 报告回答版本是否满足双维度约束。

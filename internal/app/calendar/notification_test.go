@@ -18,6 +18,19 @@ func (n *recordingNotifier) NotifyReminder(_ context.Context, notice ReminderNot
 	return n.err
 }
 
+// failingConsumeRepository 让指定用户的配额扣减失败，其余行为委托真实仓库。
+type failingConsumeRepository struct {
+	*SQLRepository
+	failUserID string
+}
+
+func (r failingConsumeRepository) ConsumeSubscriptionGrant(ctx context.Context, userID, templateID string) (bool, error) {
+	if userID == r.failUserID {
+		return false, errors.New("consume subscription grant failed")
+	}
+	return r.SQLRepository.ConsumeSubscriptionGrant(ctx, userID, templateID)
+}
+
 func newNotificationTestService(t *testing.T, notifier ReminderNotifier) (*Service, *sql.DB) {
 	t.Helper()
 	db := newCalendarQueryTestDB(t)
@@ -100,6 +113,53 @@ func TestDispatchReminderNotificationSendsAndConsumesGrant(t *testing.T) {
 	remaining, err := service.repository.SubscriptionRemaining(ctx, "user-1", "template-1")
 	if err != nil || remaining != 0 {
 		t.Fatalf("remaining = %d, error = %v, want consumed", remaining, err)
+	}
+}
+
+func TestDispatchReminderNotificationKeepsSentWhenQuotaConsumeFails(t *testing.T) {
+	notifier := &recordingNotifier{}
+	db := newCalendarQueryTestDB(t)
+	repository, err := NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	service, err := NewService(failingConsumeRepository{SQLRepository: repository, failUserID: "user-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.SetReminderPush(notifier, "template-1")
+	seedPushReminder(t, db, "reminder-1", "user-1", "2026-10-22", 3)
+	if _, err := db.Exec("INSERT INTO calendar_reminders (id, family_id, pet_id, source_record_id, reminder_date, repeat_type, advance_days, notification_channels, status, created_by, notify_status, notify_attempts) VALUES ('reminder-2', 'family-1', 'pet-1', 'record-1', '2026-10-22', 'once', 3, '[\"in_app\",\"push\"]', 'pending', 'user-1', 'pending', 0)"); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if _, err := service.RecordReminderSubscription(ctx, "family-1", "user-1", true); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 10, 19, 10, 0, 0, 0, reminderTimezone)
+	result, err := service.DispatchReminderNotifications(ctx, now)
+	if err != nil {
+		t.Fatalf("dispatch failed: %v", err)
+	}
+	if result.Sent != 2 || result.Failed != 0 {
+		t.Fatalf("result = %+v, want two sent despite quota consume failure", result)
+	}
+	if remaining, err := repository.SubscriptionRemaining(ctx, "user-1", "template-1"); err != nil || remaining != 1 {
+		t.Fatalf("remaining = %d, error = %v, want unconsumed after failed consume", remaining, err)
+	}
+	for _, reminderID := range []string{"reminder-1", "reminder-2"} {
+		status, _, notifiedAt := reminderNotificationState(t, db, reminderID)
+		if status != reminderNotifySent || !notifiedAt.Valid {
+			t.Fatalf("%s state = %s/%v, want sent with notified_at", reminderID, status, notifiedAt.Valid)
+		}
+	}
+	// 已落定 sent 后不再被重新领取，第二次派发不重复推送。
+	again, err := service.DispatchReminderNotifications(ctx, now)
+	if err != nil {
+		t.Fatalf("second dispatch failed: %v", err)
+	}
+	if len(notifier.notices) != 2 || again.Sent != 0 {
+		t.Fatalf("notices = %d, result = %+v, want no resend", len(notifier.notices), again)
 	}
 }
 

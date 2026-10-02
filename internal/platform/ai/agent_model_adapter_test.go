@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -71,6 +72,17 @@ func (r *memoryAttemptRepository) TransitionAttempt(_ context.Context, id string
 }
 
 type concurrentProvider struct{}
+
+type failingAttemptFinishRepository struct {
+	memoryAttemptRepository
+}
+
+func (r *failingAttemptFinishRepository) TransitionAttempt(_ context.Context, id string, from, to askapp.AttemptStatus, errorCode, requestID, usage string, at time.Time) error {
+	if to == askapp.AttemptFailed {
+		return errors.New("attempt transition unavailable")
+	}
+	return r.memoryAttemptRepository.TransitionAttempt(context.Background(), id, from, to, errorCode, requestID, usage, at)
+}
 
 func (concurrentProvider) Complete(_ context.Context, request Request) (Response, error) {
 	return Response{AttemptID: request.AttemptID, Text: validFinalAnswerJSON}, nil
@@ -156,6 +168,27 @@ func TestBlocksToMessagesSeparatesInstructions(t *testing.T) {
 	idxTool := indexOf(body, "【工具结果】\n工具结果")
 	if !(idxTask >= 0 && idxHistory > idxTask && idxCurrent > idxHistory && idxTool > idxCurrent) {
 		t.Fatalf("user message layer order wrong: %q", body)
+	}
+}
+
+func TestBlocksToMessagesSeparatesDeveloperTier(t *testing.T) {
+	blocks := []askapp.ContextBlock{
+		{Layer: askapp.LayerControlInstructions, Kind: askapp.InstructionKindSystem, Text: "身份与安全边界"},
+		{Layer: askapp.LayerControlInstructions, Kind: askapp.InstructionKindDeveloper, Text: "输出协议"},
+		{Layer: askapp.LayerCurrentTask, Kind: "current_turn", Text: "当前问题"},
+	}
+	messages := blocksToMessages(blocks)
+	if len(messages) != 3 {
+		t.Fatalf("messages = %d, want 3 (system + developer + user)", len(messages))
+	}
+	if messages[0].Role != "system" || messages[0].Content != "身份与安全边界" {
+		t.Fatalf("system message = %+v", messages[0])
+	}
+	if messages[1].Role != "developer" || messages[1].Content != "输出协议" {
+		t.Fatalf("developer message = %+v", messages[1])
+	}
+	if messages[2].Role != "user" {
+		t.Fatalf("third message role = %q, want user", messages[2].Role)
 	}
 }
 
@@ -481,6 +514,14 @@ func TestAgentModelAdapterStepPropagatesProviderError(t *testing.T) {
 	adapter := NewAgentModelAdapter(provider, Profile{})
 	if _, err := adapter.Step(context.Background(), askapp.StepInput{}); err == nil {
 		t.Fatal("provider error should propagate")
+	}
+}
+
+func TestAgentModelAdapterKeepsStepErrorWhenAttemptTransitionFails(t *testing.T) {
+	adapter := NewAgentModelAdapter(&fakeProvider{err: NewProviderError(ErrProviderUnavailable, true, 0, errors.New("upstream unavailable"))}, Profile{}, &failingAttemptFinishRepository{})
+	_, err := adapter.Step(context.Background(), askapp.StepInput{SessionID: "session-1", RunID: "run-transition"})
+	if code, retryable := askapp.ExecutorErrorDetails(err); code != ErrProviderUnavailable || !retryable {
+		t.Fatalf("error = (%q, %v), want (%q, true)", code, retryable, ErrProviderUnavailable)
 	}
 }
 

@@ -9,14 +9,16 @@ import (
 // 一轮是一条已接受且属于本次可用历史的用户 Turn；追问回复和补充各计一轮，
 // 工具步骤、模型重试、回答版本和确认按钮不增加轮数。
 // 摘要仅影响后续模型上下文，不删除或改写聊天原文。
+// 当前摘要规划与候选校验尚无生产调用方，属规划中能力：接线见
+// docs/pet-ask-agent-refactor-plan.md P5（T5），契约依据 docs/pet-ask-agent-architecture-v2.md 5.10。
 
 // SummaryTrigger：摘要触发原因。
 type SummaryTrigger string
 
 const (
-	SummaryTriggerNone      SummaryTrigger = "none"      // 未触发
-	SummaryTriggerCount     SummaryTrigger = "count"     // 数量触发：超过阈值
-	SummaryTriggerToken     SummaryTrigger = "token"     // Token 不足提前压缩
+	SummaryTriggerNone  SummaryTrigger = "none"  // 未触发
+	SummaryTriggerCount SummaryTrigger = "count" // 数量触发：超过阈值
+	SummaryTriggerToken SummaryTrigger = "token" // Token 不足提前压缩
 )
 
 // SummaryThresholds 是 32/16 摘要的固定阈值（文档 5.10）。
@@ -29,11 +31,11 @@ const (
 
 // SummaryPlan 是一次摘要的范围计算（文档 5.10）。
 type SummaryPlan struct {
-	Triggered    bool          // 是否需要压缩
-	Trigger      SummaryTrigger
-	CompressTurnIDs []string   // 可压缩区间内的 Turn ID（最近 keep 条之前）
-	KeepTurnIDs  []string      // 保留区间内的 Turn ID（最近 keep 条）
-	Reason       string        // 触发原因描述
+	Triggered       bool // 是否需要压缩
+	Trigger         SummaryTrigger
+	CompressTurnIDs []string // 可压缩区间内的 Turn ID（最近 keep 条之前）
+	KeepTurnIDs     []string // 保留区间内的 Turn ID（最近 keep 条）
+	Reason          string   // 触发原因描述
 }
 
 // PlanSummarize 计算数量触发的摘要范围（文档 5.10 开头）。
@@ -71,11 +73,11 @@ func PlanSummarize(turns []Turn, threshold, keep int) SummaryPlan {
 		return SummaryPlan{Triggered: false, Trigger: SummaryTriggerNone}
 	}
 	return SummaryPlan{
-		Triggered:      true,
-		Trigger:        SummaryTriggerCount,
+		Triggered:       true,
+		Trigger:         SummaryTriggerCount,
 		CompressTurnIDs: compress,
-		KeepTurnIDs:    kept,
-		Reason:         fmt.Sprintf("uncompressed turns %d exceed threshold %d", len(turns), threshold),
+		KeepTurnIDs:     kept,
+		Reason:          fmt.Sprintf("uncompressed turns %d exceed threshold %d", len(turns), threshold),
 	}
 }
 
@@ -105,11 +107,11 @@ func PlanSummarizeForToken(turns []Turn, keep int) SummaryPlan {
 		return SummaryPlan{Triggered: false, Trigger: SummaryTriggerNone}
 	}
 	return SummaryPlan{
-		Triggered:      true,
-		Trigger:        SummaryTriggerToken,
+		Triggered:       true,
+		Trigger:         SummaryTriggerToken,
 		CompressTurnIDs: compress,
-		KeepTurnIDs:    kept,
-		Reason:         "token budget insufficient, compressing earlier turns",
+		KeepTurnIDs:     kept,
+		Reason:          "token budget insufficient, compressing earlier turns",
 	}
 }
 
@@ -226,20 +228,20 @@ type SummaryCoverage struct {
 // SummaryCandidate 是一次摘要候选（文档 5.10.1）。
 // 服务端分配身份，模型只能返回来源临时键，不能改归属或状态。
 type SummaryCandidate struct {
-	ID            string
-	Version       int
-	SessionID     string
-	RunID         string
-	AttemptID     string
-	InputRevision int
-	Status        SummaryStatus
-	Sources       []SummarySource
-	ReplaceRefs   []SummarySourceRef // 拟从上下文移出的完整来源组
+	ID             string
+	Version        int
+	SessionID      string
+	RunID          string
+	AttemptID      string
+	InputRevision  int
+	Status         SummaryStatus
+	Sources        []SummarySource
+	ReplaceRefs    []SummarySourceRef // 拟从上下文移出的完整来源组
 	ConstraintRefs []SummarySourceRef // 关联的纠正、对象与未完成状态（仍按 5.9 保留）
-	RequiredItems []string           // 需保留的已知对象、陈述、否定、未知、纠正、任务关联
-	Items         []SummaryItem
-	Coverage      []SummaryCoverage
-	RejectReason  string
+	RequiredItems  []string           // 需保留的已知对象、陈述、否定、未知、纠正、任务关联
+	Items          []SummaryItem
+	Coverage       []SummaryCoverage
+	RejectReason   string
 }
 
 // ValidateSummaryCandidate 执行摘要候选的纯逻辑核验（文档 5.10.2）。

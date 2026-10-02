@@ -20,6 +20,7 @@ type ToolCall struct {
 	ToolName    string          // 目录工具名
 	ToolVersion string          // 目录/Schema 版本
 	Arguments   json.RawMessage // 完整 arguments，服务端最终校验后才生效
+	TaskKeys    []string        // 本次调用服务的任务项（本次响应内的短键）
 	DependsOn   []string        // 依赖的前置 tool_call_id（真实数据表达依赖）
 }
 

@@ -78,7 +78,7 @@ func (a *AgentModelAdapter) Step(ctx context.Context, input askapp.StepInput) (a
 	if err != nil {
 		executorErr := toExecutorError(err)
 		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, Response{}); transitionErr != nil {
-			return askapp.ModelStepResult{}, transitionErr
+			return askapp.ModelStepResult{}, fmt.Errorf("%w; %v", executorErr, transitionErr)
 		}
 		return askapp.ModelStepResult{}, executorErr
 	}
@@ -86,7 +86,7 @@ func (a *AgentModelAdapter) Step(ctx context.Context, input askapp.StepInput) (a
 	if response.FinishReason == FinishLength {
 		executorErr := askapp.NewExecutorError(ErrProviderOutputTruncated, true, 0, errors.New("model output truncated by max_output_tokens"))
 		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, response); transitionErr != nil {
-			return result, transitionErr
+			return result, fmt.Errorf("%w; %v", executorErr, transitionErr)
 		}
 		return result, executorErr
 	}
@@ -94,7 +94,7 @@ func (a *AgentModelAdapter) Step(ctx context.Context, input askapp.StepInput) (a
 	if err != nil {
 		executorErr := askapp.NewExecutorError(askapp.ErrAgentOutputUnparsable, false, 0, fmt.Errorf("%w (len=%d, head=%q, tail=%q)", err, len(response.Text), headSnippet(response.Text), tailSnippet(response.Text)))
 		if transitionErr := a.finishAttempt(ctx, attemptID, askapp.AttemptFailed, executorErr, response); transitionErr != nil {
-			return result, transitionErr
+			return result, fmt.Errorf("%w; %v", executorErr, transitionErr)
 		}
 		return result, executorErr
 	}
@@ -269,17 +269,23 @@ func toExecutorError(err error) error {
 }
 
 // blocksToMessages 把上下文块转换为有序模型消息（文档 5.8）。
-// 受控指令层进入 system 消息；其余层（参考数据、历史、当前任务、工具交互）
-// 按层拼接为 user 消息。图片由 Runtime 经 Request.ImageContent 注入，此处不处理。
+// 指令层按档拆分：system 档进入 system 消息，developer 档进入 developer 消息；
+// 其余层（参考数据、历史、当前任务、工具交互）按层拼接为 user 消息。
+// 图片由 Runtime 经 Request.ImageContent 注入，此处不处理。
 func blocksToMessages(blocks []askapp.ContextBlock) []Message {
 	var instructions []string
+	var developers []string
 	var reference []string
 	var history []string
 	var current []string
 	var toolInteractions []string
 
 	for _, b := range blocks {
-		if b.Layer == askapp.LayerControlInstructions || b.Kind == "instruction" {
+		if b.Kind == askapp.InstructionKindDeveloper {
+			developers = append(developers, b.Text)
+			continue
+		}
+		if b.Layer == askapp.LayerControlInstructions || b.Kind == askapp.InstructionKindSystem {
 			instructions = append(instructions, b.Text)
 			continue
 		}
@@ -297,9 +303,12 @@ func blocksToMessages(blocks []askapp.ContextBlock) []Message {
 		}
 	}
 
-	messages := make([]Message, 0, 2)
+	messages := make([]Message, 0, 3)
 	if joined := strings.TrimSpace(strings.Join(instructions, "\n\n")); joined != "" {
 		messages = append(messages, Message{Role: "system", Content: joined})
+	}
+	if joined := strings.TrimSpace(strings.Join(developers, "\n\n")); joined != "" {
+		messages = append(messages, Message{Role: "developer", Content: joined})
 	}
 	var body []string
 	if len(reference) > 0 {

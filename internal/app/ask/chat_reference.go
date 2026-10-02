@@ -8,6 +8,8 @@ import (
 // 本文件固定旧聊天只读引用的执行契约（对应架构设计 v2 文档 5.6）。
 // 旧聊天引用属于当前 Run 的只读工具步骤：不新增 Run 状态、不恢复来源 Session，
 // 检索范围限最近三次 Session（含当前），读取故障与无命中始终分开。
+// 当前 Service 尚未注入该端口，属规划中能力：接线见
+// docs/pet-ask-agent-refactor-plan.md P5（T5），契约依据 docs/pet-ask-agent-architecture-v2.md 5.6。
 
 // maxReferenceSessions：允许引用的最近 Session 数（含当前）。
 const maxReferenceSessions = 3
@@ -18,10 +20,10 @@ type ChatReferenceStatus string
 
 const (
 	ChatReferenceOK           ChatReferenceStatus = "ok"           // 找到命中片段
-	ChatReferenceNotFound     ChatReferenceStatus = "not_found"     // 允许范围内无命中（区别于故障）
-	ChatReferenceAmbiguous    ChatReferenceStatus = "ambiguous"     // 多个候选且无法确定用户所指
+	ChatReferenceNotFound     ChatReferenceStatus = "not_found"    // 允许范围内无命中（区别于故障）
+	ChatReferenceAmbiguous    ChatReferenceStatus = "ambiguous"    // 多个候选且无法确定用户所指
 	ChatReferenceUnauthorized ChatReferenceStatus = "unauthorized" // 范围外、已删除或无权读取
-	ChatReferenceError        ChatReferenceStatus = "error"         // 读取超时或服务故障
+	ChatReferenceError        ChatReferenceStatus = "error"        // 读取超时或服务故障
 )
 
 // ChatReferenceQuery：旧聊天引用定位条件。用户与家庭由鉴权注入，

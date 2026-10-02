@@ -125,6 +125,7 @@ func main() {
 		os.Exit(1)
 	}
 	calendarService.SetAssetAuthorizer(fileService)
+	calendarService.SetDebugLogger(logger)
 	if templateID := strings.TrimSpace(cfg.WeChatReminderTemplateID); templateID != "" {
 		miniprogramState := "formal"
 		if cfg.AppEnv != "production" {

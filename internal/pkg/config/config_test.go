@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/joho/godotenv"
 )
 
 func TestLoadReadsYAMLAndEnvironmentOverrides(t *testing.T) {
@@ -114,9 +116,39 @@ func TestAIConfigRequiresCredentialsModelAndTimeout(t *testing.T) {
 	}
 }
 
-func TestAIConfigAcceptsChatCompletionProvider(t *testing.T) {
+func TestAIConfigRejectsUnsupportedProvider(t *testing.T) {
 	cfg := Config{AppEnv: "test", HTTPAddr: ":8080", DatabaseDriver: "sqlite", DatabaseDSN: ":memory:", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads", AIEnabled: true, AIProvider: "chat_completion", AIAPIKey: "key", AIModel: "deepseek-chat", AITimeoutSeconds: 30}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "AI_PROVIDER") {
+		t.Fatalf("Validate() error = %v, want AI_PROVIDER validation error", err)
+	}
+	cfg.AIProvider = "openai"
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("Validate() error = %v", err)
+		t.Fatalf("Validate() error = %v, want openai accepted", err)
+	}
+}
+
+func TestExampleConfigFilesMatchAIProviderValidation(t *testing.T) {
+	yamlConfig, err := Load("../../../config.example.yaml")
+	if err != nil {
+		t.Fatalf("Load(config.example.yaml) error = %v", err)
+	}
+	envValues, err := godotenv.Read("../../../.env.example")
+	if err != nil {
+		t.Fatalf("read .env.example error = %v", err)
+	}
+	// 示例默认关闭 AI，这里按示例给出的 Provider、地址与模型打开 AI，确认示例组合本身能通过校验。
+	for _, example := range []struct {
+		file     string
+		provider string
+		baseURL  string
+		model    string
+	}{
+		{"config.example.yaml", yamlConfig.AIProvider, yamlConfig.AIBaseURL, yamlConfig.AIModel},
+		{".env.example", envValues["AI_PROVIDER"], envValues["AI_BASE_URL"], envValues["AI_MODEL"]},
+	} {
+		cfg := Config{AppEnv: "test", HTTPAddr: ":8080", DatabaseDriver: "sqlite", DatabaseDSN: ":memory:", JWTExpireMinutes: 120, StorageDriver: "local", LocalUploadDir: "data/uploads", AIEnabled: true, AIProvider: example.provider, AIAPIKey: "key", AIBaseURL: example.baseURL, AIModel: example.model, AITimeoutSeconds: 30}
+		if err := cfg.Validate(); err != nil {
+			t.Fatalf("%s AI config is rejected: %v", example.file, err)
+		}
 	}
 }

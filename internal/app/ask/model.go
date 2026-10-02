@@ -242,7 +242,8 @@ const (
 	MemoryFact    MemoryKind = "fact"
 )
 
-// Memory：长期记忆，带来源版本。
+// Memory：长期记忆，带来源版本。属规划中能力（文档 10.6）：ask_memories 表已由
+// migration 000015 落地，当前尚无仓储与读写调用。
 type Memory struct {
 	ID            string
 	FamilyID      string

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 	"time"
@@ -87,14 +88,33 @@ const maxDecisionSteps = 16
 //  3. call_tools -> 构造批次、执行工具、结果回灌后继续；
 //     request_input / final_answer -> 返回最终处置。
 func RunDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, initial StepInput, maxSteps int) (LoopOutcome, error) {
-	return runDecisionLoop(ctx, model, tools, initial, maxSteps, nil, nil, "", nil, nil)
+	return runDecisionLoop(ctx, model, tools, initial, maxSteps, nil, nil, "", nil, nil, nil)
 }
 
-func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, initial StepInput, maxSteps int, repository Repository, restored []TaskItem, turnID string, budgets BudgetRepository, recallTools func([]ContextBlock) []Tool) (LoopOutcome, error) {
+func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, initial StepInput, maxSteps int, repository Repository, restored []TaskItem, turnID string, budgets BudgetRepository, recallTools func([]ContextBlock) []Tool, logger *slog.Logger) (LoopOutcome, error) {
 	if maxSteps <= 0 {
 		maxSteps = maxDecisionSteps
 	}
+	store, _ := repository.(ToolResultStore)
 	blocks := append([]ContextBlock(nil), initial.Blocks...)
+	// Run 挂起（追问、崩溃恢复）后重新进入循环时，之前取得的工具结果按原正文重放，
+	// 模型不必重复查询同一份业务数据（文档 7.7）。
+	// replayBlockIndex 记录重放块在 blocks 中的下标（键为持久化记录标识）：复用命中时
+	// 原位替换，避免同一份结果既作为参考数据重放、又作为本次工具交互重复注入。
+	replayBlockIndex := make(map[string]int)
+	if store != nil {
+		prior, err := store.ListRunToolResults(ctx, initial.RunID)
+		if err != nil {
+			// 结果持久化是尽力而为的增强能力：库表缺失或读取失败只记日志，
+			// 本次不重放既有结果，循环按改动前的行为继续（文档 7.7）。
+			logToolResultStoreFailure(logger, "list run tool results", initial.RunID, err)
+		} else {
+			for _, record := range replayableToolResults(prior, restored) {
+				replayBlockIndex[record.ID] = len(blocks)
+				blocks = append(blocks, record.replayBlock())
+			}
+		}
+	}
 	taskItems := append([]TaskItem(nil), restored...)
 	toolResults := []ToolResult{}
 	callKeys := make(map[string]struct{})
@@ -121,7 +141,7 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 			stepBlocks = append(append([]ContextBlock(nil), stepBlocks...), taskBlock)
 		}
 		if validationFeedback != "" {
-			stepBlocks = append(stepBlocks, ContextBlock{Layer: LayerControlInstructions, Kind: "instruction", ObjectID: "validation_feedback", Text: "上一次回答未通过校验：" + validationFeedback + "。请重新生成完整的 record_array_v1，覆盖当前任务清单并使用当前回答类型允许的字段。", Required: true})
+			stepBlocks = append(stepBlocks, ContextBlock{Layer: LayerControlInstructions, Kind: InstructionKindDeveloper, ObjectID: "validation_feedback", Text: "上一次回答未通过校验：" + sanitizeValidationFeedback(validationFeedback) + "。请重新生成完整的 record_array_v1，覆盖当前任务清单并使用当前回答类型允许的字段。", Required: true})
 		}
 		var budgetSnapshot ModelBudgetSnapshot
 		if budgets != nil {
@@ -187,6 +207,7 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 			}
 			return outcome, err
 		}
+		previousCallKeys := callKeys
 		callKeys = nextCallKeys
 		// 合并本轮任务项更新（header.task_updates 映射为待分配稳定 ID 的任务项）。
 		if len(decision.TaskUpdates) > 0 {
@@ -211,8 +232,8 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 		outcome.Steps = step + 1
 		switch decision.Action {
 		case ActionCallTools:
-			validationRetries = 0
 			validationFeedback = ""
+			normalizeCallToolVersions(decision.Calls, initial.Tools)
 			batch := BuildToolBatch(decision.Calls, "", "", "")
 			toolContext, cancelTools, budgetErr := callBudgetContext(ctx, budgets, initial.RunID)
 			if budgetErr != nil {
@@ -231,6 +252,12 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 			cancelTools()
 			toolActual := toolEstimate
 			toolActual.DurationMillis = toolDuration
+			// 命中复用的调用没有真实发起工具调用，不占用工具调用预算（文档 9.3）。
+			for _, result := range results {
+				if result.Reused {
+					toolActual.ToolCalls--
+				}
+			}
 			if settleErr := settleCallBudget(ctx, budgets, toolReservation, toolActual); settleErr != nil {
 				return outcome, settleErr
 			}
@@ -240,6 +267,12 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 			if execErr != nil {
 				var validationErr *BatchValidationError
 				if errors.As(execErr, &validationErr) {
+					if validationRetries == 0 && step+1 < maxSteps {
+						validationRetries++
+						validationFeedback = validationErr.Error()
+						callKeys = previousCallKeys
+						continue
+					}
 					calls := make([]string, 0, len(batch.Calls))
 					for _, call := range batch.Calls {
 						calls = append(calls, fmt.Sprintf("%s=%s@%s", call.ToolCallID, call.ToolName, call.ToolVersion))
@@ -248,10 +281,56 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 				}
 				return outcome, execErr
 			}
+			validationRetries = 0
 			toolResults = append(toolResults, results...)
 			// 结果回灌：真实工具结果作为低信任参考数据进入下一轮上下文。
-			for _, r := range results {
-				blocks = append(blocks, toolResultBlock(r))
+			// 正文与证据在此固化落库，Run 恢复或复用同一结果时按原样重放（文档 7.7）。
+			calls := make(map[string]ToolCall, len(batch.Calls))
+			for _, call := range batch.Calls {
+				calls[call.ToolCallID] = call
+			}
+			records := make([]ToolResultRecord, 0, len(results))
+			fresh := make([]ToolResultRecord, 0, len(results))
+			for _, result := range results {
+				if result.Reused && result.ResultHandle != "" && store != nil {
+					record, err := store.GetToolResult(ctx, result.ResultHandle)
+					if err != nil {
+						logToolResultStoreFailure(logger, "get tool result", initial.RunID, err)
+						continue
+					}
+					// 正文与证据沿用既有记录，块标识必须回到本次调用的 call_key（文档 7.7）。
+					record.ToolCallID = result.ToolCallID
+					records = append(records, record)
+					continue
+				}
+				call, ok := calls[result.ToolCallID]
+				if !ok {
+					continue
+				}
+				record, err := newToolResultRecord(initial.SessionID, initial.RunID, call, result, time.Now())
+				if err != nil {
+					return outcome, err
+				}
+				records = append(records, record)
+				fresh = append(fresh, record)
+			}
+			if store != nil && len(fresh) > 0 {
+				if err := store.SaveToolResults(ctx, fresh); err != nil {
+					logToolResultStoreFailure(logger, "save tool results", initial.RunID, err)
+				}
+			}
+			// 上一批结果不再是本步新增；本批结果标记为本步新增，预算紧张时优先保留（文档 5.9）。
+			for index := range blocks {
+				blocks[index].Fresh = false
+			}
+			for _, record := range records {
+				block := record.block()
+				block.Fresh = true
+				if index, ok := replayBlockIndex[record.ID]; ok {
+					blocks[index] = block
+					continue
+				}
+				blocks = append(blocks, block)
 			}
 			// 按 coverage 记录未完成项，继续下一轮决策。
 			taskItems = ResolveCoverage(taskItems, stableCoverage(initial.RunID, decision.Coverage))
@@ -322,6 +401,27 @@ func outputRepairFeedback(err error) string {
 	}
 	reason = strings.TrimPrefix(reason, ErrAgentOutputUnparsable+": ")
 	return "模型回复不是可解析的 record_array_v1（" + reason + "）"
+}
+
+// sanitizeValidationFeedback 抹掉校验反馈里的取值，只保留错误类别与字段位置。
+// 反馈进入受信任的 developer 档，模型产出物与其上游的用户输入不得作为指令回灌（文档 8.4）。
+// 校验错误统一用 %q 打印取值，因此逐个省略双引号内的内容即可；引号不成对时丢弃其后内容。
+func sanitizeValidationFeedback(text string) string {
+	var builder strings.Builder
+	inQuote := false
+	for _, r := range text {
+		switch {
+		case r == '"':
+			if !inQuote {
+				builder.WriteString(`"…"`)
+			}
+			inQuote = !inQuote
+		case inQuote:
+		default:
+			builder.WriteRune(r)
+		}
+	}
+	return strings.TrimSpace(builder.String())
 }
 
 const agentOutputTokenReserve = 2048
@@ -414,18 +514,45 @@ func taskKeyFromItem(runID, taskItemID string) string {
 	return taskItemID
 }
 
+// taskStateItem 是任务清单注入模型的形态（文档 2.3.1）。
+// 空字段省略，避免每一步上下文为已完成的任务付出 Token。
+type taskStateItem struct {
+	TaskKey          string          `json:"task_key"`
+	Goal             string          `json:"goal"`
+	Outcome          TaskOutcome     `json:"outcome"`
+	Subjects         []AnswerSubject `json:"subjects,omitempty"`
+	MissingFields    []MissingField  `json:"missing_fields,omitempty"`
+	IncompleteReason string          `json:"incomplete_reason,omitempty"`
+	ResultRef        *TaskResultRef  `json:"result_ref,omitempty"`
+	SupersededBy     string          `json:"superseded_by,omitempty"`
+	WithdrawnReason  string          `json:"withdrawn_reason,omitempty"`
+}
+
+// taskStateBlock 把当前 Run 的任务清单转换为参考数据块（文档 5.8 第 2 层）。
+// 注入内容必须能独立表达任务态势：目标、结果分类、对象、缺失字段、未完成原因与产物引用。
+// 只给标记不给内容时，Run 挂起恢复后模型知道任务没做完，却不知道缺什么、之前产出了什么。
 func taskStateBlock(runID string, items []TaskItem) (ContextBlock, error) {
-	tasks := make([]struct {
-		TaskKey string      `json:"task_key"`
-		Goal    string      `json:"goal"`
-		Outcome TaskOutcome `json:"outcome"`
-	}, 0, len(items))
+	tasks := make([]taskStateItem, 0, len(items))
 	for _, item := range items {
-		tasks = append(tasks, struct {
-			TaskKey string      `json:"task_key"`
-			Goal    string      `json:"goal"`
-			Outcome TaskOutcome `json:"outcome"`
-		}{TaskKey: taskKeyFromItem(runID, item.TaskItemID), Goal: item.Goal, Outcome: item.Outcome})
+		state := taskStateItem{
+			TaskKey:          taskKeyFromItem(runID, item.TaskItemID),
+			Goal:             item.Goal,
+			Outcome:          item.Outcome,
+			Subjects:         item.Subjects,
+			IncompleteReason: item.IncompleteReason,
+			ResultRef:        item.ResultRef,
+			SupersededBy:     taskKeyFromItem(runID, item.SupersededBy),
+			WithdrawnReason:  item.WithdrawnReason,
+		}
+		// 缺失字段在存储层用稳定任务项标识，注入前换算回本次响应内的短键。
+		if len(item.MissingFields) > 0 {
+			state.MissingFields = make([]MissingField, len(item.MissingFields))
+			copy(state.MissingFields, item.MissingFields)
+			for index := range state.MissingFields {
+				state.MissingFields[index].TaskKey = taskKeyFromItem(runID, state.MissingFields[index].TaskKey)
+			}
+		}
+		tasks = append(tasks, state)
 	}
 	data, err := json.Marshal(tasks)
 	if err != nil {
@@ -489,20 +616,6 @@ func persistTaskItems(ctx context.Context, repository Repository, items []TaskIt
 		items[index].ItemRevision = stored.ItemRevision + 1
 	}
 	return nil
-}
-
-// toolResultBlock 把一项真实工具结果转换为回灌上下文块（文档 5.8 第 5 层）。
-// 工具结果是有来源的低信任参考数据，不获得指令权限。
-func toolResultBlock(r ToolResult) ContextBlock {
-	return ContextBlock{
-		Layer:        LayerToolInteractions,
-		Kind:         "tool_result",
-		ObjectID:     r.ToolCallID,
-		Version:      "",
-		Position:     "",
-		Text:         toolResultText(r),
-		EvidenceRefs: toolEvidenceRefs(r),
-	}
 }
 
 func evidenceKeysForBlocks(blocks []ContextBlock) map[string]struct{} {
@@ -610,14 +723,14 @@ func validateDecisionReferences(decision StepDecision, taskItems []TaskItem, cal
 		for _, segment := range group.Segments {
 			for _, evidence := range segment.EvidenceRefs {
 				if !evidenceExists(evidenceKeys, evidence) {
-					return fmt.Errorf("decision_loop: segment %q references unknown evidence %s/%s", segment.SegmentKey, evidence.SourceType, evidence.SourceID)
+					return fmt.Errorf("decision_loop: segment %q references unknown evidence %q", segment.SegmentKey, evidence.SourceType+"/"+evidence.SourceID)
 				}
 			}
 		}
 		for _, risk := range group.Risks {
 			for _, evidence := range risk.Evidence {
 				if !evidenceExists(evidenceKeys, evidence) {
-					return fmt.Errorf("decision_loop: risk %q references unknown evidence %s/%s", group.GroupKey, evidence.SourceType, evidence.SourceID)
+					return fmt.Errorf("decision_loop: risk %q references unknown evidence %q", group.GroupKey, evidence.SourceType+"/"+evidence.SourceID)
 				}
 			}
 		}
@@ -776,4 +889,13 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// logToolResultStoreFailure 记录工具结果持久化的降级。
+// 结果持久化只服务于重放与复用，库表缺失或读写失败不得成为决策循环的门槛（文档 7.7）。
+func logToolResultStoreFailure(logger *slog.Logger, operation, runID string, err error) {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	logger.Error("ask tool result store unavailable", "operation", operation, "run_id", runID, "error", err)
 }

@@ -14,7 +14,7 @@ type TaskOutcome string
 const (
 	OutcomePending         TaskOutcome = "pending"          // 待处理：当前有效输入已识别目标，尚无足够结果
 	OutcomeNeedsInput      TaskOutcome = "needs_input"      // 需补信息：缺失信息实质影响对象、操作或判断
-	OutcomeEvidenceReady   TaskOutcome = "evidence_ready"   // 依据已就绪：已取得仍有效的工具结果，尚未发布对应答复
+	OutcomeEvidenceReady   TaskOutcome = "evidence_ready"   // 依据已就绪：已取得仍有效的工具结果，尚未发布对应答复（协议预留，当前无生产赋值）
 	OutcomeAnswered        TaskOutcome = "answered"         // 已回答：对应回答块已通过最终校验并持久化
 	OutcomePreviewProvided TaskOutcome = "preview_provided" // 已提供预览：冻结预览真实存在，答复准确指向该 Operation
 	OutcomeIncomplete      TaskOutcome = "incomplete"       // 未完成：资料无法取得或能力/权限/预算/故障/停止导致不再处理
@@ -49,7 +49,7 @@ type ResultRefKind string
 
 const (
 	ResultRefAnswerGroup ResultRefKind = "answer_group" // 回答内容块
-	ResultRefToolResult  ResultRefKind = "tool_result"  // 实际采用的工具结果
+	ResultRefToolResult  ResultRefKind = "tool_result"  // 实际采用的工具结果（协议预留，当前无生产赋值）
 	ResultRefOperation   ResultRefKind = "operation"    // 独立授权的 Operation
 )
 

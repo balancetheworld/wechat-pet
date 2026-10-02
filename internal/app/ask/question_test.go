@@ -56,10 +56,10 @@ func TestValidateReply(t *testing.T) {
 		t.Fatalf("valid reply should pass: %v", err)
 	}
 	for name, mutate := range map[string]func(*Reply){
-		"empty question_id":   func(r *Reply) { r.QuestionID = "" },
-		"empty run_id":        func(r *Reply) { r.RunID = "" },
-		"empty idempotency":   func(r *Reply) { r.IdempotencyKey = "" },
-		"empty content":       func(r *Reply) { r.Text = ""; r.ImageIDs = nil; r.OptionKeys = nil },
+		"empty question_id": func(r *Reply) { r.QuestionID = "" },
+		"empty run_id":      func(r *Reply) { r.RunID = "" },
+		"empty idempotency": func(r *Reply) { r.IdempotencyKey = "" },
+		"empty content":     func(r *Reply) { r.Text = ""; r.ImageIDs = nil; r.OptionKeys = nil },
 	} {
 		rr := Reply{QuestionID: "q-1", RunID: "run-1", IdempotencyKey: "ik-1", Text: "不知道"}
 		mutate(&rr)

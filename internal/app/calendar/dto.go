@@ -123,12 +123,15 @@ type CreateReminderRequest struct {
 	NotificationChannels []string `json:"notification_channels"`
 }
 
-/* UpdateRecordRequest 部分更新日历记录: 指针为 nil 表示不更新该字段;
-   MediaAssetIDs 为 nil 表示图片不变, 传空数组表示清空图片, 非空数组表示整体替换 */
+/*
+UpdateRecordRequest 部分更新日历记录: 指针为 nil 表示不更新该字段;
+
+	MediaAssetIDs 为 nil 表示图片不变, 传空数组表示清空图片, 非空数组表示整体替换
+*/
 type UpdateRecordRequest struct {
-	Content        *string  `json:"content"`
-	OccurredAt     *string  `json:"occurred_at"`
-	MediaAssetIDs  []string `json:"media_asset_ids"`
+	Content       *string  `json:"content"`
+	OccurredAt    *string  `json:"occurred_at"`
+	MediaAssetIDs []string `json:"media_asset_ids"`
 }
 
 type CreateRecordRequest struct {

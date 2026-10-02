@@ -83,6 +83,43 @@
   pointer-events: none;
 }
 
+/* --- 未发起会话时小猫说的话: 气泡压在小猫左上方, 小尾巴指向小猫脑袋 --- */
+.ask-cat-bubble {
+  position: absolute;
+  left: -30rpx;
+  bottom: calc(100% - 96rpx);
+  box-sizing: border-box;
+  width: 660rpx;
+  padding: 22rpx 30rpx;
+  background: #FFFFFF;
+  border: 2rpx solid rgba(127, 165, 214, 0.7);
+  border-radius: 40rpx;
+  box-shadow: 0 10rpx 30rpx rgba(74, 100, 137, 0.22), 0 2rpx 8rpx rgba(74, 100, 137, 0.12);
+  pointer-events: none;
+}
+
+.ask-cat-bubble::after {
+  content: '';
+  position: absolute;
+  left: 260rpx;
+  bottom: -12rpx;
+  width: 0;
+  height: 0;
+  border-top: 12rpx solid #FFFFFF;
+  border-right: 12rpx solid transparent;
+  border-left: 12rpx solid transparent;
+}
+
+.ask-cat-bubble-text {
+  font-family: var(--handwritten);
+  font-size: 30rpx;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #3D5C82;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* --- AI 生成回答时左下角播放的动图 ---
    贴着会话区左下角, 底部会插到输入框下面一点(输入框 z-index 更高会盖住), 不拦截点击 */
 .ask-answer-cat {
@@ -210,24 +247,7 @@
   flex-direction: column;
   gap: 22rpx;
   min-height: 100%;
-  padding: calc(72rpx + env(safe-area-inset-top)) 68rpx 28rpx;
-}
-
-.ask-bound-pets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10rpx;
-  align-self: center;
-  justify-content: center;
-}
-
-.ask-bound-pet {
-  padding: 8rpx 14rpx;
-  color: var(--primary-deep);
-  border: 1rpx solid rgba(127, 165, 214, 0.34);
-  border-radius: 8rpx;
-  background: rgba(255, 254, 251, 0.68);
-  font-size: 22rpx;
+  padding: calc(112rpx + env(safe-area-inset-top)) 68rpx 28rpx;
 }
 
 .ask-turn {
@@ -239,7 +259,7 @@
 .ask-message--user {
   align-self: flex-end;
   color: #FFFEFB;
-  border-radius: 8rpx 8rpx 2rpx 8rpx;
+  border-radius: 22rpx 22rpx 6rpx 22rpx;
   background: rgba(74, 100, 137, 0.88);
   box-shadow: var(--shadow-sm);
 }

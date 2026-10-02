@@ -35,14 +35,14 @@ func TestTaskOutcomeValidAndTerminal(t *testing.T) {
 
 func validTaskItem() TaskItem {
 	return TaskItem{
-		TaskItemID:     "ti-1",
-		OriginTurnID:   "turn-1",
-		RunID:          "run-1",
-		ItemRevision:   1,
-		Goal:           "查旺仔最近记录",
-		SourceTurnIDs:  []string{"turn-1"},
-		Subjects:       []AnswerSubject{{SubjectKey: "s1", Kind: SubjectPet, PetID: "pet-1"}},
-		Outcome:        OutcomePending,
+		TaskItemID:    "ti-1",
+		OriginTurnID:  "turn-1",
+		RunID:         "run-1",
+		ItemRevision:  1,
+		Goal:          "查旺仔最近记录",
+		SourceTurnIDs: []string{"turn-1"},
+		Subjects:      []AnswerSubject{{SubjectKey: "s1", Kind: SubjectPet, PetID: "pet-1"}},
+		Outcome:       OutcomePending,
 	}
 }
 
