@@ -573,7 +573,7 @@ func updatePetProfileTool() Tool {
 	return Tool{
 		Name:         "update_pet_profile",
 		OperationID:  "prepare.pet_profile.update",
-		AliasesZH:    []string{"改档案", "修改档案", "更新宠物资料", "改成", "改名字", "改品种", "改生日", "改性别", "是否绝育"},
+		AliasesZH:    []string{"改档案", "修改档案", "更新宠物资料", "改成", "改名字", "改品种", "改生日", "改性别", "是否绝育", "名字是", "品种是", "性别是", "生日是"},
 		AliasesEN:    []string{"update pet profile", "edit pet profile"},
 		ResourceType: ResourcePetProfile,
 		ActionType:   ActionPrepareUpdate,

@@ -283,14 +283,13 @@ func (s *Service) executeCalendarReminderComplete(ctx context.Context, repositor
 	return s.finishOperation(ctx, repository, value, now, OperationSucceeded, string(result))
 }
 
-// petProfileWriter 是档案更新的写入端口，由 pet 仓储提供（与 HTTP 档案更新同一路径）。
+// petProfileWriter 是档案更新的写入端口，由 pet 应用服务提供（与 HTTP 档案更新同一路径）。
 type petProfileWriter interface {
 	Resource(context.Context, string, string, string, string, string, map[string]any) (any, error)
 }
 
 func (s *Service) executePetProfileUpdate(ctx context.Context, repository operationRepository, value Operation, familyID, userID string, now time.Time) (Operation, error) {
-	writer, ok := s.pets.(petProfileWriter)
-	if !ok {
+	if s.petWriter == nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_target_unavailable")
 	}
 	var payload struct {
@@ -300,7 +299,7 @@ func (s *Service) executePetProfileUpdate(ctx context.Context, repository operat
 	if err := json.Unmarshal([]byte(value.Payload), &payload); err != nil || payload.PetID == "" || len(payload.Fields) == 0 {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_payload_invalid")
 	}
-	if _, err := writer.Resource(ctx, familyID, userID, payload.PetID, "profile", "PATCH", payload.Fields); err != nil {
+	if _, err := s.petWriter.Resource(ctx, familyID, userID, payload.PetID, "profile", "PATCH", payload.Fields); err != nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "pet_profile_update_failed")
 	}
 	result, _ := json.Marshal(map[string]any{"pet_id": payload.PetID, "verified": s.verifyPetProfile(ctx, familyID, payload.PetID, payload.Fields)})
@@ -309,8 +308,7 @@ func (s *Service) executePetProfileUpdate(ctx context.Context, repository operat
 
 // executePetHealthUpdate 修改宠物健康档案（过敏、长期用药、健康状态）。
 func (s *Service) executePetHealthUpdate(ctx context.Context, repository operationRepository, value Operation, familyID, userID string, now time.Time) (Operation, error) {
-	writer, ok := s.pets.(petProfileWriter)
-	if !ok {
+	if s.petWriter == nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_target_unavailable")
 	}
 	var payload struct {
@@ -320,7 +318,7 @@ func (s *Service) executePetHealthUpdate(ctx context.Context, repository operati
 	if err := json.Unmarshal([]byte(value.Payload), &payload); err != nil || payload.PetID == "" || len(payload.Fields) == 0 {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_payload_invalid")
 	}
-	if _, err := writer.Resource(ctx, familyID, userID, payload.PetID, "health", "PATCH", payload.Fields); err != nil {
+	if _, err := s.petWriter.Resource(ctx, familyID, userID, payload.PetID, "health", "PATCH", payload.Fields); err != nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "pet_health_update_failed")
 	}
 	result, _ := json.Marshal(map[string]any{"pet_id": payload.PetID, "verified": s.verifyPetHealth(ctx, familyID, payload.PetID, payload.Fields)})
