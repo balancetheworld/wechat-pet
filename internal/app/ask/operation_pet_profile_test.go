@@ -33,7 +33,7 @@ func confirmPetProfileOperation(t *testing.T, service *Service, familyID, userID
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := service.ConfirmOperation(context.Background(), familyID, userID, sessionID, operation.ID, operation.Version, operation.Preview)
+	confirmed, err := service.ConfirmOperation(context.Background(), familyID, userID, sessionID, operation.ID, operation.Version, operation.Preview, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

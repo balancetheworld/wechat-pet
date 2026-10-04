@@ -72,6 +72,53 @@ func TestPetRoutesCompleteCRUDFlow(t *testing.T) {
 	_ = family
 }
 
+func TestPetProfilePatchPersistsAvatar(t *testing.T) {
+	familyRepository, db := newFamilyRouteRepository(t)
+	if _, err := db.Exec("ALTER TABLE pets ADD COLUMN avatar_asset_id TEXT"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("ALTER TABLE pets ADD COLUMN cover_asset_id TEXT"); err != nil {
+		t.Fatal(err)
+	}
+	familyService, err := familyapp.NewService(familyRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seedFamilyRouteUser(t, db, "owner-pet", "宠物家庭")
+	if _, err := familyService.Create(context.Background(), "owner-pet", familyapp.CreateFamilyRequest{Name: "宠物家庭"}); err != nil {
+		t.Fatal(err)
+	}
+	petRepository, err := petapp.NewRepository(db, "sqlite")
+	if err != nil {
+		t.Fatal(err)
+	}
+	petService, err := petapp.NewService(petRepository)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := jwtpkg.NewSigner("test-secret", time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewWithDependencies(Dependencies{FamilyRepository: familyRepository, FamilyService: familyService, PetRepository: petRepository, PetService: petService, TokenSigner: signer})
+
+	create := petRouteRequest(t, router, signer, http.MethodPost, "/api/v1/pets", "owner-pet", `{"name":"小白"}`)
+	if create.Code != http.StatusOK {
+		t.Fatalf("create response: status=%d body=%s", create.Code, create.Body.String())
+	}
+	petID := extractPetID(create.Body.String())
+	if petID == "" {
+		t.Fatal("pet ID not returned")
+	}
+	if _, err := db.Exec("UPDATE pets SET sterilized = 0 WHERE id = ?", petID); err != nil {
+		t.Fatal(err)
+	}
+	patch := petRouteRequest(t, router, signer, http.MethodPatch, "/api/v1/pets/"+petID+"/profile", "owner-pet", `{"avatar_asset_id":"asset-1"}`)
+	if patch.Code != http.StatusOK || !strings.Contains(patch.Body.String(), `"avatar_asset_id":"asset-1"`) {
+		t.Fatalf("profile patch response: status=%d body=%s", patch.Code, patch.Body.String())
+	}
+}
+
 func petRouteRequest(t *testing.T, router http.Handler, signer *jwtpkg.Signer, method string, path string, userID string, body string) *httptest.ResponseRecorder {
 	t.Helper()
 	token, err := signer.Sign(userID)

@@ -33,8 +33,18 @@ export function authorizedAssetURL(value: string) {
   return token ? `${value}${value.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(token)}` : value
 }
 
+function errorMessage(error: unknown) {
+  if (error instanceof Error) {
+    return error.message
+  }
+  if (error && typeof error === 'object' && 'errMsg' in error && typeof error.errMsg === 'string') {
+    return error.errMsg
+  }
+  return String(error || '网络请求失败')
+}
+
 function errorFromNetwork(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error || '网络请求失败')
+  const message = errorMessage(error)
   const kind = /timeout|超时/i.test(message) ? 'timeout' : 'network'
   return new ApiError(message, { kind })
 }

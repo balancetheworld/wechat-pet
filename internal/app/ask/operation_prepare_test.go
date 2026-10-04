@@ -58,16 +58,22 @@ func TestProcessRunPreparesCalendarRecordOperation(t *testing.T) {
 		t.Fatalf("operation preview/expiry missing: %+v", operation)
 	}
 	var payload struct {
-		PetID      string `json:"pet_id"`
-		Category   string `json:"category"`
-		Content    string `json:"content"`
-		OccurredAt string `json:"occurred_at"`
+		Request struct {
+			PetID      string `json:"pet_id"`
+			Category   string `json:"category"`
+			Content    string `json:"content"`
+			OccurredAt string `json:"occurred_at"`
+		} `json:"request"`
+		SyncTargets []string `json:"sync_targets"`
 	}
 	if err := json.Unmarshal([]byte(operation.Payload), &payload); err != nil {
 		t.Fatalf("payload = %s: %v", operation.Payload, err)
 	}
-	if payload.PetID != "pet-1" || payload.Category != "daily" || payload.Content != "洗澡" || payload.OccurredAt != "2026-09-23T20:00:00+08:00" {
+	if payload.Request.PetID != "pet-1" || payload.Request.Category != "daily" || payload.Request.Content != "洗澡" || payload.Request.OccurredAt != "2026-09-23T20:00:00+08:00" {
 		t.Fatalf("payload = %+v", payload)
+	}
+	if len(payload.SyncTargets) != 0 {
+		t.Fatalf("sync_targets = %v, want empty", payload.SyncTargets)
 	}
 	if len(model.inputs) != 2 {
 		t.Fatalf("model calls = %d, want 2 (prepare then final answer)", len(model.inputs))
@@ -126,13 +132,15 @@ func TestProcessRunPreparesCustomMedicalTypeRecord(t *testing.T) {
 		t.Fatalf("preview = %q, want custom medical type", operation.Preview)
 	}
 	var payload struct {
-		MedicalType       string `json:"medical_type"`
-		CustomMedicalType string `json:"custom_medical_type"`
+		Request struct {
+			MedicalType       string `json:"medical_type"`
+			CustomMedicalType string `json:"custom_medical_type"`
+		} `json:"request"`
 	}
 	if err := json.Unmarshal([]byte(operation.Payload), &payload); err != nil {
 		t.Fatalf("payload = %s: %v", operation.Payload, err)
 	}
-	if payload.MedicalType != "other" || payload.CustomMedicalType != "过敏复查" {
+	if payload.Request.MedicalType != "other" || payload.Request.CustomMedicalType != "过敏复查" {
 		t.Fatalf("payload = %+v", payload)
 	}
 }
@@ -160,13 +168,15 @@ func TestPrepareCalendarRecordMedicalType(t *testing.T) {
 		t.Fatal(err)
 	}
 	var payload struct {
-		MedicalType       string `json:"medical_type"`
-		CustomMedicalType string `json:"custom_medical_type"`
+		Request struct {
+			MedicalType       string `json:"medical_type"`
+			CustomMedicalType string `json:"custom_medical_type"`
+		} `json:"request"`
 	}
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.MedicalType != "other" || payload.CustomMedicalType != "过敏复查" {
+	if payload.Request.MedicalType != "other" || payload.Request.CustomMedicalType != "过敏复查" {
 		t.Fatalf("payload = %s", raw)
 	}
 	if !strings.Contains(input.Summary, "过敏复查") {
@@ -192,6 +202,65 @@ func TestPrepareCalendarRecordMedicalType(t *testing.T) {
 	} {
 		if _, err := prepareInputForTool("create_calendar_record", args); err != nil {
 			t.Fatalf("%s should be accepted: %v", name, err)
+		}
+	}
+}
+
+func TestPrepareCalendarRecordSyncTargets(t *testing.T) {
+	base := func(overrides map[string]any) map[string]any {
+		args := map[string]any{
+			"pet_id":      "pet-1",
+			"category":    "daily",
+			"content":     "洗澡",
+			"occurred_at": "2026-09-23T20:00:00+08:00",
+		}
+		for key, value := range overrides {
+			args[key] = value
+		}
+		return args
+	}
+	syncTargetsOf := func(t *testing.T, input OperationPreviewInput) []string {
+		t.Helper()
+		raw, err := json.Marshal(input.Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var payload struct {
+			SyncTargets []string `json:"sync_targets"`
+		}
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			t.Fatal(err)
+		}
+		return payload.SyncTargets
+	}
+
+	input, err := prepareInputForTool("create_calendar_record", base(map[string]any{"sync_targets": []any{"growth"}}))
+	if err != nil {
+		t.Fatalf("prepareInputForTool: %v", err)
+	}
+	if targets := syncTargetsOf(t, input); len(targets) != 1 || targets[0] != "growth" {
+		t.Fatalf("sync_targets = %v, want [growth]", targets)
+	}
+	if strings.Contains(input.Summary, "同步") {
+		t.Fatalf("summary = %q, want preview without sync (sync is chosen on the confirm card)", input.Summary)
+	}
+
+	input, err = prepareInputForTool("create_calendar_record", base(map[string]any{"sync_targets": []any{"growth", "growth"}}))
+	if err != nil {
+		t.Fatalf("prepareInputForTool: %v", err)
+	}
+	if targets := syncTargetsOf(t, input); len(targets) != 1 || targets[0] != "growth" {
+		t.Fatalf("sync_targets = %v, want deduped [growth]", targets)
+	}
+
+	for name, args := range map[string]map[string]any{
+		"非数组":    base(map[string]any{"sync_targets": "growth"}),
+		"未知目标":   base(map[string]any{"sync_targets": []any{"calendar"}}),
+		"生日纪念页":  base(map[string]any{"sync_targets": []any{"birthday"}}),
+		"元素非字符串": base(map[string]any{"sync_targets": []any{1}}),
+	} {
+		if _, err := prepareInputForTool("create_calendar_record", args); err == nil {
+			t.Fatalf("%s should be rejected before freezing the preview", name)
 		}
 	}
 }

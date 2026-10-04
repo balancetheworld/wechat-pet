@@ -94,7 +94,7 @@ func TestDefaultToolParameterNames(t *testing.T) {
 	assertParamNames(t, toolByName(t, tools, "aggregate_health_records"),
 		"pet_id", "category", "medical_type", "custom_medical_type", "start_at", "end_at")
 	assertParamNames(t, toolByName(t, tools, "create_calendar_record"),
-		"pet_id", "category", "medical_type", "custom_medical_type", "content", "occurred_at")
+		"pet_id", "category", "medical_type", "custom_medical_type", "content", "occurred_at", "sync_targets")
 }
 
 // TestDefaultToolsMatchBusinessReadPorts 锁定工具的动作/资源类型与五方法一一对应。

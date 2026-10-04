@@ -167,6 +167,13 @@ export default function PetEdit() {
 
   /* --- 提交 --- */
   async function handleSubmit() {
+    if (submitting) {
+      return
+    }
+    if (loading) {
+      await Taro.showToast({ title: '正在加载宠物信息，请稍候', icon: 'none' })
+      return
+    }
     const value = formName.trim()
     if (value.length < 1 || value.length > 12) {
       await Taro.showToast({ title: '名字长度需为 1-12 个字符', icon: 'none' })
@@ -175,9 +182,6 @@ export default function PetEdit() {
     const breedValue = formBreed.trim()
     if (breedValue.length < 1) {
       await Taro.showToast({ title: '请填写品种', icon: 'none' })
-      return
-    }
-    if (submitting || loading) {
       return
     }
     setSubmitting(true)
@@ -406,7 +410,7 @@ export default function PetEdit() {
         <Button className="secondary-button" onClick={() => { void navigateBack() }}>取消</Button>
         <Button
           className="primary-button"
-          disabled={!formName.trim() || !formBreed.trim() || submitting || loading}
+          disabled={submitting}
           onClick={handleSubmit}
         >
           {isEdit ? '保存修改' : '添加到家庭'}

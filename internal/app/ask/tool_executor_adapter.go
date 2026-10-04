@@ -230,6 +230,10 @@ func prepareInputForTool(toolName string, args map[string]any) (OperationPreview
 		if _, err := time.Parse(time.RFC3339, occurredAt); err != nil {
 			return OperationPreviewInput{}, fmt.Errorf("occurred_at must be RFC3339")
 		}
+		syncTargets, err := parseCalendarSyncTargets(args["sync_targets"])
+		if err != nil {
+			return OperationPreviewInput{}, err
+		}
 		medicalType, _ := args["medical_type"].(string)
 		medicalType = strings.TrimSpace(medicalType)
 		customMedicalType, _ := args["custom_medical_type"].(string)
@@ -253,7 +257,7 @@ func prepareInputForTool(toolName string, args map[string]any) (OperationPreview
 			}
 		}
 		request := calendarapp.CreateRecordRequest{PetID: petID, Category: category, Content: content, OccurredAt: occurredAt, MedicalType: medicalType, CustomMedicalType: customMedicalType}
-		return OperationPreviewInput{Target: operationTargetCalendarRecordCreate, Summary: calendarRecordSummary(request), Payload: request}, nil
+		return OperationPreviewInput{Target: operationTargetCalendarRecordCreate, Summary: calendarRecordSummary(request), Payload: calendarRecordCreatePayload{Request: request, SyncTargets: syncTargets}}, nil
 	case "update_calendar_record":
 		recordID, _ := args["record_id"].(string)
 		if recordID == "" {
@@ -415,6 +419,34 @@ func calendarRecordSummary(request calendarapp.CreateRecordRequest) string {
 		occurred = parsed.In(askTimezone).Format("2006-01-02 15:04")
 	}
 	return "新增" + label + "：" + occurred + " " + request.Content
+}
+
+// parseCalendarSyncTargets 校验并去重 sync_targets；缺省时返回 nil，表示不同步档案。
+func parseCalendarSyncTargets(value any) ([]string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	items, ok := value.([]any)
+	if !ok {
+		return nil, fmt.Errorf("sync_targets must be an array")
+	}
+	targets := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		target, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("sync_targets must contain strings")
+		}
+		if !validCalendarSyncTarget(target) {
+			return nil, fmt.Errorf("sync_targets must be growth")
+		}
+		if _, exists := seen[target]; exists {
+			continue
+		}
+		seen[target] = struct{}{}
+		targets = append(targets, target)
+	}
+	return targets, nil
 }
 
 // calendarRecordUpdateSummary 生成记录修改预览摘要（服务端确定性文案）。

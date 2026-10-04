@@ -81,6 +81,7 @@ type OperationDTO struct {
 	Preview     string          `json:"preview"`
 	Target      string          `json:"target"`
 	Result      string          `json:"result"`
+	SyncTargets []string        `json:"sync_targets"`
 	Version     int             `json:"version"`
 	ConfirmedAt *time.Time      `json:"confirmed_at"`
 	ExpiresAt   *time.Time      `json:"expires_at"`
@@ -151,7 +152,23 @@ func NewExecutionDTO(value ExecutionResult) ExecutionDTO {
 }
 
 func NewOperationDTO(value Operation) OperationDTO {
-	return OperationDTO{ID: value.ID, SessionID: value.SessionID, RunID: value.RunID, Status: value.Status, Preview: value.Preview, Target: value.Target, Result: value.Result, Version: value.Version, ConfirmedAt: value.ConfirmedAt, ExpiresAt: value.ExpiresAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+	return OperationDTO{ID: value.ID, SessionID: value.SessionID, RunID: value.RunID, Status: value.Status, Preview: value.Preview, Target: value.Target, Result: value.Result, SyncTargets: operationSyncTargets(value), Version: value.Version, ConfirmedAt: value.ConfirmedAt, ExpiresAt: value.ExpiresAt, CreatedAt: value.CreatedAt, UpdatedAt: value.UpdatedAt}
+}
+
+// operationSyncTargets 返回卡片展示的档案同步目标：未确认时为模型建议（作为默认勾选），
+// 确认后为用户最终选择。
+func operationSyncTargets(value Operation) []string {
+	if value.Target != operationTargetCalendarRecordCreate {
+		return nil
+	}
+	if targets, ok := confirmedCalendarSyncTargets(value.Result); ok {
+		return targets
+	}
+	var payload calendarRecordCreatePayload
+	if err := json.Unmarshal([]byte(value.Payload), &payload); err != nil {
+		return nil
+	}
+	return payload.SyncTargets
 }
 
 func NewSnapshotDTO(value Snapshot) SnapshotDTO {
