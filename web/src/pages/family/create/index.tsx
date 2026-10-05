@@ -30,7 +30,7 @@ export default function CreateFamily() {
         useAuthStore.getState().setUserProfile(user, { id: family.id, name: family.name }, 'owner')
       }
       await Taro.showToast({ title: '家庭已创建', icon: 'success' })
-      await reLaunch(routes.pages.home)
+      await reLaunch(routes.tabs.calendar)
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '创建失败，请重试'

@@ -259,7 +259,8 @@ export default function ProfileOnboarding() {
       await Taro.showToast({ title: '家庭已创建', icon: 'success' })
       /* 首次登录悬浮猫指引: 建完家庭进入日历页后开始第 7-8 轮跨页指引 */
       Taro.setStorageSync('pet-first-guide', 'calendar')
-      await reLaunch(routes.pages.home)
+      /* 直接进日历主界面, 不再绕旧版首页 /pages/index/index */
+      await reLaunch(routes.tabs.calendar)
     }
     catch (error) {
       const message = error instanceof Error ? error.message : '创建失败，请重试'

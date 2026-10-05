@@ -472,15 +472,23 @@ export default function Calendar() {
         })
         /* 同步到档案(可选): 勾选后把这条记录同时写进对应章节; 同步失败不影响日历记录本身 */
         if (syncTargets.length) {
-          try {
-            if (syncTargets.includes('growth')) {
+          /* 事件记录与生日记录各自独立: 一项失败不应连累另一项, 且需保留真实错误便于排查 */
+          if (syncTargets.includes('growth')) {
+            try {
               await createPetResource(petID, 'growth-events', {
                 type: category === 'medical' ? (medicalTypeLabel(medicalType, customMedicalType.trim()) || '医疗') : '日常',
-                occurred_at: occurredAt,
+                /* 档案接口的 occurred_at 只接受 YYYY-MM-DD (后端 time.Parse("2006-01-02")), 传 RFC3339 会 400 */
+                occurred_at: formDate,
                 content: content.trim() || '这一天发生了一件值得记录的事',
               })
             }
-            if (syncTargets.includes('birthday')) {
+            catch (error) {
+              syncFailed = true
+              console.error('[calendar] 同步成长足迹页失败', error)
+            }
+          }
+          if (syncTargets.includes('birthday')) {
+            try {
               const year = Number.parseInt(formDate.slice(0, 4), 10)
               /* 年龄 = 记录日期时的实岁 (按宠物出生日期推算, 无生日则记 0) */
               let age = 0
@@ -514,9 +522,10 @@ export default function Calendar() {
                 })))
               }
             }
-          }
-          catch {
-            syncFailed = true
+            catch (error) {
+              syncFailed = true
+              console.error('[calendar] 同步生日纪念页失败', error)
+            }
           }
         }
       }

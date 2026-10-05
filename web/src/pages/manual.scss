@@ -364,6 +364,10 @@
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 12rpx;
+  /* 照片较多时限制高度并允许下滑查看, 保证每一张都能看到 */
+  max-height: 760rpx;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .detail-image-grid .detail-image:only-child {

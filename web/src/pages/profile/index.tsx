@@ -125,6 +125,53 @@ const PAGE_PAPER_STYLE: CSSProperties = {
 /* 体重数值统一保留两位小数展示 */
 const fmtWeight = (value: number) => Number(value).toFixed(2)
 
+/* 体重折线图: 取最近 8 次称重, 按时间旧 → 新从左到右 */
+const WEIGHT_CHART_MAX_POINTS = 8
+/* 折线用多少个小方块"栅格化"出整条线 (越多越平滑, 方块互相重叠所以看起来是连续的线) */
+const WEIGHT_CHART_COLUMNS = 80
+/* 折线左右留白(%), 避免首尾方块被卡片边缘裁掉一半 */
+const WEIGHT_CHART_INSET = 1.6
+
+/**
+ * 把体重序列换算成折线图上的百分比坐标。
+ * 原来这里的 .chart-line 是一条写死的装饰线(永远是从左下到右上), 与数据无关;
+ * 现在按每条记录的实际体重算位置, 数据变了线形就变。
+ * 用百分比定位 + 一串小方块拼线, 纯 View 实现, weapp / h5 表现一致。
+ */
+function buildWeightChart(values: number[]) {
+  if (values.length === 0) {
+    return { dots: [] as Array<{ left: number, bottom: number }>, line: [] as Array<{ left: number, bottom: number }> }
+  }
+  const min = Math.min(...values)
+  const max = Math.max(...values)
+  const span = max - min
+  /* 体重 → 垂直百分比: 上下各留 12% 边距; 所有值相同时画在中间 */
+  const toBottom = (value: number) => (span === 0 ? 50 : 12 + ((value - min) / span) * 76)
+  const toLeft = (ratio: number) => WEIGHT_CHART_INSET + ratio * (100 - WEIGHT_CHART_INSET * 2)
+
+  const dots = values.map((value, index) => ({
+    left: toLeft(values.length === 1 ? 0.5 : index / (values.length - 1)),
+    bottom: toBottom(value),
+  }))
+  if (values.length === 1) {
+    return { dots, line: dots }
+  }
+
+  /* 沿折线等距采样出若干个点, 每个点渲染一个小方块 (相邻方块重叠 → 连成一条线) */
+  const line: Array<{ left: number, bottom: number }> = []
+  for (let column = 0; column < WEIGHT_CHART_COLUMNS; column++) {
+    const ratio = column / (WEIGHT_CHART_COLUMNS - 1)
+    const position = ratio * (values.length - 1)
+    const start = Math.min(values.length - 2, Math.floor(position))
+    const offset = position - start
+    line.push({
+      left: toLeft(ratio),
+      bottom: toBottom(values[start] + (values[start + 1] - values[start]) * offset),
+    })
+  }
+  return { dots, line }
+}
+
 /* 健康资料页体重卡片: 展示最近三条记录 */
 const HEALTH_WEIGHT_PREVIEW = 3
 /* 体重合法区间 (kg), 防止误输 */
@@ -192,6 +239,54 @@ function writeLocalGrowthEvents(petID: string, events: GrowthEvent[]) {
   }
   catch {
     /* 存储失败静默忽略: 记录仍会在本次会话内显示 */
+  }
+}
+
+/* 预置标签(preset-tag-*)编辑/删除的本地缓存: 预置项不是服务端记录无法 PATCH/DELETE,
+   修改与删除结果都存本地, 加载档案时应用, 保证不因重新拉取而回退或复活 */
+interface TagOverride { trait: string, value: string }
+
+const tagOverridesStorageKey = (petID: string) => `pet-tag-overrides-${petID}`
+const deletedTagsStorageKey = (petID: string) => `pet-tags-deleted-${petID}`
+
+function readTagOverrides(petID: string): Record<string, TagOverride> {
+  try {
+    const stored = Taro.getStorageSync<unknown>(tagOverridesStorageKey(petID))
+    if (stored && typeof stored === 'object' && !Array.isArray(stored)) {
+      return stored as Record<string, TagOverride>
+    }
+    return {}
+  }
+  catch {
+    return {}
+  }
+}
+
+function writeTagOverrides(petID: string, overrides: Record<string, TagOverride>) {
+  try {
+    Taro.setStorageSync(tagOverridesStorageKey(petID), overrides)
+  }
+  catch {
+    /* 存储失败静默忽略 */
+  }
+}
+
+function readDeletedTagIDs(petID: string): string[] {
+  try {
+    const stored = Taro.getStorageSync<unknown>(deletedTagsStorageKey(petID))
+    return Array.isArray(stored) ? (stored as string[]) : []
+  }
+  catch {
+    return []
+  }
+}
+
+function writeDeletedTagIDs(petID: string, ids: string[]) {
+  try {
+    Taro.setStorageSync(deletedTagsStorageKey(petID), ids)
+  }
+  catch {
+    /* 存储失败静默忽略 */
   }
 }
 
@@ -295,6 +390,12 @@ function formatDate(value?: string) {
   return value ? value.slice(0, 10) : '暂无记录'
 }
 
+/* 今天的 YYYY-MM-DD (本地时区), 作为添加生日记录时的日期默认值 */
+function formatToday() {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 function formatGender(value: string) {
   if (value === 'male') {
     return '男孩'
@@ -328,9 +429,15 @@ export default function Profile() {
   const [weightFormDate, setWeightFormDate] = useState('')
   const [weightFormEditingID, setWeightFormEditingID] = useState('')
   const [weightSubmitting, setWeightSubmitting] = useState(false)
+  /* 体重记录弹层: 点体重卡片打开, 列出全部记录并可修改 / 删除 */
+  const [weightListOpen, setWeightListOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(0)
-  const [touchStartX, setTouchStartX] = useState<number | null>(null)
+  /* 滑动起点用 ref 而非 state: 轻点(无位移)时不能触发任何重渲染,
+     否则 book-card 会在手势期间重建, 微信小程序会把同一次手势的 tap 丢掉,
+     表现为"章节内的按钮要点两下才响应"。只有真正滑动时才 setDragging 开动画。 */
+  const touchStartXRef = useRef<number | null>(null)
+  const [dragging, setDragging] = useState(false)
   const [touchDeltaX, setTouchDeltaX] = useState(0)
   const [turning, setTurning] = useState(false)
   const [turnDirection, setTurnDirection] = useState<'next' | 'previous' | null>(null)
@@ -372,8 +479,8 @@ export default function Profile() {
   /* ===== 生日纪念册添加记录 (通用档案资源 POST birthday-records + birthday-media) ===== */
   const [birthdayFormVisible, setBirthdayFormVisible] = useState(false)
   const [birthdayFormPetID, setBirthdayFormPetID] = useState('')
-  const [birthdayFormYear, setBirthdayFormYear] = useState(String(new Date().getFullYear()))
-  const [birthdayFormAge, setBirthdayFormAge] = useState('')
+  /* 生日日期 (YYYY-MM-DD): 年份与年龄都由它推导, 无需手填 */
+  const [birthdayFormDate, setBirthdayFormDate] = useState('')
   const [birthdayFormSummary, setBirthdayFormSummary] = useState('')
   const [birthdaySubmitting, setBirthdaySubmitting] = useState(false)
   const [birthdayFormMediaAssetIDs, setBirthdayFormMediaAssetIDs] = useState<string[]>([])
@@ -476,6 +583,12 @@ export default function Profile() {
       setProfile(petProfile)
       /* 个性页: 预置标签/问答固定展示在前, 后端已有且不重复的条目追加在后 */
       const presetTraits = new Set(DEFAULT_PERSONALITY.map(tag => tag.trait))
+      /* 预置标签应用本地编辑覆盖与删除名单, 与服务端标签合并展示 */
+      const tagOverrides = readTagOverrides(pet.id)
+      const deletedTagIDs = new Set(readDeletedTagIDs(pet.id))
+      const displayPresetTags = DEFAULT_PERSONALITY
+        .map(tag => (tagOverrides[tag.id] ? { ...tag, ...tagOverrides[tag.id] } : tag))
+        .filter(tag => !deletedTagIDs.has(tag.id))
       /* 预置问答应用本地编辑覆盖(用户改过的预置项以修改后的内容展示) */
       const questionOverrides = readQuestionOverrides(pet.id)
       const displayPresetQuestions = DEFAULT_QUESTIONS.map(q => (
@@ -485,8 +598,8 @@ export default function Profile() {
       /* 应用本地删除名单: 被用户删掉的问答(含预置)不再展示 */
       const deletedQuestionIDs = new Set(readDeletedQuestionIDs(pet.id))
       setPersonality([
-        ...DEFAULT_PERSONALITY,
-        ...personalityItems.filter(item => !presetTraits.has(item.trait)),
+        ...displayPresetTags,
+        ...personalityItems.filter(item => !presetTraits.has(item.trait) && !deletedTagIDs.has(item.id)),
       ])
       setQuestions([
         ...displayPresetQuestions.filter(q => !deletedQuestionIDs.has(q.id)),
@@ -596,18 +709,36 @@ export default function Profile() {
   }, [pets])
 
   /* 从宠物表单保存返回时刷新档案: useDidShow 在每次页面显示(含 navigateBack)时触发;
-     首次显示跳过, 由上方 useEffect 负责初始加载, 避免重复请求 */
+     首次挂载由上方 useEffect 负责初始加载, 此处跳过以免重复请求。
+     注意: 不能用闭包里的 selectedPet 做判断 —— 首次添加宠物返回时闭包仍是空列表,
+     必须每次都向服务端拉最新宠物列表, 再决定加载哪只宠物的档案。 */
   const hasShownOnceRef = useRef(false)
   useDidShow(() => {
     if (!hasShownOnceRef.current) {
       hasShownOnceRef.current = true
       return
     }
-    if (selectedPet) {
-      void loadProfile(selectedPet, true)
-      /* 宠物名/列表也可能被表单改过, 一并刷新(失败不影响档案) */
-      getPets().then(setPets).catch(() => {})
-    }
+    /* 宠物列表可能刚被表单改过(新增/改名/删除), 先刷新列表 */
+    getPets().then((latestPets) => {
+      const { pets: cachedPets, currentPetId, setPets: applyPets } = usePetStore.getState()
+      /* 内容无变化就不 setPets: 避免无谓替换数组引用, 触发挂载 effect 重复请求 */
+      const changed = latestPets.length !== cachedPets.length
+        || latestPets.some((pet, index) => pet.id !== cachedPets[index]?.id || pet.name !== cachedPets[index]?.name)
+      if (changed) {
+        applyPets(latestPets)
+      }
+      const target = latestPets.find(item => item.id === currentPetId) || latestPets[0]
+      if (!target) {
+        return
+      }
+      /* 列表有变化时由挂载 effect(依赖 selectedPet) 负责加载;
+         列表没变但 store 里原本为空(如首次从"无宠物"返回), 需要在这里补一次加载 */
+      if (!changed && !cachedPets.length) {
+        void loadProfile(target, true)
+      }
+    }).catch(() => {
+      /* 列表刷新失败不影响已有档案展示 */
+    })
   })
 
   const goToPage = useCallback((page: number) => {
@@ -624,46 +755,53 @@ export default function Profile() {
     if (!touch) {
       return
     }
-    setTouchStartX(touch.clientX)
-    setTouchDeltaX(0)
-    setTurnDirection(null)
+    /* 只记录起点, 不 setState: 轻点必须零重渲染, 否则会吞掉章节内的 click */
+    touchStartXRef.current = touch.clientX
   }, [turning])
 
   const handleTouchMove = useCallback((event: CommonEvent) => {
-    if (touchStartX === null) {
+    const startX = touchStartXRef.current
+    if (startX === null) {
       return
     }
     const touch = (event as Partial<ITouchEvent>).touches?.[0]
     if (!touch) {
       return
     }
-    const deltaX = touch.clientX - touchStartX
+    const deltaX = touch.clientX - startX
+    /* 位移小于 8px 视为手指抖动/轻点, 保持零 setState */
+    if (Math.abs(deltaX) < 8 && !dragging) {
+      return
+    }
     if ((deltaX < 0 && currentPage >= pageCount - 1) || (deltaX > 0 && currentPage <= 0)) {
       setTouchDeltaX(0)
       setTurnDirection(null)
+      setDragging(false)
       return
     }
+    setDragging(true)
     setTouchDeltaX(Math.max(-360, Math.min(360, deltaX)))
     setTurnDirection(deltaX < 0 ? 'next' : 'previous')
-  }, [currentPage, pageCount, touchStartX])
+  }, [currentPage, dragging, pageCount])
 
   const handleTouchEnd = useCallback((event: CommonEvent) => {
-    if (touchStartX === null) {
+    const startX = touchStartXRef.current
+    touchStartXRef.current = null
+    if (startX === null) {
       return
     }
     const touch = (event as Partial<ITouchEvent>).changedTouches?.[0]
-    if (!touch) {
-      setTouchStartX(null)
-      return
-    }
-    const deltaX = touch.clientX - touchStartX
-    setTouchStartX(null)
+    const deltaX = touch ? touch.clientX - startX : 0
     const rotation = Math.max(-180, Math.min(180, deltaX * 0.5))
     const canTurnNext = rotation <= -35 && currentPage < pageCount - 1
     const canTurnPrevious = rotation >= 35 && currentPage > 0
     if (!canTurnNext && !canTurnPrevious) {
-      setTouchDeltaX(0)
-      setTurnDirection(null)
+      /* 轻点/小幅抖动: 只在确实拖动过时才需要复位, 否则不求任何 setState */
+      if (dragging) {
+        setDragging(false)
+        setTouchDeltaX(0)
+        setTurnDirection(null)
+      }
       return
     }
     const direction = canTurnNext ? 'next' : 'previous'
@@ -684,7 +822,7 @@ export default function Profile() {
         setTurning(false)
       }, 30)
     }, 400)
-  }, [currentPage, goToPage, pageCount, touchStartX])
+  }, [currentPage, dragging, goToPage, pageCount])
 
   const openDetail = (title: string, subtitle: string, body: string, onSave?: (newBody: string, newTitle?: string, newDate?: string) => void, editableTitle?: boolean, meta?: string, editableDate?: boolean, image?: string, images?: string[]) => {
     /* 编辑章节下若调用方未传 onSave, 自动提供一个本地保存提示 */
@@ -701,7 +839,7 @@ export default function Profile() {
     setDetailDateDraft(editableDate ? (meta || '').split(' · ')[0] || '' : '')
   }
 
-  /* 个性说明书: 添加标签 — 直接复用与"修改"标签相同的详情卡(填写→保存) */
+  /* 个性说明书: 添加标签 — 填写后写入后端 pet_personality */
   const openAddPersonalityTag = () => {
     openDetail(
       '添加性格标签',
@@ -713,8 +851,27 @@ export default function Profile() {
           Taro.showToast({ title: '标签内容不能为空', icon: 'none' })
           return
         }
-        setPersonality(previous => [...previous, { id: `local-${Date.now()}`, trait: trimmed, value: '' }])
-        Taro.showToast({ title: '已添加标签', icon: 'success' })
+        const petID = selectedPet?.id
+        const localID = `local-${Date.now()}`
+        /* 本地先插入, 弹窗关闭后立即可见 */
+        setPersonality(previous => [...previous, { id: localID, trait: trimmed, value: '' }])
+        if (!petID) {
+          Taro.showToast({ title: '已添加标签', icon: 'success' })
+          return
+        }
+        void createPetResource(petID, 'personality', { trait: trimmed, value: '' })
+          .then(() => {
+            Taro.showToast({ title: '已添加标签', icon: 'success' })
+            /* 静默重拉, 用服务端返回的真实记录替换本地临时条目 */
+            if (selectedPet) {
+              void loadProfile(selectedPet, true)
+            }
+          })
+          .catch(() => {
+            /* 同步失败: 撤回本地条目, 避免刷新后"凭空消失"造成困惑 */
+            setPersonality(previous => previous.filter(item => item.id !== localID))
+            Taro.showToast({ title: '保存失败,请重试', icon: 'none' })
+          })
       },
     )
   }
@@ -758,34 +915,38 @@ export default function Profile() {
     )
   }
 
-  /* 健康资料: 打开详情卡可编辑; 保存 PUT 到后端 pet_health 持久化, 同时写本地缓存兜底 */
+  /* 健康资料: 仅编辑态(editingChapter==='health')下点开可修改并保存;
+     非编辑态点开为纯查看(不传 onSave, 弹层渲染为只读文本) */
   const openHealthNote = (key: HealthNoteKey, label: string, placeholder: string) => {
     const saved = healthNotes[key]
+    const editable = editingChapter === 'health'
     openDetail(
       label,
       saved ? '已保存' : '暂无记录',
       saved || placeholder,
-      (newBody: string) => {
-        const trimmed = newBody.trim()
-        const petID = selectedPet?.id
-        const next = { ...healthNotes, [key]: trimmed }
-        /* 先更新界面(乐观), 再异步持久化到服务端 */
-        setHealthNotes(next)
-        if (!petID) {
-          return
-        }
-        /* 本地缓存始终兜底一份 */
-        writeHealthNotes(petID, next)
-        void putPetHealth(petID, {
-          status: '',
-          allergies: next.allergy,
-          disease: next.disease,
-          long_term_medication: next.medication,
-          vaccine: next.vaccine,
-        })
-          .then(() => Taro.showToast({ title: '已保存', icon: 'success' }))
-          .catch(() => Taro.showToast({ title: '云端保存失败,已存本机', icon: 'none' }))
-      },
+      editable
+        ? (newBody: string) => {
+            const trimmed = newBody.trim()
+            const petID = selectedPet?.id
+            const next = { ...healthNotes, [key]: trimmed }
+            /* 先更新界面(乐观), 再异步持久化到服务端 */
+            setHealthNotes(next)
+            if (!petID) {
+              return
+            }
+            /* 本地缓存始终兜底一份 */
+            writeHealthNotes(petID, next)
+            void putPetHealth(petID, {
+              status: '',
+              allergies: next.allergy,
+              disease: next.disease,
+              long_term_medication: next.medication,
+              vaccine: next.vaccine,
+            })
+              .then(() => Taro.showToast({ title: '已保存', icon: 'success' }))
+              .catch(() => Taro.showToast({ title: '云端保存失败,已存本机', icon: 'none' }))
+          }
+        : undefined,
     )
   }
 
@@ -883,20 +1044,63 @@ export default function Profile() {
     }
   }
 
+  /* 删除一张已选图片: 同步移除本地预览路径与已上传的 asset_id, 保证保存时不会再带上它 */
+  function handleRemoveGrowthImage(index: number) {
+    setGrowthFormLocalImagePaths(previous => previous.filter((_, pathIndex) => pathIndex !== index))
+    setGrowthFormMediaAssetIDs(previous => previous.filter((_, assetIndex) => assetIndex !== index))
+  }
+
+  /* 弹层内已选图片的缩略图网格: 点图可全屏预览, 点右上角 × 可删除重选
+     (生日记录 / 成长足迹等表单共用同一套观感, 与证件表单的缩略图一致) */
+  const renderFormImageThumbs = (paths: string[], onRemove: (index: number) => void) => (
+    paths.length > 0 && (
+      <View className="cal-image-thumbs">
+        {paths.map((path, index) => (
+          <View className="cal-image-thumb-cell" key={`${path}-${index}`}>
+            <Image
+              className="cal-image-thumb-pic"
+              src={path}
+              mode="aspectFill"
+              onClick={() => void Taro.previewImage({ urls: paths, current: path })}
+            />
+            <View className="cal-image-thumb-del" onClick={() => onRemove(index)}>×</View>
+          </View>
+        ))}
+      </View>
+    )
+  )
+
   function closeGrowthForm() {
     setGrowthFormVisible(false)
   }
 
   /* ===== 生日纪念册添加记录 ===== */
+  /* 由"生日日期 + 宠物出生日期"自动算出这一岁是几岁 (实岁, 无出生日期则记 0) */
+  function computeBirthdayAge(recordDate: string, petBirthday?: string | null) {
+    const year = Number.parseInt(recordDate.slice(0, 4), 10)
+    if (!Number.isFinite(year)) {
+      return 0
+    }
+    const birth = (petBirthday || '').slice(0, 10)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(birth)) {
+      return 0
+    }
+    const birthYear = Number.parseInt(birth.slice(0, 4), 10)
+    const birthMonth = Number.parseInt(birth.slice(5, 7), 10)
+    const birthDay = Number.parseInt(birth.slice(8, 10), 10)
+    const recordMonth = Number.parseInt(recordDate.slice(5, 7), 10)
+    const recordDay = Number.parseInt(recordDate.slice(8, 10), 10)
+    const computed = year - birthYear - ((recordMonth < birthMonth) || (recordMonth === birthMonth && recordDay < birthDay) ? 1 : 0)
+    return Number.isFinite(computed) && computed >= 0 ? computed : 0
+  }
+
+  /* 年龄不进界面: 保存时由 computeBirthdayAge(生日日期, 宠物出生日期) 自动算出后随记录提交 */
+
   function openBirthdayForm() {
     const targetPetID = currentPetId || pets[0]?.id || ''
-    const now = new Date()
-    const year = now.getFullYear()
-    /* 默认几岁: 用宠物生日的年份推算, 推不出来留空让用户填 */
-    const birthYear = Number.parseInt((profile?.birthday || '').slice(0, 4), 10)
     setBirthdayFormPetID(targetPetID)
-    setBirthdayFormYear(String(year))
-    setBirthdayFormAge(Number.isFinite(birthYear) && birthYear > 0 ? String(year - birthYear) : '')
+    /* 默认就选今天: 年份与年龄都由该日期自动推导 */
+    setBirthdayFormDate(formatToday())
     setBirthdayFormSummary('')
     setBirthdayFormMediaAssetIDs([])
     setBirthdayFormLocalImagePaths([])
@@ -933,6 +1137,12 @@ export default function Profile() {
     }
   }
 
+  /* 删除一张已选照片: 同步移除本地预览路径与已上传的 asset_id, 保证保存时不会再带上它 */
+  function handleRemoveBirthdayImage(index: number) {
+    setBirthdayFormLocalImagePaths(previous => previous.filter((_, pathIndex) => pathIndex !== index))
+    setBirthdayFormMediaAssetIDs(previous => previous.filter((_, assetIndex) => assetIndex !== index))
+  }
+
   async function handleCreateBirthdayRecord() {
     if (birthdaySubmitting) {
       return
@@ -942,16 +1152,18 @@ export default function Profile() {
       await Taro.showToast({ title: '请选择宠物', icon: 'none' })
       return
     }
-    const year = Number.parseInt(birthdayFormYear, 10)
+    /* 年份与年龄都由所选日期推导, 无需用户手填 */
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(birthdayFormDate)) {
+      await Taro.showToast({ title: '请选择生日日期', icon: 'none' })
+      return
+    }
+    const year = Number.parseInt(birthdayFormDate.slice(0, 4), 10)
     if (!Number.isFinite(year) || year < 1990 || year > 2100) {
-      await Taro.showToast({ title: '请输入正确的年份', icon: 'none' })
+      await Taro.showToast({ title: '请选择正确的年份', icon: 'none' })
       return
     }
-    const age = Number.parseInt(birthdayFormAge, 10)
-    if (!Number.isFinite(age) || age < 0 || age > 50) {
-      await Taro.showToast({ title: '请输入正确的年龄', icon: 'none' })
-      return
-    }
+    /* 年龄: 按该日期与宠物出生日期自动计算实岁 */
+    const age = computeBirthdayAge(birthdayFormDate, profile?.birthday)
     if (birthdayFormUploading) {
       return
     }
@@ -1156,6 +1368,41 @@ export default function Profile() {
     }
   }
 
+  /* 编辑态点击性格标签的 ×: 删除(带确认)。预置标签不是服务端记录, 记入本地删除名单 */
+  async function handleDeletePersonalityTag(tag: PersonalityItem) {
+    const petID = selectedPet?.id
+    if (!petID) {
+      return
+    }
+    const confirmed = await Taro.showModal({
+      title: '删除标签',
+      content: `确定要删除标签「${tag.trait}」吗？删除后无法找回`,
+      cancelText: '取消',
+      confirmText: '删除',
+    })
+    if (!confirmed.confirm) {
+      return
+    }
+    if (tag.id.startsWith('preset-')) {
+      const ids = readDeletedTagIDs(petID)
+      if (!ids.includes(tag.id)) {
+        writeDeletedTagIDs(petID, [...ids, tag.id])
+      }
+      setPersonality(previous => previous.filter(item => item.id !== tag.id))
+      Taro.showToast({ title: '已删除', icon: 'success' })
+      return
+    }
+    try {
+      await deletePetResource(petID, 'personality', tag.id)
+      setPersonality(previous => previous.filter(item => item.id !== tag.id))
+      Taro.showToast({ title: '已删除', icon: 'success' })
+    }
+    catch (error) {
+      const message = error instanceof Error ? error.message : '删除失败,请重试'
+      await Taro.showToast({ title: message, icon: 'none' })
+    }
+  }
+
   /* 编辑态点击生日记录: 删除(带确认) */
   async function handleDeleteBirthday(record: BirthdayRecord) {
     const petID = currentPetId || pets[0]?.id || ''
@@ -1320,6 +1567,7 @@ export default function Profile() {
     }
   }
 
+  /* 删除一条体重记录 (体重记录弹层里每行右侧的小叉) */
   async function handleDeleteWeight(record: WeightRecord) {
     const petID = currentPetId || pets[0]?.id || ''
     if (!petID) {
@@ -1438,7 +1686,7 @@ export default function Profile() {
   /* 翻页方向派生态：决定哪一页是"翻起页"、翻起角度与纸张投影强度 */
   const flippingNext = turnDirection === 'next'
   const flippingPrevious = turnDirection === 'previous'
-  const isDragging = touchStartX !== null || resetting
+  const isDragging = dragging || resetting
   /* 往前翻(next)：当前页绕左书脊向左翻 0 → -180 */
   const currentRotation = flippingNext ? Math.max(-180, Math.min(0, touchDeltaX * 0.5)) : 0
   /* 往后翻(previous)：上一页从左侧 -180 翻回 0 */
@@ -1679,17 +1927,41 @@ export default function Profile() {
                     <Text
                       className="tag-capsule-text"
                       onClick={() => {
-                        if (isEditing) {
-                          /* 编辑态: 点标签文字进入详情卡可编辑 */
-                          openDetail(
-                            `性格标签 · ${item.trait}`,
-                            '点下方"记录内容"修改此标签',
-                            tagBody,
-                            (_newBody: string) => {
-                              Taro.showToast({ title: `已更新标签"${item.trait}"`, icon: 'success' })
-                            },
-                          )
+                        if (!isEditing) {
+                          return
                         }
+                        /* 编辑态: 点标签文字进入详情卡, 可同时修改名称与补充说明 */
+                        openDetail(
+                          item.trait,
+                          '可修改标签名称，并补充它的说明',
+                          item.value || '',
+                          (newBody: string, newTitle?: string) => {
+                            const petID = selectedPet?.id
+                            if (!petID) {
+                              return
+                            }
+                            const nextTrait = (newTitle ?? '').trim() || item.trait
+                            const nextValue = newBody.trim()
+                            /* 本地先更新, 弹窗关闭后立即可见 */
+                            setPersonality(previous => previous.map(tag => (
+                              tag.id === item.id ? { ...tag, trait: nextTrait, value: nextValue } : tag
+                            )))
+                            if (item.id.startsWith('preset-')) {
+                              /* 预置标签不是服务端记录: 写入本地覆盖缓存, 重拉合并后不回退 */
+                              const overrides = readTagOverrides(petID)
+                              overrides[item.id] = { trait: nextTrait, value: nextValue }
+                              writeTagOverrides(petID, overrides)
+                              Taro.showToast({ title: '已保存修改', icon: 'success' })
+                            }
+                            else {
+                              /* 服务端标签: PATCH 持久化到后端 */
+                              void updatePetResource(petID, 'personality', item.id, { trait: nextTrait, value: nextValue })
+                                .then(() => Taro.showToast({ title: '已保存修改', icon: 'success' }))
+                                .catch(() => Taro.showToast({ title: '保存失败,请重试', icon: 'none' }))
+                            }
+                          },
+                          true,
+                        )
                       }}
                     >
                       {tagBody}
@@ -1698,8 +1970,7 @@ export default function Profile() {
                       <Text
                         className="tag-capsule-close"
                         onClick={() => {
-                          /* 编辑态: 点 × 删除该标签 (本地 state, 不写后端) */
-                          Taro.showToast({ title: `已删除标签"${item.trait}"`, icon: 'success' })
+                          void handleDeletePersonalityTag(item)
                         }}
                       >
                         ×
@@ -1862,10 +2133,18 @@ export default function Profile() {
   }
 
   /* ===== 章节: 生日纪念册（每页 3 条记录，超出自动开新页） ===== */
-  /* 生日记录关联的第一张照片 URL (无照片返回空串) */
+  /* 生日记录关联的第一张照片 URL (无照片返回空串) — 仅用于大图卡封面 */
   const birthdayRecordImage = (recordID: string) => {
     const media = birthdayMedia.find(item => item.record_id === recordID)
     return media ? assetURL(media.asset_id) : ''
+  }
+
+  /* 生日记录关联的全部照片 URL — 详情卡内可逐张下滑查看 */
+  const birthdayRecordImages = (recordID: string) => {
+    return birthdayMedia
+      .filter(item => item.record_id === recordID)
+      .map(item => assetURL(item.asset_id))
+      .filter(url => !!url)
   }
 
   const renderBirthdayPage = (part: number) => {
@@ -1907,9 +2186,36 @@ export default function Profile() {
             </View>
           )}
           {partRecords.map((r, i) => {
-            /* 详情卡附照片: 取该记录的第一张生日照片(有才显示, 只显示一张) */
+            /* 大图卡封面只取第一张; 详情卡内展示该记录的全部照片(多张可下滑查看) */
             const recordImage = birthdayRecordImage(r.id)
-            const open = () => openDetail(`${r.age} 生日`, r.summary || '暂无简介', `出生于 ${r.year} 年。这一年的故事是：${r.summary || '正在补充中'}。`, undefined, undefined, undefined, undefined, recordImage)
+            const recordImages = birthdayRecordImages(r.id)
+            const open = () => openDetail(
+              `${r.age} 生日`,
+              r.summary || '暂无简介',
+              `出生于 ${r.year} 年。这一年的故事是：${r.summary || '正在补充中'}。`,
+              editingChapter === 'birthday'
+                ? (newBody: string) => {
+                    /* 编辑态: 允许修改这一年的故事 */
+                    const trimmed = newBody.trim()
+                    setBirthdayRecords(previous => previous.map(item => (
+                      item.id === r.id ? { ...item, summary: trimmed } : item
+                    )))
+                    const petID = currentPetId || pets[0]?.id || ''
+                    if (!petID) {
+                      Taro.showToast({ title: '已保存修改', icon: 'success' })
+                      return
+                    }
+                    void updatePetResource(petID, 'birthday-records', r.id, { summary: trimmed })
+                      .then(() => Taro.showToast({ title: '已保存修改', icon: 'success' }))
+                      .catch(() => Taro.showToast({ title: '保存失败,请重试', icon: 'none' }))
+                  }
+                : undefined,
+              undefined,
+              undefined,
+              undefined,
+              recordImage,
+              recordImages,
+            )
             if (start + i === 0) {
               return (
                 <View className="birthday-feature" key={r.id} onClick={open}>
@@ -1970,6 +2276,8 @@ export default function Profile() {
     const wLatest = recentWeights[0]
     const wPrev = recentWeights[1]
     const wDiff = wLatest && wPrev ? wLatest.weight - wPrev.weight : 0
+    /* 折线图: 最近 8 次称重, 旧 → 新 (左 → 右) */
+    const weightChart = buildWeightChart(sortedWeights.slice(0, WEIGHT_CHART_MAX_POINTS).reverse().map(item => item.weight))
     const sortedEvents = [...growthEvents].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))
     const partEvents = part === 1
       ? sortedEvents.slice(0, GROWTH_FIRST_PAGE_EVENTS)
@@ -1995,9 +2303,10 @@ export default function Profile() {
               <Text className="growth-section-title">体重记录</Text>
               <View
                 className="weight-card detail-trigger"
-                onClick={() => wLatest
-                  ? openDetail('体重记录', `当前 ${fmtWeight(wLatest.weight)} kg，比上次${wDiff < 0 ? '减少' : '增加'} ${Math.abs(wDiff).toFixed(2)} kg`, sortedWeights.map(w => `${(w.measured_at || '').slice(0, 10)} ${fmtWeight(w.weight)} kg`).join('\n'))
-                  : openDetail('体重记录', '暂无记录', '还没有体重记录，添加后这里会展示体重变化趋势。')}
+                onClick={() => {
+                  /* 点卡片打开"体重记录"弹层: 里面列出全部记录, 可修改 / 删除 */
+                  setWeightListOpen(true)
+                }}
               >
                 {wLatest
                   ? (
@@ -2013,8 +2322,21 @@ kg
                           </View>
                           <View className="weight-change">{wPrev ? `较上次 ${wDiff < 0 ? '−' : '+'}${Math.abs(wDiff).toFixed(2)}` : '首次记录'}</View>
                         </View>
-                        <View className="chart">
-                          <View className="chart-line" />
+                        <View className="weight-chart">
+                          {weightChart.line.map((point, index) => (
+                            <View
+                              key={`line-${index}`}
+                              className="weight-chart-seg"
+                              style={{ left: `${point.left}%`, bottom: `${point.bottom}%`, transform: 'translate(-50%, 50%)' }}
+                            />
+                          ))}
+                          {weightChart.dots.map((point, index) => (
+                            <View
+                              key={`dot-${index}`}
+                              className="weight-chart-dot"
+                              style={{ left: `${point.left}%`, bottom: `${point.bottom}%`, transform: 'translate(-50%, 50%)' }}
+                            />
+                          ))}
                         </View>
                       </>
                     )
@@ -2027,44 +2349,15 @@ kg
                       </View>
                     )}
               </View>
-              {/* 体重管理: 最近三次, 编辑态可改可删, 可添加 */}
-              <View className="health-weight">
-                {recentWeights.map((item, index) => (
-                  <View
-                    className={`weight-row${isEditing ? ' editable' : ''}`}
-                    key={item.id}
-                    onClick={() => {
-                      if (isEditing) {
-                        openWeightEdit(item)
-                      }
-                    }}
-                  >
-                    <Text className="weight-row-date">{(item.measured_at || '').slice(0, 10)}</Text>
-                    {index === 0 && <Text className="weight-row-badge">最新</Text>}
-                    <Text className="weight-row-value">
-                      {fmtWeight(item.weight)}
-                      {' kg'}
-                    </Text>
-                    {isEditing && (
-                      <View
-                        className="weight-row-del"
-                        onClick={(event) => {
-                          event.stopPropagation()
-                          void handleDeleteWeight(item)
-                        }}
-                      >
-                        ×
-                      </View>
-                    )}
-                  </View>
-                ))}
-                {recentWeights.length === 0 && (
-                  <Text className="weight-empty">还没有体重记录，编辑页面后可以记下第一次称重。</Text>
-                )}
-                {isEditing && (
+              {/* 体重明细行已全部移除: 查看点上方体重卡片, 修改点卡片进入表单, 新增用下方按钮 */}
+              {isEditing && (
+                <View className="health-weight">
                   <View className="inline-edit-add" onClick={openWeightForm}>＋ 记录体重</View>
-                )}
-              </View>
+                </View>
+              )}
+              {!isEditing && recentWeights.length === 0 && (
+                <Text className="weight-empty">还没有体重记录，编辑页面后可以记下第一次称重。</Text>
+              )}
               <View className="growth-events-head">
                 <Text className="growth-section-title">事件记录</Text>
               </View>
@@ -2223,6 +2516,9 @@ kg
   /* 目录：按章节跳转（跳到该章节的第 1 页） */
   const chapterStartPage = (key: ChapterKey) => pages.findIndex(p => p.chapter === key)
   const currentPageInfo = pages[currentPage] || pages[0]
+
+  /* 体重记录弹层用: 全部记录按测量日期 新 → 旧 */
+  const weightRecords = [...weights].sort((a, b) => b.measured_at.localeCompare(a.measured_at))
 
   /* 右上角"修改"按钮: 出现时从屏幕右侧滑入, 消失时向右滑出(封面/封底不显示)。
      章节在非封面/封底页之间切换时 active 保持 true, 按钮不重复播动画 */
@@ -2484,6 +2780,59 @@ kg
         </View>
       </View>
 
+      {/* 体重记录弹层: 点体重卡片打开, 列出全部记录; 点某一行=修改, 点右侧小叉=删除 */}
+      <View className={`overlay${weightListOpen ? ' open' : ''}`} onClick={() => setWeightListOpen(false)}>
+        <View className="sheet weight-list-sheet" onClick={event => event.stopPropagation()}>
+          <View className="handle" />
+          <View className="sheet-head">
+            <View className="sheet-head-main">
+              <Text className="h2">体重记录</Text>
+              <Text className="p">
+共
+{' '}
+{weightRecords.length}
+{' '}
+条 · 点记录可修改
+              </Text>
+            </View>
+            <Button className="close-button" onClick={() => setWeightListOpen(false)}>×</Button>
+          </View>
+          <View className="weight-list">
+            {weightRecords.length === 0 && (
+              <View className="weight-list-empty">
+                <Text className="p">还没有体重记录，点右下角"修改"后可以记下第一次称重。</Text>
+              </View>
+            )}
+            {weightRecords.map((item, index) => (
+              <View
+                className="weight-list-item"
+                key={item.id}
+                onClick={() => {
+                  setWeightListOpen(false)
+                  openWeightEdit(item)
+                }}
+              >
+                <Text className="weight-list-date">{(item.measured_at || '').slice(0, 10)}</Text>
+                {index === 0 && <Text className="weight-list-badge">最新</Text>}
+                <Text className="weight-list-value">
+{fmtWeight(item.weight)}
+{' kg'}
+                </Text>
+                <View
+                  className="weight-list-del"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    void handleDeleteWeight(item)
+                  }}
+                >
+                  <Text className="weight-list-del-x">×</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        </View>
+      </View>
+
       {/* 宠物切换弹层（顶部下拉） */}
       <View className={`overlay overlay--top${switcherOpen ? ' open' : ''}`} onClick={() => setSwitcherOpen(false)}>
         <View className="pet-switcher-panel" onClick={event => event.stopPropagation()}>
@@ -2585,6 +2934,9 @@ kg
               )}
             </View>
 
+            {/* 已选照片缩略图: 保存前可点大图预览、点右上角 × 删除重选 (与证件表单的缩略图同款) */}
+            {renderFormImageThumbs(growthFormLocalImagePaths, handleRemoveGrowthImage)}
+
             <View className="cal-sheet-actions">
               <View className="cal-cancel-button" onClick={closeGrowthForm}>取消</View>
               <View className={`cal-save-button${growthSubmitting ? ' disabled' : ''}`} onClick={handleCreateGrowthEvent}>{growthSubmitting ? '保存中' : '保存'}</View>
@@ -2607,16 +2959,14 @@ kg
               ))}
             </View>
 
-            <View className="cal-form-row">
-              <View className="cal-form-col">
-                <Text className="cal-field-label">年份</Text>
-                <Input className="cal-input" type="number" value={birthdayFormYear} maxlength={4} placeholder="如 2025" onInput={event => setBirthdayFormYear(event.detail.value)} />
+            {/* 只填日期: 年份与年龄都由所选日期 + 宠物出生日期自动推导, 不再让用户填/看"几岁"输入框 */}
+            <Text className="cal-field-label">生日日期</Text>
+            <Picker mode="date" value={birthdayFormDate} onChange={event => setBirthdayFormDate(event.detail.value)}>
+              <View className="cal-picker">
+                <Text>{birthdayFormDate || '选择日期'}</Text>
+                <Text>选择</Text>
               </View>
-              <View className="cal-form-col">
-                <Text className="cal-field-label">几岁</Text>
-                <Input className="cal-input" type="number" value={birthdayFormAge} maxlength={2} placeholder="如 1" onInput={event => setBirthdayFormAge(event.detail.value)} />
-              </View>
-            </View>
+            </Picker>
 
             <Text className="cal-field-label">这一岁的故事</Text>
             <Textarea className="cal-textarea" value={birthdayFormSummary} maxlength={500} placeholder="记录这一年里值得留念的事" onInput={event => setBirthdayFormSummary(event.detail.value)} />
@@ -2631,6 +2981,9 @@ kg
                 </Text>
               )}
             </View>
+
+            {/* 已选照片缩略图: 保存前可点大图预览、点右上角 × 删除重选 (与证件表单的缩略图同款) */}
+            {renderFormImageThumbs(birthdayFormLocalImagePaths, handleRemoveBirthdayImage)}
 
             <View className="cal-sheet-actions">
               <View className="cal-cancel-button" onClick={closeBirthdayForm}>取消</View>

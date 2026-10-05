@@ -1,7 +1,7 @@
 import type { FamilyMember, JoinApplication } from '../../types/family'
 import { Button, Image, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import PageBackground from '../../components/page-background'
 import { routes } from '../../constants/routes'
 import { approveApplication, getCurrentFamily, getMembers, getPendingApplications, rejectApplication, removeMember } from '../../services/family'
@@ -33,6 +33,8 @@ export default function Account() {
   const [pendingApplications, setPendingApplications] = useState<JoinApplication[]>([])
   /* 成员管理态: 仅拥有者可开启, 开启后每行尾部出现移除小×(自己的行除外) */
   const [managingMembers, setManagingMembers] = useState(false)
+  /* 退出登录流程锁: 两次确认期间防止重复触发 */
+  const loggingOutRef = useRef(false)
 
   useEffect(() => {
     if (!family) {
@@ -144,18 +146,39 @@ export default function Account() {
     }
   }
 
+  /* 退出登录: 两次确认 (产品要求), 并在两次确认期间加锁防止重复触发 */
   async function handleLogout() {
-    const confirmed = await Taro.showModal({
-      title: '退出登录',
-      content: '确定要退出当前账号吗？',
-      cancelText: '取消',
-      confirmText: '退出',
-    })
-    if (!confirmed.confirm) {
+    if (loggingOutRef.current) {
       return
     }
-    await clearSession()
-    await reLaunch(routes.pages.home)
+    loggingOutRef.current = true
+    try {
+      const first = await Taro.showModal({
+        title: '退出登录',
+        content: '确定要退出当前账号吗？',
+        cancelText: '取消',
+        confirmText: '下一步',
+      })
+      if (!first.confirm) {
+        return
+      }
+      const second = await Taro.showModal({
+        title: '再次确认',
+        content: '退出后需要重新登录才能查看宠物档案与日历，确定要退出吗？',
+        cancelText: '取消',
+        confirmText: '确认退出',
+      })
+      if (!second.confirm) {
+        return
+      }
+      await clearSession()
+      /* 退出后回到登录引导页 (重新走登录动画 → 昵称头像 → 创建/加入家庭),
+         不再跳到旧版首页 /pages/index/index */
+      await reLaunch(routes.pages.profileOnboarding)
+    }
+    finally {
+      loggingOutRef.current = false
+    }
   }
 
   return (

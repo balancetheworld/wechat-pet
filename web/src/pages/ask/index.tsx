@@ -31,15 +31,25 @@ const askAnswerGIF = typeof TARO_APP_ASK_ANSWER_GIF === 'string' ? TARO_APP_ASK_
 /* 未发起会话时随机展示一张 GIF: 模块级只求值一次, 本次小程序运行内保持不变 */
 const cdnLandingImages: LandingImage[] = askLandingGIFs.split(',').map(url => url.trim()).filter(Boolean).map(src => ({ src, large: largeLandingPattern.test(src) }))
 
-/* eslint-disable ts/no-require-imports -- 本地素材只在开发构建里兜底, 生产构建中该分支为常量 false, webpack 会连同大图一起丢弃 */
+/* eslint-disable ts/no-require-imports -- 本地素材只作兜底, 生产构建中该分支常量 false, webpack 会连同大图一起丢弃 */
 const localLandingImages: LandingImage[] = TARO_APP_DEBUG
-  ? [{ src: require('../../assets/play2.gif'), large: true }, { src: require('../../assets/sleepy.gif'), large: false }]
+  ? [
+      { src: require('../../assets/play1.gif'), large: false },
+      { src: require('../../assets/play2.gif'), large: true },
+      { src: require('../../assets/sleepy.gif'), large: false },
+      { src: require('../../assets/answer.gif'), large: false },
+    ]
   : []
-const localAnswerGif: string = TARO_APP_DEBUG ? require('../../assets/answer.gif') : ''
 /* eslint-enable ts/no-require-imports */
 
 const landingImages = cdnLandingImages.length ? cdnLandingImages : localLandingImages
 const landingImage = landingImages.length ? landingImages[Math.floor(Math.random() * landingImages.length)] : null
+
+/* 回答态同样只在本地调试时兜底 */
+/* eslint-disable ts/no-require-imports -- 同上 */
+const localAnswerGif = TARO_APP_DEBUG ? require('../../assets/answer.gif') : ''
+/* eslint-enable ts/no-require-imports */
+
 const answerGif = askAnswerGIF || localAnswerGif
 
 const landingGreeting = `哈喽～我是你的宠物助手
@@ -189,6 +199,7 @@ export default function Ask() {
   const busy = phase === 'creating' || phase === 'thinking' || phase === 'reconnecting' || phase === 'replying'
   const hasError = Boolean(error) && (phase === 'input_error' || phase === 'ambiguous' || phase === 'network_error' || phase === 'failed')
   const hasConversation = conversation.length > 0 || hasError
+  /* 会话开始后, 把回答态的猫替换到导航栏位置 */
   const answerCatImage = hasConversation ? answerGif : ''
 
   async function handleSend() {
@@ -285,8 +296,8 @@ export default function Ask() {
       <View className="ask-content-area">
         {!hasConversation && (
           <>
-            <View className="ask-cat-wrap">
-              {!!landingImage && (
+            {!!landingImage && (
+              <View className="ask-cat-wrap">
                 <View className="ask-cat-stage">
                   <Image className={`ask-cat${landingImage.large ? ' ask-cat--large' : ''}`} src={landingImage.src} mode="aspectFit" />
                   <View className="ask-cat-mask" />
@@ -294,8 +305,8 @@ export default function Ask() {
                     <Text className="ask-cat-bubble-text">{landingGreeting}</Text>
                   </View>
                 </View>
-              )}
-            </View>
+              </View>
+            )}
             <View className="preset-row">
               <View className="preset-chip" onClick={() => handlePreset('上次打疫苗是什么时候')}>疫苗记录</View>
               <View className="preset-chip" onClick={() => handlePreset('上次洗澡是什么时候')}>洗澡记录</View>

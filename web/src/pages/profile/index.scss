@@ -1161,7 +1161,8 @@
   font-family: 'Ma Shan Zheng', cursive;
 }
 
-.chart {
+/* 体重折线图: 由真实称重数据算出线形 (此前 .chart-line 是一条写死的装饰线, 与数据无关) */
+.weight-chart {
   position: relative;
   width: 100%;
   height: 110rpx;
@@ -1170,30 +1171,25 @@
   overflow: hidden;
 }
 
-.chart-line {
+/* 折线采样方块: 宽度用 % 让相邻方块必然重叠 → 视觉上连成一条线; 高度固定保证线宽一致 */
+.weight-chart-seg {
   position: absolute;
-  left: 8%;
-  right: 8%;
-  bottom: 36rpx;
-  height: 4rpx;
-  background: #5B84BE;
+  width: 1.9%;
+  height: 8rpx;
   border-radius: 4rpx;
-  transform: rotate(-2deg);
+  background: #5B84BE;
 }
 
-.chart-line::before,
-.chart-line::after {
-  content: '';
+/* 每个真实称重记录点上的圆点 */
+.weight-chart-dot {
   position: absolute;
-  width: 16rpx;
-  height: 16rpx;
+  box-sizing: border-box;
+  width: 14rpx;
+  height: 14rpx;
+  border: 2rpx solid rgba(255, 254, 251, 0.9);
   border-radius: 50%;
   background: #5B84BE;
-  top: -6rpx;
 }
-
-.chart-line::before { left: 0; }
-.chart-line::after  { right: 0; }
 
 .growth-events-head {
   display: flex;
@@ -1570,7 +1566,7 @@
 .archive-page .cal-field-label {
   display: block;
   margin: 24rpx 0 12rpx;
-  font-size: 25rpx;
+  font-size: 29rpx;
   font-weight: 600;
   color: #2A2520;
 }
@@ -1643,12 +1639,15 @@
   background: rgba(232, 244, 248, 0.62);
 }
 
+/* 各表单的日期选择框: 字号与字段标签接近, 避免"日期太小"看不清
+   (.cal-picker 来自全局 proto.scss, 字号仅 14rpx, 必须在此覆盖) */
+.archive-page .cal-picker,
 .archive-page .cal-picker-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   padding: 14rpx;
-  font-size: 24rpx;
+  font-size: 28rpx;
   color: rgba(74, 100, 137, 0.92);
   border: 1rpx solid #D0E8F0;
   border-radius: 10rpx;
@@ -1667,7 +1666,7 @@
   background: rgba(255, 255, 255, 0.56);
 }
 
-/* 生日表单: 年份/几岁 双列排布 */
+/* 生日表单: 日期/几岁 双列排布 (仍供体重等表单复用) */
 .archive-page .cal-form-row {
   display: flex;
   gap: 20rpx;
@@ -1697,6 +1696,46 @@
   border-radius: 14rpx;
   background: rgba(255, 255, 255, 0.48);
   box-shadow: 0 4rpx 12rpx rgba(74, 100, 137, 0.08);
+}
+
+/* 生日表单: 已选照片缩略图网格 (与证件表单 cal-image-thumb 同款观感, 统一方形便于多张排列) */
+.archive-page .cal-image-thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+  margin-top: 14rpx;
+}
+
+.archive-page .cal-image-thumb-cell {
+  position: relative;
+  width: 132rpx;
+  height: 132rpx;
+  overflow: hidden;
+  border: 1rpx solid rgba(163, 194, 232, 0.6);
+  border-radius: 12rpx;
+  background: rgba(232, 244, 248, 0.62);
+}
+
+.archive-page .cal-image-thumb-pic {
+  display: block;
+  width: 132rpx;
+  height: 132rpx;
+}
+
+.archive-page .cal-image-thumb-del {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40rpx;
+  height: 40rpx;
+  font-size: 26rpx;
+  line-height: 1;
+  color: #FFFEFB;
+  background: rgba(74, 100, 137, 0.68);
+  border-bottom-left-radius: 12rpx;
 }
 
 /* 表单内图片缩略图预览: 添加/更换后立即在按钮右侧可见, 点击可全屏 */
@@ -1993,30 +2032,53 @@
   font-size: 20rpx;
 }
 
-/* 历史行: 日期 + 最新角标 + 数值 (编辑态可点改, 右侧小叉删除) */
-.weight-row {
+.weight-empty {
+  display: block;
+  padding: 16rpx 4rpx;
+  color: #8A8278;
+  font-size: 22rpx;
+}
+
+/* ===== 体重记录弹层 (点体重卡片打开) =====
+   页面上不再有内联明细行, 全部记录改在这里列出: 点行=修改, 右侧小叉=删除
+   外层沿用全局 .sheet / .sheet-head / .close-button
+   (档案页同时引入了 manual.scss, 弹层是 flex 居中浮在屏幕中间的卡片) */
+
+/* 标题下不再画那条浅色分隔线 (来源: manual.scss 的 .sheet-head border-bottom) */
+.sheet.weight-list-sheet .sheet-head {
+  border-bottom: none;
+}
+
+/* 卡片是浮空的, 底部两角也要圆角: 36rpx 与顶部半径一致, 四角统一 */
+.sheet.weight-list-sheet {
+  border-radius: 36rpx;
+}
+
+.weight-list {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 历史行: 日期 + 最新角标 + 数值 + 删除小叉 */
+.weight-list-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12rpx;
-  padding: 16rpx 18rpx;
-  margin-bottom: 10rpx;
+  padding: 20rpx 18rpx;
+  margin-bottom: 12rpx;
   border: 1rpx solid rgba(255, 255, 255, 0.66);
   border-radius: 14rpx;
   background: rgba(255, 255, 255, 0.42);
 }
 
-.weight-row.editable {
-  border-color: rgba(127, 165, 214, 0.72);
-  background: rgba(255, 255, 255, 0.62);
-}
-
-.weight-row-date {
+.weight-list-date {
   color: #2A2520;
-  font-size: 24rpx;
+  font-size: 26rpx;
   font-weight: 700;
 }
 
-.weight-row-badge {
+.weight-list-badge {
   padding: 2rpx 12rpx;
   border-radius: 999rpx;
   background: rgba(127, 165, 214, 0.28);
@@ -2025,28 +2087,31 @@
   font-weight: 700;
 }
 
-.weight-row-value {
+.weight-list-value {
   margin-left: auto;
   color: #5B84BE;
-  font-size: 26rpx;
+  font-size: 28rpx;
   font-weight: 700;
 }
 
 /* 删除小叉: 与宠物切换弹层同款, 纯文字无底色 */
-.weight-row-del {
+.weight-list-del {
   flex: 0 0 auto;
-  width: 44rpx !important;
-  height: 44rpx !important;
+  width: 48rpx;
+  height: 48rpx;
   margin-left: 6rpx;
-  color: #B7AFA3 !important;
-  font-size: 30rpx !important;
-  font-weight: 700 !important;
-  line-height: 44rpx !important;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.weight-empty {
-  display: block;
+.weight-list-del-x {
+  color: #A8A096;
+  font-size: 30rpx;
+  line-height: 1;
+}
+
+.weight-list-empty {
   padding: 16rpx 4rpx;
   color: #8A8278;
   font-size: 22rpx;

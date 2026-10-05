@@ -121,9 +121,11 @@
 }
 
 /* --- AI 生成回答时左下角播放的动图 ---
-   贴着会话区左下角, 底部会插到输入框下面一点(输入框 z-index 更高会盖住), 不拦截点击 */
+   贴着会话区左下角, 底部会插到输入框下面一点(输入框 z-index 更高会盖住), 不拦截点击
+   z-index 1: 压在所有静态兄弟节点之上, 但低于会话文字(2), 避免挡住回答内容 */
 .ask-answer-cat {
   position: absolute;
+  z-index: 1;
   left: 0;
   bottom: -48rpx;
   width: 210rpx;
@@ -236,6 +238,9 @@
 .ask-header { display: none; }
 
 .ask-conversation {
+  position: relative;
+  /* 会话文字层级: 高于左下角 AI 精灵(1), 否则精灵会浮在回答文字上面挡住内容 */
+  z-index: 2;
   width: 100%;
   height: 100%;
   box-sizing: border-box;
