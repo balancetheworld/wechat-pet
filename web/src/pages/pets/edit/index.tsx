@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import PageBackground from '../../../components/page-background'
 import { createPet, getPet, getPetProfile, getPets, updatePet, updatePetProfile } from '../../../services/pet'
 import { assetURL, uploadFile } from '../../../services/request'
+import { usePetStore } from '../../../stores/pet-store'
 import { navigateBack } from '../../../utils/navigation'
 import './index.scss'
 
@@ -249,9 +250,16 @@ export default function PetEdit() {
             await Taro.showToast({ title: '头像保存失败，已保存其他信息', icon: 'none' })
           }
         }
+        /* 改名/改头像后同步刷新 store, 档案页的宠物名与头像才会立即更新 */
+        try {
+          usePetStore.getState().setPets(await getPets())
+        }
+        catch {
+          /* 刷新失败不阻塞保存流程 */
+        }
       }
       else {
-        await createPet({
+        const created = await createPet({
           name: value,
           breed: breedValue,
           gender: formGender,
@@ -260,6 +268,20 @@ export default function PetEdit() {
           home_date: formArrival,
           ...(avatarAssetID ? { avatar_asset_id: avatarAssetID } : {}),
         })
+        /* 主动刷新 pet store: 档案页/首页依赖 store 里的 pets 渲染,
+           若等 useDidShow 再去拉, 首次添加(页面尚未"显示过"第二次)会漏刷新导致列表为空 */
+        try {
+          const latestPets = await getPets()
+          const { setPets, setCurrentPetId } = usePetStore.getState()
+          setPets(latestPets)
+          const createdID = typeof created?.id === 'string' ? created.id : ''
+          if (createdID) {
+            setCurrentPetId(createdID)
+          }
+        }
+        catch {
+          /* 列表刷新失败不阻塞保存流程, 后续页面显示时仍会重试 */
+        }
       }
       await Taro.showToast({ title: isEdit ? '已保存' : '已添加到家庭', icon: 'success' })
       await navigateBack()
