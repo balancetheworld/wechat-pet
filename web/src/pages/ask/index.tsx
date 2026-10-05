@@ -74,6 +74,7 @@ export default function Ask() {
     retry,
   } = useAskSession()
   const [assetRefs, setAssetRefs] = useState<string[]>([])
+  const [localImagePaths, setLocalImagePaths] = useState<string[]>([])
   const [uploading, setUploading] = useState(false)
   const [scrollTop, setScrollTop] = useState(0)
   const [operationState, setOperationState] = useState<{ sessionID: string, values: AskOperation[] }>({ sessionID: '', values: [] })
@@ -160,13 +161,25 @@ export default function Ask() {
 
   const visibleOperations = operationState.sessionID === sessionID ? operationState.values : []
 
-  async function handleOperationConfirm(operation: AskOperation) {
+  function renderOperationCards(values: AskOperation[]) {
+    return values.map(operation => (
+      <AskOperationCard
+        key={operation.id}
+        operation={operation}
+        busy={operationBusy}
+        onConfirm={(value, syncTargets) => void handleOperationConfirm(value, syncTargets)}
+        onAbandon={value => void handleOperationAbandon(value)}
+      />
+    ))
+  }
+
+  async function handleOperationConfirm(operation: AskOperation, syncTargets?: string[]) {
     if (!sessionID || operationBusy) {
       return
     }
     setOperationBusy(true)
     try {
-      const confirmed = operation.status === 'pending' ? await confirmAskOperation(sessionID, operation.id, operation.version, operation.preview) : operation
+      const confirmed = operation.status === 'pending' ? await confirmAskOperation(sessionID, operation.id, operation.version, operation.preview, syncTargets) : operation
       const executed = await executeAskOperation(sessionID, operation.id, confirmed.version)
       setOperationState(current => ({ ...current, values: current.values.map(value => value.id === executed.id ? executed : value) }))
       await Taro.showToast({ title: executed.status === 'succeeded' ? '已写入日历' : '写入未完成', icon: 'none' })
@@ -225,6 +238,7 @@ export default function Ask() {
         await submit(value, assetRefs)
       }
       setAssetRefs([])
+      setLocalImagePaths([])
     }
     catch {
       setDraft(value)
@@ -243,6 +257,7 @@ export default function Ask() {
       setUploading(true)
       const uploaded = await Promise.all(result.tempFilePaths.map(uploadAskImage))
       setAssetRefs(previous => [...previous, ...uploaded.map(item => item.asset_id)])
+      setLocalImagePaths(previous => [...previous, ...result.tempFilePaths])
     }
     catch (error) {
       await Taro.showToast({ title: error instanceof Error ? error.message : '图片上传失败', icon: 'none' })
@@ -250,6 +265,11 @@ export default function Ask() {
     finally {
       setUploading(false)
     }
+  }
+
+  function handleRemoveImage(index: number) {
+    setAssetRefs(previous => previous.filter((_, assetIndex) => assetIndex !== index))
+    setLocalImagePaths(previous => previous.filter((_, pathIndex) => pathIndex !== index))
   }
 
   function handlePreset(value: string) {
@@ -327,17 +347,10 @@ export default function Ask() {
                   {visibleTurnEvents(turn.events).map(event => (
                     <AskEventView event={event} input={turn.input} events={turn.events} key={`${turn.runID}-${event.sequence}`} />
                   ))}
+                  {renderOperationCards(visibleOperations.filter(operation => operation.run_id === turn.runID))}
                 </View>
               ))}
-              {visibleOperations.map(operation => (
-                <AskOperationCard
-                  key={operation.id}
-                  operation={operation}
-                  busy={operationBusy}
-                  onConfirm={value => void handleOperationConfirm(value)}
-                  onAbandon={value => void handleOperationAbandon(value)}
-                />
-              ))}
+              {renderOperationCards(visibleOperations.filter(operation => !conversation.some(turn => turn.runID === operation.run_id)))}
               {busy && (
                 <View className="ask-processing">
                   <Text>{phase === 'reconnecting' ? '正在恢复连接' : phase === 'replying' ? '正在整理补充信息' : '正在查看宠物记录'}</Text>
@@ -369,6 +382,16 @@ export default function Ask() {
         )}
       </View>
       <View className="ask-input-bar">
+        {localImagePaths.length > 0 && (
+          <View className="ask-image-thumbs">
+            {localImagePaths.map((path, index) => (
+              <View className="ask-image-thumb" key={`${path}-${index}`}>
+                <Image className="ask-image-thumb-img" src={path} mode="aspectFill" />
+                <Button className="ask-image-thumb-remove" aria-label="移除图片" onClick={() => handleRemoveImage(index)}>×</Button>
+              </View>
+            ))}
+          </View>
+        )}
         <View className="ask-bottom-row">
           <Button className={`ask-add-img${assetRefs.length ? ' has-img' : ''}`} disabled={busy || uploading || assetRefs.length >= 4} aria-label="添加图片" onClick={() => void handleChooseImage()}>＋</Button>
           <Input

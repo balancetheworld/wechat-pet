@@ -20,11 +20,18 @@ func RegisterRoutes(router *gin.RouterGroup, signer *jwtpkg.Signer, familyReposi
 	group.PATCH("/:pet_id", handler.Update)
 	group.DELETE("/:pet_id", handler.Delete)
 	group.GET("/:pet_id/profile", handler.Profile)
-	group.PATCH("/:pet_id/profile", handler.Resource)
-	group.GET("/:pet_id/dates", handler.Resource)
+	group.PATCH("/:pet_id/profile", resourceRoute(handler, "profile"))
+	group.GET("/:pet_id/dates", resourceRoute(handler, "dates"))
 	group.GET("/:pet_id/:resource", handler.Resource)
 	group.POST("/:pet_id/:resource", handler.Resource)
 	group.PUT("/:pet_id/:resource", handler.Resource)
 	group.PATCH("/:pet_id/:resource/:resource_id", handler.Resource)
 	group.DELETE("/:pet_id/:resource/:resource_id", handler.Resource)
+}
+
+func resourceRoute(handler *Handler, resource string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Params = append(c.Params, gin.Param{Key: "resource", Value: resource})
+		handler.Resource(c)
+	}
 }

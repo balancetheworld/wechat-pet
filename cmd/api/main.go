@@ -162,6 +162,7 @@ func main() {
 	}
 	askService.SetCalendarRepository(calendarRepository)
 	askService.SetCalendarWriter(calendarService)
+	askService.SetPetProfileWriter(petService)
 	// v2 工具目录与业务读取端口（不依赖 AI 启用，供决策循环工具执行使用）。
 	askCatalog, err := askapp.DefaultCatalog(askapp.DefaultToolVersion)
 	if err != nil {

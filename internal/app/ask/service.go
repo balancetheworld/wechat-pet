@@ -169,6 +169,7 @@ type Service struct {
 	versions       Versions
 	calendar       calendarRecordReader
 	calendarWriter calendarRecordWriter
+	petWriter      petProfileWriter
 	// v2 决策循环依赖（文档 4、6、7）：由 main 装配注入，供 processRun 走
 	// RunDecisionLoop 使用。尚未注入时 processRun 降级为 provider_unavailable。
 	agentModel   AgentModel
@@ -224,6 +225,10 @@ func (s *Service) SetCalendarRepository(repository any) {
 
 func (s *Service) SetCalendarWriter(writer calendarRecordWriter) {
 	s.calendarWriter = writer
+}
+
+func (s *Service) SetPetProfileWriter(writer petProfileWriter) {
+	s.petWriter = writer
 }
 
 // SetAgentModel 注入决策循环模型端口（v2，文档 4）。nil 表示未启用 v2 决策循环。

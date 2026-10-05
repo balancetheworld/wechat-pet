@@ -497,7 +497,8 @@ func createCalendarRecordTool() Tool {
 				"medical_type": {"type": "string", "enum": ["vaccine", "deworming", "checkup", "visit", "medication", "other"], "description": "医疗类型，仅 category=medical 时使用；自定义类型填 other 并在 custom_medical_type 写明名称，category=daily 时不得填写"},
 				"custom_medical_type": {"type": "string", "maxLength": 50, "description": "自定义医疗类型名称，仅 medical_type=other 时填写，最多 50 个字符；其他取值下不得填写"},
 				"content": {"type": "string", "description": "记录正文，例如「洗澡」「服用驱虫药」"},
-				"occurred_at": {"type": "string", "description": "发生时间，RFC3339；相对时间用上下文当前时间换算"}
+				"occurred_at": {"type": "string", "description": "发生时间，RFC3339；相对时间用上下文当前时间换算"},
+				"sync_targets": {"type": "array", "items": {"type": "string", "enum": ["growth"]}, "description": "可选：让这条记录同时写入成长足迹页（growth）；仅当用户明确要求同步到成长足迹时填写"}
 			},
 			"required": ["pet_id", "category", "content", "occurred_at"],
 			"additionalProperties": false
@@ -514,8 +515,9 @@ func createCalendarRecordTool() Tool {
 		UseCases: []string{
 			"用户明确要求把某件事记到宠物日历或记录里时，先准备写入预览，由用户在页面确认后写入",
 			"医疗记录类型不在枚举内时用 medical_type=other 并在 custom_medical_type 写明用户原话类型，例如 medical_type=other、custom_medical_type=过敏复查",
+			"用户明确要求记录同时同步到档案时，用 sync_targets 指定 growth（成长足迹页）",
 		},
-		NegativeCases:        []string{"用户只是询问或尚未确认时不得写入；发生时间不确定时先追问，不猜测时间；不得声称已写入；日常记录不得填 medical_type 或 custom_medical_type；不得把自定义名称直接塞进 medical_type"},
+		NegativeCases:        []string{"用户只是询问或尚未确认时不得写入；发生时间不确定时先追问，不猜测时间；不得声称已写入；日常记录不得填 medical_type 或 custom_medical_type；不得把自定义名称直接塞进 medical_type；用户没有要求同步档案时不得自行填写 sync_targets；生日纪念页只记录生日内容，不得作为日常或医疗记录的同步目标"},
 		Preconditions:        []string{"pet_id 已由解析宠物明确且属于当前授权家庭范围；occurred_at 已换算为绝对时间"},
 		SideEffects:          []string{"创建一条待确认的日历记录预览（尚未写入业务数据）"},
 		RiskLevel:            ToolRiskMedium,
@@ -573,7 +575,7 @@ func updatePetProfileTool() Tool {
 	return Tool{
 		Name:         "update_pet_profile",
 		OperationID:  "prepare.pet_profile.update",
-		AliasesZH:    []string{"改档案", "修改档案", "更新宠物资料", "改成", "改名字", "改品种", "改生日", "改性别", "是否绝育"},
+		AliasesZH:    []string{"改档案", "修改档案", "更新宠物资料", "改成", "改名字", "改品种", "改生日", "改性别", "是否绝育", "名字是", "品种是", "性别是", "生日是"},
 		AliasesEN:    []string{"update pet profile", "edit pet profile"},
 		ResourceType: ResourcePetProfile,
 		ActionType:   ActionPrepareUpdate,

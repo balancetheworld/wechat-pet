@@ -19,6 +19,7 @@ const (
 	operationTargetPetProfileUpdate         = "pet.profile.update"
 	operationTargetPetHealthUpdate          = "pet.health.update"
 	operationTargetPetCreate                = "pet.create"
+	calendarSyncTargetGrowth                = "growth"
 	operationPreviewTTL                     = 15 * time.Minute
 	operationExecutionTTL                   = 5 * time.Minute
 )
@@ -34,8 +35,22 @@ type OperationPreviewInput struct {
 }
 
 type CalendarRecordPreview struct {
-	Request calendarapp.CreateRecordRequest `json:"request"`
-	Summary string                          `json:"summary"`
+	Request     calendarapp.CreateRecordRequest `json:"request"`
+	Summary     string                          `json:"summary"`
+	SyncTargets []string                        `json:"sync_targets"`
+}
+
+// calendarRecordCreatePayload 是日历记录写入的冻结载荷：主记录 + 可选的档案同步目标。
+type calendarRecordCreatePayload struct {
+	Request     calendarapp.CreateRecordRequest `json:"request"`
+	SyncTargets []string                        `json:"sync_targets"`
+}
+
+// calendarRecordConfirmInput 是确认阶段记录的档案同步目标选择。
+// pending 阶段 result 列为空，确认时写入本结构，执行结束后再被执行结果覆盖；
+// 执行阶段优先采用它，未记录时回落到模型给出的建议目标。
+type calendarRecordConfirmInput struct {
+	SyncTargets []string `json:"sync_targets"`
 }
 
 type operationRepository interface {
@@ -49,13 +64,63 @@ func (s *Service) CreateOperationPreview(ctx context.Context, familyID, userID, 
 	if preview.Request.PetID == "" || (preview.Request.Category != "daily" && preview.Request.Category != "medical") {
 		return Operation{}, appErrors.InvalidParam("冻结写入内容无效")
 	}
+	syncTargets, err := normalizeCalendarSyncTargets(preview.SyncTargets)
+	if err != nil {
+		return Operation{}, err
+	}
 	return s.PrepareOperation(ctx, sessionID, runID, OperationPreviewInput{
 		FamilyID: familyID,
 		UserID:   userID,
 		Target:   operationTargetCalendarRecordCreate,
 		Summary:  preview.Summary,
-		Payload:  preview.Request,
+		Payload:  calendarRecordCreatePayload{Request: preview.Request, SyncTargets: syncTargets},
 	})
+}
+
+// validCalendarSyncTarget 判断同步目标是否为受支持的档案章节。
+// 目前只支持成长足迹页：生日纪念页只记录生日内容，不接收日历记录同步。
+func validCalendarSyncTarget(target string) bool {
+	switch target {
+	case calendarSyncTargetGrowth:
+		return true
+	default:
+		return false
+	}
+}
+
+// normalizeCalendarSyncTargets 去重并校验同步目标，越界目标直接拒绝。
+func normalizeCalendarSyncTargets(targets []string) ([]string, error) {
+	if len(targets) == 0 {
+		return []string{}, nil
+	}
+	result := make([]string, 0, len(targets))
+	seen := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		if !validCalendarSyncTarget(target) {
+			return nil, appErrors.InvalidParam("同步目标仅支持成长足迹页")
+		}
+		if _, exists := seen[target]; exists {
+			continue
+		}
+		seen[target] = struct{}{}
+		result = append(result, target)
+	}
+	return result, nil
+}
+
+// confirmedCalendarSyncTargets 读取确认阶段记录的同步目标选择。
+// result 为空或不是确认输入（例如已是执行结果）时返回 false。
+func confirmedCalendarSyncTargets(result string) ([]string, bool) {
+	if strings.TrimSpace(result) == "" {
+		return nil, false
+	}
+	var input struct {
+		SyncTargets *[]string `json:"sync_targets"`
+	}
+	if err := json.Unmarshal([]byte(result), &input); err != nil || input.SyncTargets == nil {
+		return nil, false
+	}
+	return *input.SyncTargets, true
 }
 
 // PrepareOperation 冻结一份写入预览（工具 prepare_* 路径与 HTTP 预览接口共用）。
@@ -141,7 +206,9 @@ func (s *Service) ListOperations(ctx context.Context, familyID, userID, sessionI
 	return result, nil
 }
 
-func (s *Service) ConfirmOperation(ctx context.Context, familyID, userID, sessionID, operationID string, expectedVersion int, summary string) (Operation, error) {
+// ConfirmOperation 由用户确认写入预览。syncTargets 为卡片上用户最终选定的档案同步目标：
+// nil 表示未做选择（沿用模型建议），空切片表示明确不同步档案。
+func (s *Service) ConfirmOperation(ctx context.Context, familyID, userID, sessionID, operationID string, expectedVersion int, summary string, syncTargets *[]string) (Operation, error) {
 	value, err := s.GetOperation(ctx, familyID, userID, sessionID, operationID)
 	if err != nil {
 		return Operation{}, err
@@ -150,15 +217,34 @@ func (s *Service) ConfirmOperation(ctx context.Context, familyID, userID, sessio
 	if value.Status != OperationPending || value.Version != expectedVersion || value.ExpiresAt == nil || !value.ExpiresAt.After(now) || strings.TrimSpace(summary) != value.Preview {
 		return Operation{}, appErrors.Conflict("写入预览已失效")
 	}
+	resultValue := value.Result
+	if syncTargets != nil {
+		targets, err := normalizeCalendarSyncTargets(*syncTargets)
+		if err != nil {
+			return Operation{}, err
+		}
+		if value.Target != operationTargetCalendarRecordCreate {
+			if len(targets) > 0 {
+				return Operation{}, appErrors.InvalidParam("该写入不支持同步到档案")
+			}
+		} else {
+			recorded, err := json.Marshal(calendarRecordConfirmInput{SyncTargets: targets})
+			if err != nil {
+				return Operation{}, appErrors.Internal(err)
+			}
+			resultValue = string(recorded)
+		}
+	}
 	repository := s.repository.(operationRepository)
 	expiresAt := now.Add(operationExecutionTTL)
-	if err := repository.TransitionOperation(ctx, value.ID, value.Version, OperationPending, OperationConfirmed, now, &expiresAt, value.Result); err != nil {
+	if err := repository.TransitionOperation(ctx, value.ID, value.Version, OperationPending, OperationConfirmed, now, &expiresAt, resultValue); err != nil {
 		if errors.Is(err, ErrOperationConflict) {
 			return Operation{}, appErrors.Conflict("写入预览状态已改变")
 		}
 		return Operation{}, appErrors.Internal(err)
 	}
 	value.Status, value.Version, value.ConfirmedAt, value.ExpiresAt, value.UpdatedAt = OperationConfirmed, value.Version+1, &now, &expiresAt, now
+	value.Result = resultValue
 	return value, nil
 }
 
@@ -227,16 +313,100 @@ func (s *Service) executeCalendarRecordCreate(ctx context.Context, repository op
 	if s.calendarWriter == nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_target_unavailable")
 	}
-	var request calendarapp.CreateRecordRequest
-	if err := json.Unmarshal([]byte(value.Payload), &request); err != nil {
+	var payload calendarRecordCreatePayload
+	if err := json.Unmarshal([]byte(value.Payload), &payload); err != nil || payload.Request.PetID == "" {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_payload_invalid")
 	}
-	record, err := s.calendarWriter.CreateRecord(ctx, familyID, userID, request)
+	record, err := s.calendarWriter.CreateRecord(ctx, familyID, userID, payload.Request)
 	if err != nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "calendar_record_create_failed")
 	}
-	result, _ := json.Marshal(map[string]any{"record_id": record.ID, "verified": s.verifyCalendarRecord(ctx, familyID, record.ID)})
+	targets := payload.SyncTargets
+	if confirmed, ok := confirmedCalendarSyncTargets(value.Result); ok {
+		targets = confirmed
+	}
+	synced, syncFailed := s.syncCalendarRecordToProfile(ctx, familyID, userID, payload.Request, record, targets)
+	result, _ := json.Marshal(map[string]any{
+		"record_id":   record.ID,
+		"verified":    s.verifyCalendarRecord(ctx, familyID, record.ID),
+		"synced":      synced,
+		"sync_failed": syncFailed,
+	})
 	return s.finishOperation(ctx, repository, value, now, OperationSucceeded, string(result))
+}
+
+// syncCalendarRecordToProfile 把日历记录同步写入档案章节（目前仅成长足迹页）。
+// 同步是尽力而为：失败不回滚已写入的日历记录，失败目标通过 sync_failed 返回。
+func (s *Service) syncCalendarRecordToProfile(ctx context.Context, familyID, userID string, request calendarapp.CreateRecordRequest, record calendarapp.RecordDTO, targets []string) ([]string, []string) {
+	synced := make([]string, 0, len(targets))
+	failed := make([]string, 0, len(targets))
+	if len(targets) == 0 {
+		return synced, failed
+	}
+	if s.petWriter == nil {
+		return synced, append(failed, targets...)
+	}
+	occurredOn := calendarRecordOccurredOn(record, request)
+	for _, target := range targets {
+		var err error
+		switch target {
+		case calendarSyncTargetGrowth:
+			err = s.syncGrowthEvent(ctx, familyID, userID, request, occurredOn)
+		default:
+			err = appErrors.InvalidParam("不支持的同步目标")
+		}
+		if err != nil {
+			failed = append(failed, target)
+			continue
+		}
+		synced = append(synced, target)
+	}
+	return synced, failed
+}
+
+// syncGrowthEvent 写入成长足迹事件：类型取记录分类标签，时间为记录发生日。
+func (s *Service) syncGrowthEvent(ctx context.Context, familyID, userID string, request calendarapp.CreateRecordRequest, occurredOn string) error {
+	_, err := s.petWriter.Resource(ctx, familyID, userID, request.PetID, "growth-events", "POST", map[string]any{
+		"type":        calendarRecordSyncType(request),
+		"occurred_at": occurredOn,
+		"content":     request.Content,
+	})
+	return err
+}
+
+// calendarRecordOccurredOn 取记录发生日 (YYYY-MM-DD)，优先用回读记录的绝对时间。
+func calendarRecordOccurredOn(record calendarapp.RecordDTO, request calendarapp.CreateRecordRequest) string {
+	for _, value := range []string{record.OccurredAt, request.OccurredAt} {
+		if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+			return parsed.Format("2006-01-02")
+		}
+	}
+	return ""
+}
+
+// calendarRecordSyncType 生成成长足迹事件类型：医疗记录用医疗类型标签，日常记录用「日常」。
+func calendarRecordSyncType(request calendarapp.CreateRecordRequest) string {
+	if request.Category != "medical" {
+		return "日常"
+	}
+	if request.MedicalType == "other" && request.CustomMedicalType != "" {
+		return request.CustomMedicalType
+	}
+	switch request.MedicalType {
+	case "vaccine":
+		return "疫苗"
+	case "deworming":
+		return "驱虫"
+	case "checkup":
+		return "体检"
+	case "visit":
+		return "就诊"
+	case "medication":
+		return "用药"
+	case "other":
+		return "其他"
+	}
+	return "医疗"
 }
 
 func (s *Service) executeCalendarRecordUpdate(ctx context.Context, repository operationRepository, value Operation, familyID, userID string, now time.Time) (Operation, error) {
@@ -283,14 +453,13 @@ func (s *Service) executeCalendarReminderComplete(ctx context.Context, repositor
 	return s.finishOperation(ctx, repository, value, now, OperationSucceeded, string(result))
 }
 
-// petProfileWriter 是档案更新的写入端口，由 pet 仓储提供（与 HTTP 档案更新同一路径）。
+// petProfileWriter 是档案更新的写入端口，由 pet 应用服务提供（与 HTTP 档案更新同一路径）。
 type petProfileWriter interface {
 	Resource(context.Context, string, string, string, string, string, map[string]any) (any, error)
 }
 
 func (s *Service) executePetProfileUpdate(ctx context.Context, repository operationRepository, value Operation, familyID, userID string, now time.Time) (Operation, error) {
-	writer, ok := s.pets.(petProfileWriter)
-	if !ok {
+	if s.petWriter == nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_target_unavailable")
 	}
 	var payload struct {
@@ -300,7 +469,7 @@ func (s *Service) executePetProfileUpdate(ctx context.Context, repository operat
 	if err := json.Unmarshal([]byte(value.Payload), &payload); err != nil || payload.PetID == "" || len(payload.Fields) == 0 {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_payload_invalid")
 	}
-	if _, err := writer.Resource(ctx, familyID, userID, payload.PetID, "profile", "PATCH", payload.Fields); err != nil {
+	if _, err := s.petWriter.Resource(ctx, familyID, userID, payload.PetID, "profile", "PATCH", payload.Fields); err != nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "pet_profile_update_failed")
 	}
 	result, _ := json.Marshal(map[string]any{"pet_id": payload.PetID, "verified": s.verifyPetProfile(ctx, familyID, payload.PetID, payload.Fields)})
@@ -309,8 +478,7 @@ func (s *Service) executePetProfileUpdate(ctx context.Context, repository operat
 
 // executePetHealthUpdate 修改宠物健康档案（过敏、长期用药、健康状态）。
 func (s *Service) executePetHealthUpdate(ctx context.Context, repository operationRepository, value Operation, familyID, userID string, now time.Time) (Operation, error) {
-	writer, ok := s.pets.(petProfileWriter)
-	if !ok {
+	if s.petWriter == nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_target_unavailable")
 	}
 	var payload struct {
@@ -320,7 +488,7 @@ func (s *Service) executePetHealthUpdate(ctx context.Context, repository operati
 	if err := json.Unmarshal([]byte(value.Payload), &payload); err != nil || payload.PetID == "" || len(payload.Fields) == 0 {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "operation_payload_invalid")
 	}
-	if _, err := writer.Resource(ctx, familyID, userID, payload.PetID, "health", "PATCH", payload.Fields); err != nil {
+	if _, err := s.petWriter.Resource(ctx, familyID, userID, payload.PetID, "health", "PATCH", payload.Fields); err != nil {
 		return s.finishOperation(ctx, repository, value, now, OperationFailed, "pet_health_update_failed")
 	}
 	result, _ := json.Marshal(map[string]any{"pet_id": payload.PetID, "verified": s.verifyPetHealth(ctx, familyID, payload.PetID, payload.Fields)})

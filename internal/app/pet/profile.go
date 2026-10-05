@@ -217,7 +217,16 @@ func (r *SQLRepository) Resource(ctx context.Context, familyID, petID, resource,
 			}
 			out = append(out, m)
 		}
-		return out, rows.Err()
+		if e := rows.Err(); e != nil {
+			return nil, e
+		}
+		/* 成长足迹的 recorder 存的是用户 ID, 前端「添加人」直接展示该字段, 读取时换成昵称 */
+		if resource == "growth-events" {
+			if e := r.resolveUserIDs(ctx, out, "recorder"); e != nil {
+				return nil, e
+			}
+		}
+		return out, nil
 	}
 	if method == "POST" {
 		id, _ := newID()
@@ -405,6 +414,58 @@ func (r *SQLRepository) health(ctx context.Context, familyID, petID, method stri
 }
 
 var _ ProfileRepository = (*SQLRepository)(nil)
+
+/* resolveUserIDs 把列表项里存用户 ID 的字段批量换成昵称; 查不到的用户保留原值, 避免误改历史文本 */
+func (r *SQLRepository) resolveUserIDs(ctx context.Context, items []map[string]any, field string) error {
+	ids := make([]string, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		id, ok := item[field].(string)
+		if !ok || id == "" {
+			continue
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for index, id := range ids {
+		placeholders[index] = "?"
+		args[index] = id
+	}
+	rows, err := r.db.QueryContext(ctx, r.query("SELECT id, COALESCE(nickname, '') FROM users WHERE id IN ("+strings.Join(placeholders, ",")+")"), args...)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	nicknames := make(map[string]string, len(ids))
+	for rows.Next() {
+		var id, nickname string
+		if err := rows.Scan(&id, &nickname); err != nil {
+			return err
+		}
+		nicknames[id] = nickname
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, item := range items {
+		id, ok := item[field].(string)
+		if !ok {
+			continue
+		}
+		if nickname, exists := nicknames[id]; exists {
+			item[field] = nickname
+		}
+	}
+	return nil
+}
 
 func (r *SQLRepository) SetAvatar(ctx context.Context, familyID, petID, assetID string) error {
 	_, err := r.db.ExecContext(ctx, r.query("UPDATE pets SET avatar_asset_id=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND family_id=?"), assetID, petID, familyID)

@@ -78,11 +78,12 @@ export function getAskOperations(sessionID: string) {
   return request<AskOperation[]>({ path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/operations` })
 }
 
-export function confirmAskOperation(sessionID: string, operationID: string, expectedVersion: number, summary: string) {
+/* syncTargets: 卡片上用户选择的档案同步目标; 不传表示不做单独选择(沿用服务端建议) */
+export function confirmAskOperation(sessionID: string, operationID: string, expectedVersion: number, summary: string, syncTargets?: string[]) {
   return request<AskOperation>({
     path: `/api/v1/ask/sessions/${encodeURIComponent(sessionID)}/operations/${encodeURIComponent(operationID)}/confirm`,
     method: 'POST',
-    data: { expected_version: expectedVersion, summary },
+    data: { expected_version: expectedVersion, summary, sync_targets: syncTargets },
   })
 }
 

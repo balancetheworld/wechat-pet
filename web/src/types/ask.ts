@@ -235,6 +235,7 @@ export interface AskOperation {
   preview: string
   target: string
   result: string
+  sync_targets: string[]
   version: number
   confirmed_at: string | null
   expires_at: string | null

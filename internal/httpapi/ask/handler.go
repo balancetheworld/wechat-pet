@@ -36,13 +36,15 @@ type runControlRequest struct {
 }
 
 type operationPreviewRequest struct {
-	Summary string                          `json:"summary" binding:"required,max=2000"`
-	Request calendarapp.CreateRecordRequest `json:"request" binding:"required"`
+	Summary     string                          `json:"summary" binding:"required,max=2000"`
+	Request     calendarapp.CreateRecordRequest `json:"request" binding:"required"`
+	SyncTargets []string                        `json:"sync_targets"`
 }
 
 type operationControlRequest struct {
-	ExpectedVersion int    `json:"expected_version" binding:"required,min=1"`
-	Summary         string `json:"summary"`
+	ExpectedVersion int       `json:"expected_version" binding:"required,min=1"`
+	Summary         string    `json:"summary"`
+	SyncTargets     *[]string `json:"sync_targets"`
 }
 
 func NewHandler(service *askapp.Service, worker askapp.RunEnqueuer) *Handler {
@@ -258,7 +260,7 @@ func (h *Handler) CreateOperationPreview(c *gin.Context) {
 		response.Fail(c, appErrors.InvalidParam("写入预览参数无效"))
 		return
 	}
-	result, err := h.service.CreateOperationPreview(c.Request.Context(), familyID, userID, c.Param("session_id"), c.Param("run_id"), askapp.CalendarRecordPreview{Request: request.Request, Summary: request.Summary})
+	result, err := h.service.CreateOperationPreview(c.Request.Context(), familyID, userID, c.Param("session_id"), c.Param("run_id"), askapp.CalendarRecordPreview{Request: request.Request, Summary: request.Summary, SyncTargets: request.SyncTargets})
 	if err != nil {
 		response.Fail(c, asAppError(err))
 		return
@@ -315,7 +317,7 @@ func (h *Handler) controlOperation(c *gin.Context, action string) {
 	var err error
 	switch action {
 	case "confirm":
-		result, err = h.service.ConfirmOperation(c.Request.Context(), familyID, userID, c.Param("session_id"), c.Param("operation_id"), request.ExpectedVersion, request.Summary)
+		result, err = h.service.ConfirmOperation(c.Request.Context(), familyID, userID, c.Param("session_id"), c.Param("operation_id"), request.ExpectedVersion, request.Summary, request.SyncTargets)
 	case "abandon":
 		result, err = h.service.AbandonOperation(c.Request.Context(), familyID, userID, c.Param("session_id"), c.Param("operation_id"), request.ExpectedVersion)
 	case "withdraw":

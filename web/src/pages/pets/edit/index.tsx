@@ -168,12 +168,11 @@ export default function PetEdit() {
 
   /* --- 提交 --- */
   async function handleSubmit() {
-    /* 数据尚未加载完 / 正在提交: 给出明确反馈, 避免用户以为"点了没反应"而反复点 */
-    if (loading) {
-      await Taro.showToast({ title: '正在加载，请稍候', icon: 'none' })
+    if (submitting) {
       return
     }
-    if (submitting) {
+    if (loading) {
+      await Taro.showToast({ title: '正在加载宠物信息，请稍候', icon: 'none' })
       return
     }
     const value = formName.trim()
