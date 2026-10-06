@@ -67,10 +67,11 @@ func (s *Service) Create(ctx context.Context, familyID string, userID string, re
 		return PetDTO{}, appErrors.Internal(err)
 	}
 	/* 创建时若带档案字段, 立即补一次全量更新 (与 Update 共用 SQL 路径) */
-	if request.Breed != "" || request.Gender != "" || request.Birthday != "" || request.HomeDate != "" {
+	if request.Breed != "" || request.Species != "" || request.Gender != "" || request.Birthday != "" || request.HomeDate != "" {
 		full := UpdatePetRequest{
 			Name:       name,
 			Breed:      request.Breed,
+			Species:    request.Species,
 			Gender:     request.Gender,
 			Sterilized: request.Sterilized,
 			Birthday:   request.Birthday,

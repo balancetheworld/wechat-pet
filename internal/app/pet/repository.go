@@ -82,7 +82,7 @@ func (r *SQLRepository) Update(ctx context.Context, familyID string, petID strin
 	/* 日期为空字符串时写 NULL (数据库列为可空 DATE), 否则原样传入由 PG 解析 YYYY-MM-DD */
 	birthday := nullableDate(request.Birthday)
 	homeDate := nullableDate(request.HomeDate)
-	result, err := r.db.ExecContext(ctx, r.query("UPDATE pets SET name = ?, breed = ?, gender = ?, sterilized = ?, birthday = ?, home_date = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), request.Name, request.Breed, request.Gender, request.Sterilized, birthday, homeDate, userID, petID, familyID)
+	result, err := r.db.ExecContext(ctx, r.query("UPDATE pets SET name = ?, breed = ?, species = ?, gender = ?, sterilized = ?, birthday = ?, home_date = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND family_id = ? AND deleted_at IS NULL"), request.Name, request.Breed, request.Species, request.Gender, request.Sterilized, birthday, homeDate, userID, petID, familyID)
 	if err != nil {
 		return Pet{}, err
 	}

@@ -85,7 +85,7 @@ func newTestRepository(t *testing.T) (*SQLRepository, *sql.DB) {
 	t.Cleanup(func() { db.Close() })
 	schema := `CREATE TABLE users (id TEXT PRIMARY KEY, nickname TEXT);
 CREATE TABLE families (id TEXT PRIMARY KEY);
-CREATE TABLE pets (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, name TEXT NOT NULL, breed TEXT, gender TEXT, sterilized INTEGER, birthday TEXT, home_date TEXT, created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP);
+CREATE TABLE pets (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, name TEXT NOT NULL, breed TEXT, species TEXT, gender TEXT, sterilized INTEGER, birthday TEXT, home_date TEXT, created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP);
 CREATE TABLE pet_growth_events (id TEXT PRIMARY KEY, pet_id TEXT NOT NULL, family_id TEXT NOT NULL, type TEXT NOT NULL, occurred_at DATE NOT NULL, recorder TEXT NOT NULL, content TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP);`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatal(err)

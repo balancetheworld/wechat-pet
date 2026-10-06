@@ -25,7 +25,7 @@ func newBusinessReadTestDB(t *testing.T) *sql.DB {
 	schema := `
 CREATE TABLE pets (
   id TEXT PRIMARY KEY, family_id TEXT NOT NULL, name TEXT NOT NULL,
-  avatar_asset_id TEXT, cover_asset_id TEXT, breed TEXT, gender TEXT,
+  avatar_asset_id TEXT, cover_asset_id TEXT, breed TEXT, species TEXT, gender TEXT,
   sterilized BOOLEAN NOT NULL DEFAULT FALSE, birthday TEXT, home_date TEXT,
   created_by TEXT NOT NULL, updated_by TEXT NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,

@@ -131,7 +131,7 @@ CREATE UNIQUE INDEX idx_families_code ON families (code);
 CREATE TABLE family_members (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL CHECK (role IN ('member', 'owner')), status TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, UNIQUE (family_id, user_id));
 CREATE UNIQUE INDEX idx_family_members_active_user ON family_members (user_id) WHERE status = 'active';
 CREATE TABLE family_join_applications (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, user_id TEXT NOT NULL, status TEXT NOT NULL, created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL, UNIQUE (family_id, user_id));`
-	if _, err := db.Exec("CREATE TABLE pets (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, name TEXT NOT NULL, breed TEXT, gender TEXT, sterilized INTEGER, birthday TEXT, home_date TEXT, created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP)"); err != nil {
+	if _, err := db.Exec("CREATE TABLE pets (id TEXT PRIMARY KEY, family_id TEXT NOT NULL, name TEXT NOT NULL, breed TEXT, species TEXT, gender TEXT, sterilized INTEGER, birthday TEXT, home_date TEXT, created_by TEXT NOT NULL, updated_by TEXT NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, deleted_at TIMESTAMP)"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(schema); err != nil {

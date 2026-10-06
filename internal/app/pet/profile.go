@@ -16,6 +16,7 @@ type PetProfile struct {
 	AvatarAssetID    string  `json:"avatar_asset_id"`
 	CoverAssetID     string  `json:"cover_asset_id"`
 	Breed            string  `json:"breed"`
+	Species          string  `json:"species"`
 	Gender           string  `json:"gender"`
 	Sterilized       bool    `json:"sterilized"`
 	Birthday         *string `json:"birthday"`
@@ -102,7 +103,7 @@ func normalizeDate(value string) *string {
 func (r *SQLRepository) GetProfile(ctx context.Context, familyID, petID string) (PetProfile, error) {
 	var p PetProfile
 	var birthday, home sql.NullString
-	err := r.db.QueryRowContext(ctx, r.query("SELECT id,name,COALESCE(avatar_asset_id,''),COALESCE(cover_asset_id,''),COALESCE(breed,''),COALESCE(gender,''),sterilized,birthday,home_date FROM pets WHERE id=? AND family_id=? AND deleted_at IS NULL"), petID, familyID).Scan(&p.ID, &p.Name, &p.AvatarAssetID, &p.CoverAssetID, &p.Breed, &p.Gender, &p.Sterilized, &birthday, &home)
+	err := r.db.QueryRowContext(ctx, r.query("SELECT id,name,COALESCE(avatar_asset_id,''),COALESCE(cover_asset_id,''),COALESCE(breed,''),COALESCE(species,''),COALESCE(gender,''),sterilized,birthday,home_date FROM pets WHERE id=? AND family_id=? AND deleted_at IS NULL"), petID, familyID).Scan(&p.ID, &p.Name, &p.AvatarAssetID, &p.CoverAssetID, &p.Breed, &p.Species, &p.Gender, &p.Sterilized, &birthday, &home)
 	if err != nil {
 		return p, err
 	}
@@ -155,7 +156,7 @@ func (r *SQLRepository) Resource(ctx context.Context, familyID, petID, resource,
 		if method != "PATCH" {
 			return r.GetProfile(ctx, familyID, petID)
 		}
-		allowed := []string{"name", "avatar_asset_id", "cover_asset_id", "breed", "gender", "sterilized", "birthday", "home_date"}
+		allowed := []string{"name", "avatar_asset_id", "cover_asset_id", "breed", "species", "gender", "sterilized", "birthday", "home_date"}
 		sets := []string{}
 		args := []any{}
 		for _, k := range allowed {
@@ -326,7 +327,7 @@ func resourceSpec(resource string) (string, string, error) {
 
 func validateResourcePayload(resource, method string, payload map[string]any) error {
 	if resource == "profile" {
-		for _, field := range []string{"name", "avatar_asset_id", "cover_asset_id", "breed", "gender"} {
+		for _, field := range []string{"name", "avatar_asset_id", "cover_asset_id", "breed", "species", "gender"} {
 			if value, ok := payload[field]; ok {
 				if _, ok := value.(string); !ok {
 					return appErrors.InvalidParam(field + " 格式无效")
