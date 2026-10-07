@@ -35,6 +35,7 @@ func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot
 	value.Pet.ID = contextSummary(value.Pet.ID)
 	value.Pet.Name = contextSummary(value.Pet.Name)
 	value.Pet.Breed = contextSummary(value.Pet.Breed)
+	value.Pet.Species = contextSummary(value.Pet.Species)
 	value.Pet.Gender = contextSummary(value.Pet.Gender)
 	value.Pet.Birthday = contextSummary(value.Pet.Birthday)
 	value.Pet.HealthStatus = contextSummary(value.Pet.HealthStatus)
@@ -44,6 +45,7 @@ func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot
 		value.Pets[index].ID = contextSummary(value.Pets[index].ID)
 		value.Pets[index].Name = contextSummary(value.Pets[index].Name)
 		value.Pets[index].Breed = contextSummary(value.Pets[index].Breed)
+		value.Pets[index].Species = contextSummary(value.Pets[index].Species)
 		value.Pets[index].Gender = contextSummary(value.Pets[index].Gender)
 		value.Pets[index].Birthday = contextSummary(value.Pets[index].Birthday)
 		value.Pets[index].HealthStatus = contextSummary(value.Pets[index].HealthStatus)
@@ -88,9 +90,9 @@ func compactContextSnapshot(value ContextSnapshot, maxChars int) ContextSnapshot
 }
 
 func contextSnapshotChars(value ContextSnapshot) int {
-	result := utf8.RuneCountInString(value.Pet.ID) + utf8.RuneCountInString(value.Pet.Name) + utf8.RuneCountInString(value.Pet.Breed) + utf8.RuneCountInString(value.Pet.Gender) + utf8.RuneCountInString(value.Pet.Birthday) + utf8.RuneCountInString(value.Pet.HealthStatus) + utf8.RuneCountInString(value.Pet.Allergies) + utf8.RuneCountInString(value.Pet.LongTermMedication)
+	result := utf8.RuneCountInString(value.Pet.ID) + utf8.RuneCountInString(value.Pet.Name) + utf8.RuneCountInString(value.Pet.Breed) + utf8.RuneCountInString(value.Pet.Species) + utf8.RuneCountInString(value.Pet.Gender) + utf8.RuneCountInString(value.Pet.Birthday) + utf8.RuneCountInString(value.Pet.HealthStatus) + utf8.RuneCountInString(value.Pet.Allergies) + utf8.RuneCountInString(value.Pet.LongTermMedication)
 	for _, pet := range value.Pets {
-		result += utf8.RuneCountInString(pet.ID) + utf8.RuneCountInString(pet.Name) + utf8.RuneCountInString(pet.Breed) + utf8.RuneCountInString(pet.Gender) + utf8.RuneCountInString(pet.Birthday) + utf8.RuneCountInString(pet.HealthStatus) + utf8.RuneCountInString(pet.Allergies) + utf8.RuneCountInString(pet.LongTermMedication)
+		result += utf8.RuneCountInString(pet.ID) + utf8.RuneCountInString(pet.Name) + utf8.RuneCountInString(pet.Breed) + utf8.RuneCountInString(pet.Species) + utf8.RuneCountInString(pet.Gender) + utf8.RuneCountInString(pet.Birthday) + utf8.RuneCountInString(pet.HealthStatus) + utf8.RuneCountInString(pet.Allergies) + utf8.RuneCountInString(pet.LongTermMedication)
 	}
 	for _, turn := range value.RecentTurns {
 		result += utf8.RuneCountInString(turn.Input)

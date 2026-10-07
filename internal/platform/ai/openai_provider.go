@@ -244,7 +244,7 @@ func (p *OpenAIProvider) buildParams(request Request) (responses.ResponseNewPara
 		topLevelArray := isTopLevelArray(schema)
 		recordArrayProtocol = recordArrayProtocol || topLevelArray
 		format := responses.ResponseFormatTextConfigParamOfJSONSchema("pet_ask", schema)
-		// 真实验证（文档 12.2、docs/t3-provider-verification.md）：strict 要求根节点为 object、
+		// 真实验证：strict 要求根节点为 object、
 		// 所有 properties 进入 required、additionalProperties 为 false。顶层数组无法满足，只能非 strict；
 		// 其余 object schema 保留 strict，Provider 拒绝时由 Complete 回退一次。
 		format.OfJSONSchema.Strict = openai.Bool(!topLevelArray)

@@ -1,7 +1,6 @@
 package ask
 
 import (
-	"encoding/json"
 	"fmt"
 )
 
@@ -337,15 +336,3 @@ func ResolveQuestionCoverage(items []TaskItem, questions []QuestionRecord) []Tas
 // 当前任务约束；用户消息、图片文字、历史、工具结果及摘要始终是有来源的数据。
 // 具体提示词文本由 T5 固定，此处仅保留顺序约束常量，供 Provider 组装使用。
 const agentStepPromptOrder = "security_rules -> skills -> output_contract -> task_constraints"
-
-// toolArgsJSON 校验工具参数是否可解析为 JSON 对象（文档 7.4 整批校验的一环）。
-func toolArgsJSON(args json.RawMessage) error {
-	if len(args) == 0 || !json.Valid(args) {
-		return fmt.Errorf("tool arguments invalid")
-	}
-	var obj map[string]json.RawMessage
-	if err := json.Unmarshal(args, &obj); err != nil {
-		return fmt.Errorf("tool arguments must be a JSON object: %w", err)
-	}
-	return nil
-}

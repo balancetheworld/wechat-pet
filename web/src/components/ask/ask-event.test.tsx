@@ -40,6 +40,45 @@ it('renders a completed casual answer with empty optional evidence and risks', (
   expect(markup).toContain('复制回答')
 })
 
+it('shows the pet name instead of the internal id and skips placeholder subject text', () => {
+  const event: AskEvent = {
+    run_id: 'run-subject',
+    sequence: 3,
+    type: 'assistant.completed',
+    created_at: '2026-10-07T10:00:00Z',
+    data: {
+      answer: '节哀。',
+      intent: 'health',
+      groups: [
+        {
+          group_key: 'g1',
+          task_keys: ['t1'],
+          answer_kind: 'health',
+          scope: 'full',
+          subjects: [{ subject_key: 's1', kind: 'pet', pet_id: '8b8c60660767898642f6e5c589783496' }],
+          segments: [{ segment_key: 'seg1', group_key: 'g1', subject_keys: ['s1'], field: 'observation', text: '节哀。', basis_kind: 'general_knowledge' }],
+          risks: [{ group_key: 'g1', subject_key: 's1', level: 'unknown', evidence: null, uncertainty: null }],
+        },
+        {
+          group_key: 'g2',
+          task_keys: ['t1'],
+          answer_kind: 'health',
+          scope: 'full',
+          subjects: [{ subject_key: 's2', kind: 'unresolved' }],
+          segments: [{ segment_key: 'seg2', group_key: 'g2', subject_keys: ['s2'], field: 'observation', text: '我在。', basis_kind: 'general_knowledge' }],
+          risks: [{ group_key: 'g2', subject_key: 's2', level: 'unknown', evidence: null, uncertainty: null }],
+        },
+      ],
+      coverage: [{ task_key: 't1', answer_group_keys: ['g1', 'g2'], question_keys: [], operation_ids: [] }],
+    },
+  }
+
+  const markup = renderToStaticMarkup(<AskEventView event={event} petNames={{ '8b8c60660767898642f6e5c589783496': '旺仔' }} />)
+  expect(markup).toContain('宠物 旺仔')
+  expect(markup).not.toContain('8b8c60660767898642f6e5c589783496')
+  expect(markup).not.toContain('>turn<')
+})
+
 it('renders markdown in assistant segments without exposing raw HTML', () => {
   const event: AskEvent = {
     run_id: 'run-2',
@@ -67,6 +106,41 @@ it('renders markdown in assistant segments without exposing raw HTML', () => {
   expect(markup).toContain('&lt;strong style=&quot;font-weight:600;&quot;&gt;健康观察&lt;/strong&gt;')
   expect(markup).toContain('&lt;strong style=&quot;font-weight:600;&quot;&gt;记录查询&lt;/strong&gt;')
   expect(markup).not.toContain('&lt;script&gt;')
+})
+
+it('hides internal evidence source types from the user answer', () => {
+  const event: AskEvent = {
+    run_id: 'run-evidence',
+    sequence: 7,
+    type: 'assistant.completed',
+    created_at: '2026-09-23T10:40:50Z',
+    data: {
+      answer: '啾啾是大狗狗。',
+      intent: 'pet_fact',
+      groups: [{
+        group_key: 'g1',
+        task_keys: ['t1'],
+        answer_kind: 'casual',
+        scope: 'full',
+        subjects: [{ subject_key: 's1', kind: 'pet', pet_id: 'pet-1', description: '啾啾' }],
+        segments: [{
+          segment_key: 'seg1',
+          group_key: 'g1',
+          subject_keys: ['s1'],
+          field: 'reply',
+          text: '啾啾是大狗狗。',
+          basis_kind: 'business_fact',
+          evidence_refs: [{ source_type: 'pet_profile', source_id: 'pet-1' }, { source_type: 'turn', source_id: 'turn-1' }],
+        }],
+        risks: null,
+      }],
+      coverage: [],
+    },
+  }
+
+  const markup = renderToStaticMarkup(<AskEventView event={event} />)
+  expect(markup).not.toContain('pet_profile')
+  expect(markup).not.toContain('turn')
 })
 
 it('renders the completed answer immediately without replaying a preview', () => {

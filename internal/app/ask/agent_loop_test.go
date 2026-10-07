@@ -296,7 +296,7 @@ func TestRunDecisionLoopRetainsTaskKeyAndRetriesIncompleteCoverage(t *testing.T)
 	incomplete[3].Coverage.Tasks = []TaskCoverage{{TaskKey: "task_pet_list", CallKeys: []string{"c1"}}}
 
 	repository := newBudgetTestRepository(t)
-	if err := repository.EnsureBudget(context.Background(), BudgetRun, "run-pet-list", BudgetLimits{MaxModelCalls: 3, MaxToolCalls: 1, MaxTokens: 12000, MaxDurationMillis: 10000, MaxConcurrency: 1}); err != nil {
+	if err := repository.EnsureBudget(context.Background(), BudgetRun, "run-pet-list", BudgetLimits{MaxModelCalls: 3, MaxToolCalls: 1, MaxTokens: 48000, MaxDurationMillis: 10000, MaxConcurrency: 1}); err != nil {
 		t.Fatal(err)
 	}
 	model := &scriptedModel{responses: [][]ProtocolRecord{call, incomplete, answer}}
@@ -604,5 +604,64 @@ func TestRunDecisionLoopMarksLatestToolResultsFresh(t *testing.T) {
 	}
 	if fresh != 1 {
 		t.Fatalf("fresh tool result blocks = %d, want 1", fresh)
+	}
+}
+
+func TestRunDecisionLoopWrapsUpBeforeBudgetRunsOut(t *testing.T) {
+	repository := newBudgetTestRepository(t)
+	if err := repository.EnsureBudget(context.Background(), BudgetRun, "run-wrap-up", BudgetLimits{MaxModelCalls: 8, MaxToolCalls: 20, MaxTokens: 16000, MaxDurationMillis: 10000, MaxConcurrency: 1}); err != nil {
+		t.Fatal(err)
+	}
+	model := &scriptedModel{responses: [][]ProtocolRecord{callToolsRecords(), finalAnswerRecords()}}
+	tools := &fakeToolExecutor{}
+	outcome, err := runDecisionLoop(context.Background(), model, tools, StepInput{RunID: "run-wrap-up", Tools: []Tool{{Name: petRosterToolName, Version: DefaultToolVersion}}}, 8, nil, nil, "", repository, nil, nil)
+	if err != nil {
+		t.Fatalf("loop failed: %v", err)
+	}
+	if outcome.Action != ActionFinalAnswer || len(model.inputs) != 2 {
+		t.Fatalf("action = %s, model calls = %d, want final_answer after 2 calls", outcome.Action, len(model.inputs))
+	}
+	if len(tools.batches) != 1 {
+		t.Fatalf("tool batches = %d, want 1 (wrap-up step must not call tools)", len(tools.batches))
+	}
+	if len(model.inputs[1].Tools) != 0 {
+		t.Fatalf("wrap-up tools = %+v, want none", model.inputs[1].Tools)
+	}
+	wrapUp := false
+	for _, block := range model.inputs[1].Blocks {
+		if block.ObjectID == "budget_wrap_up" && block.Required && IsTrustedInstruction(block) {
+			wrapUp = true
+		}
+	}
+	if !wrapUp {
+		t.Fatalf("wrap-up step missing budget instruction: %+v", model.inputs[1].Blocks)
+	}
+}
+
+func TestRunDecisionLoopRejectsToolCallsDuringWrapUp(t *testing.T) {
+	repository := newBudgetTestRepository(t)
+	if err := repository.EnsureBudget(context.Background(), BudgetRun, "run-wrap-up-retry", BudgetLimits{MaxModelCalls: 8, MaxToolCalls: 20, MaxTokens: 16000, MaxDurationMillis: 10000, MaxConcurrency: 1}); err != nil {
+		t.Fatal(err)
+	}
+	model := &scriptedModel{responses: [][]ProtocolRecord{callToolsRecords(), callToolsRecords(), finalAnswerRecords()}}
+	tools := &fakeToolExecutor{}
+	outcome, err := runDecisionLoop(context.Background(), model, tools, StepInput{RunID: "run-wrap-up-retry"}, 8, nil, nil, "", repository, nil, nil)
+	if err != nil {
+		t.Fatalf("loop failed: %v", err)
+	}
+	if outcome.Action != ActionFinalAnswer || len(model.inputs) != 3 {
+		t.Fatalf("action = %s, model calls = %d, want final_answer after wrap-up retry", outcome.Action, len(model.inputs))
+	}
+	if len(tools.batches) != 1 {
+		t.Fatalf("tool batches = %d, want 1 (wrap-up tool calls must not execute)", len(tools.batches))
+	}
+	feedback := false
+	for _, block := range model.inputs[2].Blocks {
+		if block.ObjectID == "validation_feedback" && strings.Contains(block.Text, "不得再调用工具") {
+			feedback = true
+		}
+	}
+	if !feedback {
+		t.Fatalf("wrap-up retry missing feedback: %+v", model.inputs[2].Blocks)
 	}
 }

@@ -218,16 +218,16 @@ it('replaces accumulated assistant preview with the terminal answer', () => {
   ]
   const completed = { ...event(4, 'assistant.completed'), data: { answer: '目前需要观察精神变化', groups: [], coverage: [], intent: 'casual_chat' } }
   const visible = visibleTurnEvents([event(1, 'run.progress'), ...preview, completed])
-  expect(visible.map(value => value.type)).toEqual(['run.progress', 'assistant.completed'])
-  expect(visible[1].data).toEqual(completed.data)
+  expect(visible.map(value => value.type)).toEqual(['assistant.completed'])
+  expect(visible[0].data).toEqual(completed.data)
 })
 
 it('clears accumulated assistant preview when the run fails or is canceled', () => {
   const preview = { ...event(2, 'assistant.delta'), data: { message_id: 'message-1', delta: '目前需要观察' } }
   const failed = visibleTurnEvents([event(1, 'run.progress'), preview, event(3, 'run.failed')])
-  expect(failed.map(value => value.type)).toEqual(['run.progress', 'run.failed'])
+  expect(failed.map(value => value.type)).toEqual(['run.failed'])
   const canceled = visibleTurnEvents([event(1, 'run.progress'), preview, event(3, 'run.canceled')])
-  expect(canceled.map(value => value.type)).toEqual(['run.progress'])
+  expect(canceled.map(value => value.type)).toEqual([])
 })
 
 it('allows a network error to return to reconnecting', () => {

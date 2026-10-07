@@ -6,7 +6,8 @@ import (
 	"sort"
 )
 
-// ResourceType：工具涉及的资源类型。一期固定五种。
+// ResourceType：工具涉及的资源类型。一期固定五种，知识检索在 RAG 阶段新增
+// knowledge，表示只读背景知识，不属于任何家庭的业务数据。
 type ResourceType string
 
 const (
@@ -15,6 +16,7 @@ const (
 	ResourceHealthRecord  ResourceType = "health_record"
 	ResourceHealthSummary ResourceType = "health_summary"
 	ResourceConversation  ResourceType = "conversation"
+	ResourceKnowledge     ResourceType = "knowledge"
 )
 
 // ActionType：工具动作类型。一期固定七种。
@@ -65,6 +67,7 @@ var validResourceTypes = map[ResourceType]struct{}{
 	ResourceHealthRecord:  {},
 	ResourceHealthSummary: {},
 	ResourceConversation:  {},
+	ResourceKnowledge:     {},
 }
 
 var validActionTypes = map[ActionType]struct{}{

@@ -1,7 +1,7 @@
 import type { AskOperation } from '../../types/ask'
 import { Button, Image, Input, ScrollView, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import askBackground from '../../assets/nocat.png'
 import AskEventView from '../../components/ask/ask-event'
 import AskOperationCard from '../../components/ask/ask-operation'
@@ -86,6 +86,15 @@ export default function Ask() {
 
   const lastTurn = conversation.at(-1)
   const followKey = `${conversation.length}:${lastTurn?.events.length ?? 0}:${lastTurn?.events.at(-1)?.sequence ?? 0}`
+  const petNames = useMemo(() => {
+    const values: Record<string, string> = {}
+    for (const pet of session?.pets ?? []) {
+      if (pet.pet_id && pet.pet_name) {
+        values[pet.pet_id] = pet.pet_name
+      }
+    }
+    return values
+  }, [session?.pets])
 
   const measureConversation = useCallback(() => {
     const query = Taro.createSelectorQuery()
@@ -345,7 +354,7 @@ export default function Ask() {
                     </View>
                   )}
                   {visibleTurnEvents(turn.events).map(event => (
-                    <AskEventView event={event} input={turn.input} events={turn.events} key={`${turn.runID}-${event.sequence}`} />
+                    <AskEventView event={event} input={turn.input} events={turn.events} petNames={petNames} key={`${turn.runID}-${event.sequence}`} />
                   ))}
                   {renderOperationCards(visibleOperations.filter(operation => operation.run_id === turn.runID))}
                 </View>

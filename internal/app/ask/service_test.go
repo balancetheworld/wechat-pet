@@ -50,7 +50,7 @@ func (r servicePetRepository) Get(_ context.Context, _ string, petID string) (pe
 }
 
 func (r servicePetRepository) GetProfile(context.Context, string, string) (petapp.PetProfile, error) {
-	return petapp.PetProfile{ID: r.pet.ID, Name: r.pet.Name, Breed: "田园猫", Gender: "female", Sterilized: true}, nil
+	return petapp.PetProfile{ID: r.pet.ID, Name: r.pet.Name, Breed: "田园猫", Species: "猫", Gender: "female", Sterilized: true}, nil
 }
 
 func (r servicePetRepository) GetHealth(context.Context, string, string) (petapp.PetHealth, error) {

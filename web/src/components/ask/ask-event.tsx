@@ -1,4 +1,4 @@
-import type { AskAnalysisResult, AskAnswerGroup, AskAssistantResult, AskDeltaResult, AskEvent, AskFactResult, AskFailedResult, AskFamilyPetsResult, AskProgressResult, AskQuestionResult, AskRiskResult, AskTaskCoverage } from '../../types/ask'
+import type { AskAnalysisResult, AskAnswerGroup, AskAnswerSubject, AskAssistantResult, AskDeltaResult, AskEvent, AskFactResult, AskFailedResult, AskFamilyPetsResult, AskProgressResult, AskQuestionResult, AskRiskResult, AskTaskCoverage } from '../../types/ask'
 import { Button, RichText, ScrollView, Text, View } from '@tarojs/components'
 import Taro from '@tarojs/taro'
 import { micromark } from 'micromark'
@@ -144,7 +144,17 @@ function ThinkingResult({ delta }: { delta: string }) {
   )
 }
 
-function AssistantGroups({ groups, coverage, answer }: { groups: AskAnswerGroup[], coverage: AskTaskCoverage[], answer: string }) {
+// subjectLabel 生成对象标签：已确认对象显示宠物名字而不是内部 ID，
+// 未明确对象只在有描述时显示，占位内容（例如 "turn"）不展示给用户。
+function subjectLabel(subject: AskAnswerSubject, petNames?: Record<string, string>) {
+  if (subject.kind === 'pet') {
+    const name = subject.pet_id ? petNames?.[subject.pet_id] : ''
+    return name ? `宠物 ${name}` : '宠物'
+  }
+  return (subject.description ?? '').trim()
+}
+
+function AssistantGroups({ groups, coverage, answer, petNames }: { groups: AskAnswerGroup[], coverage: AskTaskCoverage[], answer: string, petNames?: Record<string, string> }) {
   if (!groups.length) {
     return <DeltaResult delta={answer} />
   }
@@ -153,19 +163,20 @@ function AssistantGroups({ groups, coverage, answer }: { groups: AskAnswerGroup[
       {groups.map(group => (
         <View className="ask-answer-group" key={group.group_key}>
           <View className="ask-answer-subjects">
-            {group.subjects.map(subject => <Text key={subject.subject_key}>{subject.kind === 'pet' ? `宠物 ${subject.pet_id}` : subject.description}</Text>)}
+            {group.subjects.map((subject) => {
+              const label = subjectLabel(subject, petNames)
+              return label ? <Text key={subject.subject_key}>{label}</Text> : null
+            })}
           </View>
           {(group.segments ?? []).map(segment => (
             <View className="ask-answer-segment" key={segment.segment_key}>
               <RichText className="ask-markdown" nodes={renderMarkdown(segment.text)} />
-              {!!segment.evidence_refs?.length && <Text className="ask-answer-evidence">{segment.evidence_refs.map(ref => ref.source_type).join('、')}</Text>}
             </View>
           ))}
           {(group.risks ?? []).map(risk => (
             <View className="ask-answer-risk" key={`${risk.group_key}-${risk.subject_key}`}>
               <Text>{`风险：${risk.level}`}</Text>
               {!!risk.uncertainty && <Text>{risk.uncertainty}</Text>}
-              {!!risk.evidence?.length && <Text className="ask-answer-evidence">{risk.evidence.map(ref => ref.source_type).join('、')}</Text>}
             </View>
           ))}
         </View>
@@ -179,8 +190,8 @@ function AssistantGroups({ groups, coverage, answer }: { groups: AskAnswerGroup[
   )
 }
 
-function AssistantResult({ data }: { data: AskAssistantResult }) {
-  return <AssistantGroups groups={data.groups ?? []} coverage={data.coverage ?? []} answer={data.answer} />
+function AssistantResult({ data, petNames }: { data: AskAssistantResult, petNames?: Record<string, string> }) {
+  return <AssistantGroups groups={data.groups ?? []} coverage={data.coverage ?? []} answer={data.answer} petNames={petNames} />
 }
 
 async function copyText(value: string) {
@@ -192,7 +203,7 @@ async function copyText(value: string) {
   }
 }
 
-export default function AskEventView({ event, input = '', events = emptyEvents }: { event: AskEvent, input?: string, events?: AskEvent[] }) {
+export default function AskEventView({ event, input = '', events = emptyEvents, petNames }: { event: AskEvent, input?: string, events?: AskEvent[], petNames?: Record<string, string> }) {
   if (event.type === 'run.progress') {
     return <ProgressResult data={event.data as AskProgressResult} />
   }
@@ -234,7 +245,7 @@ export default function AskEventView({ event, input = '', events = emptyEvents }
     const data = event.data as AskAssistantResult
     return (
       <View className="ask-message ask-message--assistant">
-        <AssistantResult data={data} />
+        <AssistantResult data={data} petNames={petNames} />
         <Button className="ask-copy-button" onClick={() => void copyText(data.answer)} aria-label="复制回答">复制</Button>
       </View>
     )

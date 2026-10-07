@@ -22,6 +22,7 @@ import (
 	"github.com/balancetheworld/wechat-pet/internal/pkg/database"
 	jwtpkg "github.com/balancetheworld/wechat-pet/internal/pkg/jwt"
 	aiplatform "github.com/balancetheworld/wechat-pet/internal/platform/ai"
+	"github.com/balancetheworld/wechat-pet/internal/platform/knowledge"
 	"github.com/balancetheworld/wechat-pet/internal/platform/storage"
 	"github.com/balancetheworld/wechat-pet/internal/platform/wechat"
 	fileservice "github.com/balancetheworld/wechat-pet/internal/service/file"
@@ -159,12 +160,22 @@ func main() {
 	}
 	if cfg.AppEnv == "development" {
 		askService.SetDebugLogger(logger)
+		askService.SetFastPath(true)
 	}
 	askService.SetCalendarRepository(calendarRepository)
 	askService.SetCalendarWriter(calendarService)
 	askService.SetPetProfileWriter(petService)
+	// 背景知识库（RAG 设计文档第一、七节）：只读端口，只影响回答内容，
+	// 不改变权限、写入确认与风险升级条件。知识目录随版本化提交发布。
+	knowledgeCatalog, err := knowledge.EmbeddedCatalog(askapp.DefaultTokenizer())
+	if err != nil {
+		logger.Error("load ask knowledge catalog", "error", err)
+		os.Exit(1)
+	}
+	askService.SetKnowledgeRetriever(knowledgeCatalog)
+	logger.Info("ask knowledge catalog", "version", knowledgeCatalog.Version(), "digest", knowledgeCatalog.Digest(), "chunks", len(knowledgeCatalog.Chunks()))
 	// v2 工具目录与业务读取端口（不依赖 AI 启用，供决策循环工具执行使用）。
-	askCatalog, err := askapp.DefaultCatalog(askapp.DefaultToolVersion)
+	askCatalog, err := askapp.DefaultCatalogWithKnowledge(askapp.DefaultToolVersion)
 	if err != nil {
 		logger.Error("create ask tool catalog", "error", err)
 		os.Exit(1)

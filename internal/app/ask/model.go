@@ -102,6 +102,7 @@ type PetContext struct {
 	ID                 string
 	Name               string
 	Breed              string
+	Species            string
 	Gender             string
 	Sterilized         bool
 	Birthday           string

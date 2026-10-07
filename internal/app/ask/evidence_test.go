@@ -89,6 +89,54 @@ func TestNormalizeDecisionEvidenceDowngradesBusinessFactWithoutEvidence(t *testi
 	}
 }
 
+// TestSanitizeSubjectDescriptionsDropsPlaceholder 锁定占位描述清理：
+// 模型把字段名或英文标识符当成对象描述时，展示层不应出现 "turn" 这类代码片段。
+func TestSanitizeSubjectDescriptionsDropsPlaceholder(t *testing.T) {
+	decision := StepDecision{Groups: []AnswerGroup{
+		{
+			GroupKey:   "g1",
+			TaskKeys:   []string{"t1"},
+			AnswerKind: AnswerCasual,
+			Scope:      ScopeFull,
+			Subjects:   []AnswerSubject{{SubjectKey: "s1", Kind: SubjectUnresolved, Description: "turn"}},
+		},
+		{
+			GroupKey:   "g2",
+			TaskKeys:   []string{"t1"},
+			AnswerKind: AnswerCasual,
+			Scope:      ScopeFull,
+			Subjects:   []AnswerSubject{{SubjectKey: "s2", Kind: SubjectUnresolved, Description: "source_turn_ids"}},
+		},
+		{
+			GroupKey:   "g3",
+			TaskKeys:   []string{"t1"},
+			AnswerKind: AnswerCasual,
+			Scope:      ScopeFull,
+			Subjects:   []AnswerSubject{{SubjectKey: "s3", Kind: SubjectUnresolved, Description: "用户提到的猫"}},
+		},
+		{
+			GroupKey:   "g4",
+			TaskKeys:   []string{"t1"},
+			AnswerKind: AnswerCasual,
+			Scope:      ScopeFull,
+			Subjects:   []AnswerSubject{{SubjectKey: "s4", Kind: SubjectPet, PetID: "pet-1", Description: "turn"}},
+		},
+	}}
+	normalizeDecisionEvidence(&decision, map[string]struct{}{}, "turn-1")
+	if decision.Groups[0].Subjects[0].Description != "" {
+		t.Fatalf("placeholder description kept: %q", decision.Groups[0].Subjects[0].Description)
+	}
+	if decision.Groups[1].Subjects[0].Description != "" {
+		t.Fatalf("field-name description kept: %q", decision.Groups[1].Subjects[0].Description)
+	}
+	if decision.Groups[2].Subjects[0].Description != "用户提到的猫" {
+		t.Fatalf("natural language description dropped: %q", decision.Groups[2].Subjects[0].Description)
+	}
+	if decision.Groups[3].Subjects[0].Description != "turn" {
+		t.Fatalf("confirmed pet subject should be left untouched: %q", decision.Groups[3].Subjects[0].Description)
+	}
+}
+
 func TestProcessRunV2ToleratesFabricatedUserStatementEvidence(t *testing.T) {
 	text := "听到这个消息很难过，节哀。需要我帮你整理这段陪伴的回忆吗？"
 	model := &scriptedModel{responses: [][]ProtocolRecord{finalAnswerRecordsWithEvidence(text, []EvidenceRef{{SourceType: "turn", SourceID: "t1", Version: "v1"}})}}

@@ -254,6 +254,12 @@ func DefaultCatalog(version string) (*Catalog, error) {
 	return NewCatalog(DefaultTools(), nil, version, nil)
 }
 
+// DefaultCatalogWithKnowledge 在默认工具目录上追加只读知识检索工具（RAG 设计文档第七节）。
+// 只在装配了 KnowledgeSource 时使用，避免注册没有后端的空工具。
+func DefaultCatalogWithKnowledge(version string) (*Catalog, error) {
+	return NewCatalog(append(DefaultTools(), SearchPetKnowledgeTool()), nil, version, nil)
+}
+
 // resolvePetTool 解析家庭宠物（resolve + pet）。
 // 参数 query 与 ToolExecutorAdapter.resolvePet 读取的 args["query"] 一致。
 func resolvePetTool() Tool {

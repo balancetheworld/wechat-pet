@@ -164,6 +164,11 @@ func TestBuildRunContextLayers(t *testing.T) {
 	if !foundCurrent {
 		t.Fatal("missing current_turn block")
 	}
+	for _, block := range assembly.Blocks {
+		if block.Kind == "profile" && !strings.Contains(block.Text, "pet_id=pet-1") {
+			t.Fatalf("profile block must expose the stable pet id: %q", block.Text)
+		}
+	}
 }
 
 func TestBuildRunContextCurrentInputNotDuplicatedInHistory(t *testing.T) {
@@ -264,9 +269,43 @@ func TestPetProfileText(t *testing.T) {
 			t.Fatalf("petProfileText missing %q: %q", part, text)
 		}
 	}
+	// 物种未记录时必须显式标注，不能省略成「没有这个字段」。
+	if !strings.Contains(text, "物种：未记录") {
+		t.Fatalf("unrecorded species should be marked explicitly: %q", text)
+	}
+	if marked := petProfileText(PetContext{ID: "p1", Name: "旺仔", Species: "猫"}); !strings.Contains(marked, "物种：猫") {
+		t.Fatalf("recorded species should be rendered: %q", marked)
+	}
 	// 缺资料不填默认值：Birthday 未设置时不应出现"生日"。
 	if strings.Contains(text, "生日") {
 		t.Fatalf("unset birthday should not appear: %q", text)
+	}
+}
+
+func TestReferenceBlocksDistinguishUnreadableProfile(t *testing.T) {
+	pets := []PetContext{{ID: "pet-1", Name: "啾啾"}}
+	available := referenceBlocks(ContextSnapshot{Pets: pets, Sources: []ContextSource{
+		{Name: "pet_base:pet-1", Version: "pet-base-v1", Status: "available"},
+		{Name: "pet_profile:pet-1", Version: "pet-profile-v1", Status: "available"},
+	}})
+	if len(available) != 1 || !strings.Contains(available[0].Text, "物种：未记录") {
+		t.Fatalf("readable profile block = %+v", available)
+	}
+	failed := referenceBlocks(ContextSnapshot{Pets: pets, Sources: []ContextSource{
+		{Name: "pet_base:pet-1", Version: "pet-base-v1", Status: "available"},
+		{Name: "pet_profile:pet-1", Version: "pet-profile-v1", Status: "failed"},
+	}})
+	if len(failed) != 1 {
+		t.Fatalf("blocks = %+v", failed)
+	}
+	if !strings.Contains(failed[0].Text, "档案读取失败") {
+		t.Fatalf("failed profile block missing marker: %q", failed[0].Text)
+	}
+	if strings.Contains(failed[0].Text, "物种：未记录") {
+		t.Fatalf("failed profile block must not claim fields are unrecorded: %q", failed[0].Text)
+	}
+	if len(failed[0].EvidenceRefs) != 1 || failed[0].EvidenceRefs[0].SourceType != "pet_base" {
+		t.Fatalf("failed profile evidence refs = %+v", failed[0].EvidenceRefs)
 	}
 }
 

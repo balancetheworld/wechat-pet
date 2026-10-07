@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -15,6 +16,16 @@ import (
 // maxDecisionStepsPerRun 是单 Run 决策循环步数上限（一期保守值，文档 9.3）。
 const maxDecisionStepsPerRun = 16
 
+func decisionStepsForToolCount(toolCount int) int {
+	if toolCount == 0 {
+		return 4
+	}
+	if toolCount <= 2 {
+		return 8
+	}
+	return maxDecisionStepsPerRun
+}
+
 // thinkingDeltaFlushRunes 是思考预览的合并阈值：推理增量先按字符聚合再落库，
 // 避免逐 token 写事件把数据库与事件流打满。
 const thinkingDeltaFlushRunes = 80
@@ -23,6 +34,7 @@ const thinkingDeltaFlushRunes = 80
 // 组装上下文 -> 召回候选工具 -> 构造工具执行器 -> RunDecisionLoop -> 降级映射。
 // ruleLevel 是 processRun 已评估的确定性规则风险，与模型风险合并后作为最终风险。
 func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Run, messageID string, contextMessages []ContextMessage, currentInput string, contextSnapshot ContextSnapshot, images []ModelImage, ruleLevel RiskLevel) (RunDecision, error) {
+	startedAt := time.Now()
 	assembly := BuildRunContext(currentInput, contextMessages, contextSnapshot, s.now())
 	budgets, ok := s.repository.(BudgetRepository)
 	if !ok {
@@ -47,6 +59,7 @@ func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Ru
 		tools = append(tools, m.Tool)
 	}
 	tools = s.withPetRosterTool(tools, filter)
+	tools = s.withKnowledgeTool(tools, filter, currentInput)
 	scope := ToolExecutionScope{
 		SessionID: session.ID,
 		RunID:     run.ID,
@@ -55,6 +68,11 @@ func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Ru
 			input.UserID = session.CreatedBy
 			return s.PrepareOperation(ctx, sessionID, runID, input)
 		}),
+		Knowledge: s.knowledge,
+	}
+	// 知识检索的物种与生命周期由 Runtime 从宠物档案注入，模型只能提出搜索请求。
+	if s.knowledge != nil {
+		scope.PetFacts = s.petProfileFacts(ctx, session)
 	}
 	// 只读结果复用需要结果存储与来源集合版本；实现缺失时不做复用，只执行真实调用。
 	if store, ok := s.repository.(ToolResultStore); ok {
@@ -76,16 +94,30 @@ func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Ru
 		for _, match := range matches {
 			result = append(result, match.Tool)
 		}
-		return s.withPetRosterTool(result, filter)
+		result = s.withPetRosterTool(result, filter)
+		return s.withKnowledgeTool(result, filter, currentInput)
 	}
 	taskItems, err := s.repository.ListTaskItems(ctx, run.ID)
 	if err != nil {
 		return RunDecision{}, err
 	}
+	if s.fastPath && len(tools) == 0 && isGreetingInput(currentInput) {
+		outcome := greetingOutcome(run, taskItems)
+		if err := persistTaskItems(ctx, s.repository, outcome.TaskItems); err != nil {
+			return RunDecision{}, err
+		}
+		return mapLoopOutcomeToDecision(outcome, ruleLevel), nil
+	}
 	streamedAnswer := false
 	thinking := strings.Builder{}
 	thinkingRunes := 0
+	lastThinkingProgress := time.Time{}
 	flushThinking := func() {
+		if !s.persistThinking {
+			thinking.Reset()
+			thinkingRunes = 0
+			return
+		}
 		text := thinking.String()
 		thinking.Reset()
 		thinkingRunes = 0
@@ -99,6 +131,15 @@ func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Ru
 		}
 	}
 	emitThinkingDelta := func(delta string) error {
+		if !s.persistThinking {
+			if strings.TrimSpace(delta) != "" && (lastThinkingProgress.IsZero() || time.Since(lastThinkingProgress) >= 3*time.Second) {
+				lastThinkingProgress = time.Now()
+				if _, progressErr := s.appendProgressEvent(ctx, session, run, "response_reasoning", "正在分析问题"); progressErr != nil && s.debugLogger != nil {
+					s.debugLogger.Debug("ask reasoning progress failed", "run_id", run.ID, "error", progressErr)
+				}
+			}
+			return nil
+		}
 		thinking.WriteString(delta)
 		thinkingRunes += utf8.RuneCountInString(delta)
 		if thinkingRunes >= thinkingDeltaFlushRunes {
@@ -120,17 +161,53 @@ func (s *Service) runV2DecisionLoop(ctx context.Context, session Session, run Ru
 		streamedAnswer = true
 		return nil
 	}
-	outcome, err := runDecisionLoop(ctx, s.agentModel, executor, StepInput{SessionID: session.ID, RunID: run.ID, Blocks: assembly.Blocks, Tools: tools, Images: images, OnAnswerDelta: emitAnswerDelta, OnThinkingDelta: emitThinkingDelta}, maxDecisionStepsPerRun, s.repository, taskItems, run.TurnID, budgets, recallTools, s.debugLogger)
+	outcome, err := runDecisionLoop(ctx, s.agentModel, executor, StepInput{SessionID: session.ID, RunID: run.ID, Blocks: assembly.Blocks, Tools: tools, Images: images, OnAnswerDelta: emitAnswerDelta, OnThinkingDelta: emitThinkingDelta}, decisionStepsForToolCount(len(tools)), s.repository, taskItems, run.TurnID, budgets, recallTools, s.debugLogger)
 	if err != nil {
 		return RunDecision{}, err
 	}
 	flushThinking()
+	if s.debugLogger != nil {
+		s.debugLogger.Debug("ask decision loop completed", "run_id", run.ID, "steps", outcome.Steps, "duration_ms", time.Since(startedAt).Milliseconds(), "tools", len(tools))
+	}
 	if err := validateOutcomeSubjects(session, outcome); err != nil {
 		return RunDecision{}, err
 	}
 	decision := mapLoopOutcomeToDecision(outcome, ruleLevel)
 	decision.StreamedAnswer = streamedAnswer
 	return decision, nil
+}
+
+func isGreetingInput(input string) bool {
+	value := strings.ToLower(strings.TrimSpace(input))
+	value = strings.Trim(value, "，。！？!?、~～. ")
+	switch value {
+	case "你好", "您好", "嗨", "哈喽", "hello", "hi", "hey":
+		return true
+	default:
+		return false
+	}
+}
+
+func greetingOutcome(run Run, existing []TaskItem) LoopOutcome {
+	const taskKey = "greeting"
+	const groupKey = "greeting"
+	const subjectKey = "unresolved"
+	taskID := stableTaskItemID(run.ID, taskKey)
+	items := append([]TaskItem(nil), existing...)
+	found := false
+	for index := range items {
+		if items[index].TaskItemID != taskID {
+			continue
+		}
+		items[index].Outcome = OutcomeAnswered
+		items[index].ResultRef = &TaskResultRef{Kind: ResultRefAnswerGroup, RefID: groupKey}
+		found = true
+		break
+	}
+	if !found {
+		items = append(items, TaskItem{TaskItemID: taskID, OriginTurnID: run.TurnID, RunID: run.ID, ItemRevision: 1, Goal: "回应用户问候", SourceTurnIDs: []string{run.TurnID}, Subjects: []AnswerSubject{{SubjectKey: subjectKey, Kind: SubjectUnresolved, Description: "尚未指明的宠物对象"}}, Outcome: OutcomeAnswered, ResultRef: &TaskResultRef{Kind: ResultRefAnswerGroup, RefID: groupKey}})
+	}
+	return LoopOutcome{Action: ActionFinalAnswer, Groups: []AnswerGroup{{GroupKey: groupKey, TaskKeys: []string{taskKey}, AnswerKind: AnswerCasual, Subjects: []AnswerSubject{{SubjectKey: subjectKey, Kind: SubjectUnresolved, Description: "尚未指明的宠物对象"}}, Scope: ScopeFull, Segments: []SegmentRecord{{SegmentKey: "greeting", GroupKey: groupKey, SubjectKeys: []string{subjectKey}, Field: "reply", Text: "你好呀，我在这儿陪着你。想聊宠物健康、喂养，还是查看档案和日历？", BasisKind: BasisGeneralKnowledge}}}}, TaskItems: items, Coverage: []TaskCoverage{{TaskKey: taskKey, AnswerGroupKeys: []string{groupKey}}}, Steps: 0}
 }
 
 func securityContextBlocks(hits []InjectionHit) []ContextBlock {
@@ -195,7 +272,7 @@ func validateOutcomeSubjects(session Session, outcome LoopOutcome) error {
 				continue
 			}
 			if _, ok := allowed[subject.PetID]; !ok {
-				return fmt.Errorf("agent_loop: subject pet %q is outside session scope", subject.PetID)
+				return NewExecutorError("invalid_subject", false, 0, fmt.Errorf("agent_loop: subject pet %q is outside session scope", subject.PetID))
 			}
 		}
 	}
@@ -324,12 +401,6 @@ func intentForGroups(groups []AnswerGroup) Intent {
 	default:
 		return IntentCasualChat
 	}
-}
-
-// maxModelRisk 取所有回答组中模型给出的最高风险等级（文档 11.1 合并前）。
-func maxModelRisk(groups []AnswerGroup) RiskLevel {
-	level, _ := maxModelRiskDetail(groups)
-	return level
 }
 
 func maxModelRiskDetail(groups []AnswerGroup) (RiskLevel, string) {

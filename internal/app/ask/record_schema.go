@@ -219,48 +219,6 @@ func callRecordSchema() map[string]any {
 	}
 }
 
-func coverageRecordSchema() map[string]any {
-	return map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"required":             []string{"type", "tasks"},
-		"properties": map[string]any{
-			"type": strEnum("coverage"),
-			"tasks": map[string]any{
-				"type":  "array",
-				"items": taskCoverageSchema(),
-			},
-		},
-	}
-}
-
-func taskCoverageSchema() map[string]any {
-	return map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"required":             []string{"task_key", "answer_group_keys", "question_keys", "call_keys", "operation_ids", "incomplete_reason"},
-		"properties": map[string]any{
-			"task_key":          map[string]any{"type": "string"},
-			"answer_group_keys": stringArraySchema(),
-			"question_keys":     stringArraySchema(),
-			"call_keys":         stringArraySchema(),
-			"operation_ids":     stringArraySchema(),
-			"incomplete_reason": nullableStringSchema(),
-		},
-	}
-}
-
-func endRecordSchema() map[string]any {
-	return map[string]any{
-		"type":                 "object",
-		"additionalProperties": false,
-		"required":             []string{"type"},
-		"properties": map[string]any{
-			"type": strEnum("end"),
-		},
-	}
-}
-
 func strEnum(values ...string) map[string]any {
 	items := make([]any, 0, len(values))
 	for _, v := range values {

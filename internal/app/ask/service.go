@@ -172,12 +172,15 @@ type Service struct {
 	petWriter      petProfileWriter
 	// v2 决策循环依赖（文档 4、6、7）：由 main 装配注入，供 processRun 走
 	// RunDecisionLoop 使用。尚未注入时 processRun 降级为 provider_unavailable。
-	agentModel   AgentModel
-	catalog      *Catalog
-	businessRead BusinessReadRepository
-	imageAssets  imageAssetReader
-	debugLogger  *slog.Logger
-	notifier     *RunEventNotifier
+	agentModel      AgentModel
+	catalog         *Catalog
+	businessRead    BusinessReadRepository
+	knowledge       KnowledgeSource
+	imageAssets     imageAssetReader
+	debugLogger     *slog.Logger
+	persistThinking bool
+	fastPath        bool
+	notifier        *RunEventNotifier
 }
 
 type Versions struct {
@@ -205,7 +208,7 @@ func NewService(repository Repository, pets petapp.Repository, versions ...Versi
 			value.KnowledgeVersion = versions[0].KnowledgeVersion
 		}
 	}
-	return &Service{repository: repository, pets: pets, rules: DeterministicRuleEngine{}, now: time.Now, versions: value, notifier: NewRunEventNotifier()}, nil
+	return &Service{repository: repository, pets: pets, rules: DeterministicRuleEngine{}, now: time.Now, versions: value, persistThinking: true, notifier: NewRunEventNotifier()}, nil
 }
 
 // SubscribeRunEvents 订阅某个 Run 的事件通知；调用方负责调用返回的解除订阅函数。
@@ -246,12 +249,29 @@ func (s *Service) SetBusinessReadRepository(repository BusinessReadRepository) {
 	s.businessRead = repository
 }
 
+// SetKnowledgeRetriever 注入只读知识检索端口（RAG 设计文档第七节）。
+// 同时把目录版本固定到新建 Session 的 knowledge_version，历史回答据此重放。
+func (s *Service) SetKnowledgeRetriever(source KnowledgeSource) {
+	s.knowledge = source
+	if source != nil && strings.TrimSpace(source.Version()) != "" {
+		s.versions.KnowledgeVersion = source.Version()
+	}
+}
+
 func (s *Service) SetImageAssetReader(reader imageAssetReader) {
 	s.imageAssets = reader
 }
 
 func (s *Service) SetDebugLogger(logger *slog.Logger) {
 	s.debugLogger = logger
+}
+
+func (s *Service) SetPersistThinking(enabled bool) {
+	s.persistThinking = enabled
+}
+
+func (s *Service) SetFastPath(enabled bool) {
+	s.fastPath = enabled
 }
 
 func (s *Service) validateAssetRefs(ctx context.Context, familyID string, assetRefs []string) error {
@@ -855,6 +875,7 @@ func (s *Service) loadHealthContext(ctx context.Context, session Session, messag
 				status = "failed"
 			} else {
 				petContext.Breed = profile.Breed
+				petContext.Species = strings.TrimSpace(profile.Species)
 				petContext.Gender = profile.Gender
 				petContext.Sterilized = profile.Sterilized
 				if profile.Birthday != nil {
@@ -920,8 +941,8 @@ func sessionPetIDs(session Session) []string {
 }
 
 // loadPetRoster 加载当前会话已授权宠物的基础清单（id 与名字），并为可读到的宠物
-// 标注 pet_base 来源。它只回答「有哪些候选对象」：品种、健康与记录明细仍由工具按需查询。
-// 读取失败按 pet_base 来源状态记录，不中断本次决策。
+// 标注 pet_base 来源。它回答「有哪些候选对象」并带上已保存的档案字段：健康与记录明细
+// 仍由工具按需查询。读取失败按 pet_base 来源状态记录，不中断本次决策。
 func (s *Service) loadPetRoster(ctx context.Context, session Session) ([]PetContext, []ContextSource) {
 	petIDs := sessionPetIDs(session)
 	pets := make([]PetContext, 0, len(petIDs))
@@ -936,8 +957,27 @@ func (s *Service) loadPetRoster(ctx context.Context, session Session) ([]PetCont
 			sources = append(sources, ContextSource{Name: "pet_base:" + petID, Version: "pet-base-v1", Status: "failed"})
 			continue
 		}
-		pets = append(pets, PetContext{ID: pet.ID, Name: pet.Name})
+		petContext := PetContext{ID: pet.ID, Name: pet.Name}
 		sources = append(sources, ContextSource{Name: "pet_base:" + petID, Version: "pet-base-v1", Status: "available", ItemCount: 1})
+		if profileRepository, ok := s.pets.(petProfileReader); ok {
+			profile, profileErr := profileRepository.GetProfile(ctx, session.FamilyID, petID)
+			status := "available"
+			if errors.Is(profileErr, petapp.ErrNotFound) {
+				status = "absent"
+			} else if profileErr != nil {
+				status = "failed"
+			} else {
+				petContext.Breed = profile.Breed
+				petContext.Species = strings.TrimSpace(profile.Species)
+				petContext.Gender = profile.Gender
+				petContext.Sterilized = profile.Sterilized
+				if profile.Birthday != nil {
+					petContext.Birthday = *profile.Birthday
+				}
+			}
+			sources = append(sources, ContextSource{Name: "pet_profile:" + petID, Version: "pet-profile-v1", Status: status, ItemCount: boolCount(profileErr == nil)})
+		}
+		pets = append(pets, petContext)
 	}
 	return pets, sources
 }

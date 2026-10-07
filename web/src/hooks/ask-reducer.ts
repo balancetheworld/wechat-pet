@@ -78,7 +78,7 @@ export function mergeAskDeltaEvents(events: AskEvent[]) {
   return merged
 }
 
-const visibleEventTypes = new Set(['run.progress', 'assistant.thinking', 'assistant.delta', 'assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed'])
+const visibleEventTypes = new Set(['assistant.thinking', 'assistant.delta', 'assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed'])
 
 const terminalEventTypes = new Set(['assistant.completed', 'assistant.question', 'fact.completed', 'family.pets.completed', 'run.completed', 'risk.escalated', 'run.failed', 'run.canceled'])
 

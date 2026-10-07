@@ -144,10 +144,16 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 			stepBlocks = append(stepBlocks, ContextBlock{Layer: LayerControlInstructions, Kind: InstructionKindDeveloper, ObjectID: "validation_feedback", Text: "上一次回答未通过校验：" + sanitizeValidationFeedback(validationFeedback) + "。请重新生成完整的 record_array_v1，覆盖当前任务清单并使用当前回答类型允许的字段。", Required: true})
 		}
 		var budgetSnapshot ModelBudgetSnapshot
+		wrappingUp := false
 		if budgets != nil {
 			ledger, err := budgets.GetBudget(ctx, BudgetRun, initial.RunID)
 			if err != nil {
 				return outcome, err
+			}
+			wrappingUp = wrapUpRequired(ledger.Limits, ledger.Used, ledger.Reserved)
+			if wrappingUp {
+				stepTools = nil
+				stepBlocks = append(stepBlocks, ContextBlock{Layer: LayerControlInstructions, Kind: InstructionKindDeveloper, ObjectID: "budget_wrap_up", Text: runWrapUpInstruction, Required: true})
 			}
 			inputBudget := ledger.Limits.MaxTokens - ledger.Used.Tokens - ledger.Reserved.Tokens - agentOutputTokenReserve
 			stepBlocks, err = TrimContext(stepBlocks, inputBudget)
@@ -198,6 +204,14 @@ func runDecisionLoop(ctx context.Context, model AgentModel, tools ToolExecutor, 
 			return outcome, err
 		}
 		normalizeDecisionEvidence(&decision, evidenceKeys, turnID)
+		if wrappingUp && decision.Action == ActionCallTools {
+			if validationRetries == 0 && step+1 < maxSteps {
+				validationRetries++
+				validationFeedback = "预算已用尽，本次不得再调用工具：请基于已有任务清单与工具结果直接给出 final_answer，或按 request_input 追问用户"
+				continue
+			}
+			return outcome, NewExecutorError("budget_exhausted", false, 0, errors.New("budget wrap-up produced no terminal action"))
+		}
 		nextCallKeys := cloneKeySet(callKeys)
 		if err := validateDecisionReferences(decision, taskItems, nextCallKeys, operationIDs, evidenceKeys, initial.RunID); err != nil {
 			if validationRetries == 0 && step+1 < maxSteps {
@@ -426,6 +440,22 @@ func sanitizeValidationFeedback(text string) string {
 
 const agentOutputTokenReserve = 2048
 
+const (
+	runWrapUpModelCalls   = 1
+	runWrapUpTokenReserve = 16000
+	runWrapUpInstruction  = "本次调用的预算即将耗尽：不得再调用工具，也不得新增任务项；必须基于已有任务清单与工具结果直接给出 final_answer（资料不足时在正文或 limitation 中说明局限），或按 request_input 追问用户。"
+)
+
+func wrapUpRequired(limits BudgetLimits, used, reserved BudgetAmount) bool {
+	if limits.MaxModelCalls > 0 && used.ModelCalls+reserved.ModelCalls+1+runWrapUpModelCalls > limits.MaxModelCalls {
+		return true
+	}
+	if limits.MaxTokens > 0 && used.Tokens+reserved.Tokens+runWrapUpTokenReserve > limits.MaxTokens {
+		return true
+	}
+	return false
+}
+
 func contextTokenCount(blocks []ContextBlock) int {
 	total := 0
 	for _, block := range blocks {
@@ -635,6 +665,7 @@ func evidenceKeysForBlocks(blocks []ContextBlock) map[string]struct{} {
 // 在 Run 期间本来就没有可核验来源，模型却常标成业务事实；来源标注不准不应打死整轮回答，
 // 真正的事实边界由风险等级、限制说明与后续核实负责。
 func normalizeDecisionEvidence(decision *StepDecision, evidenceKeys map[string]struct{}, turnID string) {
+	sanitizeSubjectDescriptions(decision)
 	for groupIndex := range decision.Groups {
 		group := &decision.Groups[groupIndex]
 		for segmentIndex := range group.Segments {
@@ -651,6 +682,40 @@ func normalizeDecisionEvidence(decision *StepDecision, evidenceKeys map[string]s
 			group.Risks[riskIndex].Evidence = resolvableEvidenceRefs(group.Risks[riskIndex].Evidence, evidenceKeys)
 		}
 	}
+}
+
+// sanitizeSubjectDescriptions 清掉未明确对象里由模型误填的占位内容（例如 "turn"、
+// "source_turn_ids" 这类字段名或英文标识符）。它们不是对象描述，直接展示会让用户看到
+// 代码片段；清空后界面按通用文案处理。中文等自然语言描述保留。
+func sanitizeSubjectDescriptions(decision *StepDecision) {
+	for groupIndex := range decision.Groups {
+		subjects := decision.Groups[groupIndex].Subjects
+		for index := range subjects {
+			if subjects[index].Kind != SubjectUnresolved {
+				continue
+			}
+			if isPlaceholderDescription(subjects[index].Description) {
+				subjects[index].Description = ""
+			}
+		}
+	}
+}
+
+// isPlaceholderDescription 报告描述是否只有 ASCII 标识符字符（字母、数字、下划线、
+// 连字符、空格）。自然语言描述包含中文等字符，不会被判定为占位。
+func isPlaceholderDescription(value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-', r == ' ':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 func withTurnEvidenceRef(refs []EvidenceRef, turnID string) []EvidenceRef {
@@ -758,13 +823,12 @@ func validateDecisionReferences(decision StepDecision, taskItems []TaskItem, cal
 	return nil
 }
 
-func addToolEvidence(evidenceKeys map[string]struct{}, result ToolResult) {
-	for _, ref := range toolEvidenceRefs(result) {
-		addEvidenceKey(evidenceKeys, ref.SourceType, ref.SourceID, ref.Version)
-	}
-}
-
 func toolEvidenceRefs(result ToolResult) []EvidenceRef {
+	// 知识结果的引用只认本次真实返回的 reference_id；目录级来源不进入 evidence_refs，
+	// 避免模型用「知识库」这个笼统来源顶替具体条目的引用校验。
+	if outcome, ok := knowledgeOutcomeOf(result.Data); ok {
+		return knowledgeEvidenceRefs(outcome)
+	}
 	refs := make([]EvidenceRef, 0)
 	if result.Source.SourceType != "" && result.Source.SourceID != "" {
 		refs = append(refs, EvidenceRef{SourceType: result.Source.SourceType, SourceID: result.Source.SourceID, Version: result.Source.Version})
@@ -819,6 +883,9 @@ func toolResultText(r ToolResult) string {
 	if r.Error != nil {
 		return fmt.Sprintf("[tool %s] error: %s", r.ToolCallID, r.Error.Reason)
 	}
+	if outcome, ok := knowledgeOutcomeOf(r.Data); ok {
+		return outcome.referenceText()
+	}
 	payload := map[string]any{
 		"tool_call_id": r.ToolCallID,
 		"status":       r.Status,
@@ -851,6 +918,8 @@ func toolResultSchema(r ToolResult) string {
 		return "health_record_search_outcome_v1"
 	case HealthRecordAggregateOutcome, *HealthRecordAggregateOutcome:
 		return "health_record_aggregate_outcome_v1"
+	case KnowledgeSearchOutcome, *KnowledgeSearchOutcome:
+		return "pet_knowledge_search_outcome_v1"
 	default:
 		return "unknown"
 	}

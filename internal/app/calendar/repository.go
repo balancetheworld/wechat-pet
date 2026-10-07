@@ -485,18 +485,6 @@ func (r *SQLRepository) listDayReminders(ctx context.Context, familyID, date str
 	return result, rows.Err()
 }
 
-func (r *SQLRepository) getRecordReminder(ctx context.Context, familyID, recordID string) (*ReminderDTO, error) {
-	row := r.db.QueryRowContext(ctx, r.query(reminderSelect("m.family_id = ? AND m.source_record_id = ? ORDER BY m.created_at DESC, m.id DESC LIMIT 1")), familyID, recordID)
-	value, err := scanReminder(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	return &value, nil
-}
-
 func (r *SQLRepository) listRecordReminders(ctx context.Context, familyID, recordID string) ([]ReminderDTO, error) {
 	rows, err := r.db.QueryContext(ctx, r.query(reminderSelect("m.family_id = ? AND m.source_record_id = ? ORDER BY m.reminder_date, m.created_at, m.id")), familyID, recordID)
 	if err != nil {

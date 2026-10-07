@@ -33,6 +33,18 @@ type ToolExecutionScope struct {
 	Operations operationPreparer
 	Results    ToolResultStore
 	Sources    SourceVersionRepository
+	Knowledge  KnowledgeSource
+	// PetFacts 是本次会话已授权宠物的物种与生命周期（Runtime 从档案读取）。
+	// 键包含全部已授权宠物，读不到时保持零值；知识检索据此注入过滤条件，
+	// 模型不能自行指定物种或生命周期。
+	PetFacts map[string]PetProfileFacts
+}
+
+// PetProfileFacts 是 Runtime 从档案确认的宠物事实，供只读检索注入过滤条件。
+// 为空字段表示未确认，调用方不得据此猜测，也不得用品种或用户原话替代。
+type PetProfileFacts struct {
+	Species   string // 知识库物种码 cat/dog
+	LifeStage string // 知识库生命周期码 young/adult/mature/senior
 }
 
 // ToolExecutorAdapter 实现 ToolExecutor（文档 7 节）。
@@ -170,6 +182,9 @@ func (a *ToolExecutorAdapter) executeCall(ctx context.Context, call ToolCall) To
 	case ActionRead:
 		return a.readByResource(ctx, call, tool, args, queuedAt)
 	case ActionSearch:
+		if tool.ResourceType == ResourceKnowledge {
+			return a.searchKnowledge(ctx, call, args, queuedAt)
+		}
 		return a.searchRecords(ctx, call, args, queuedAt)
 	case ActionAggregate:
 		return a.aggregateRecords(ctx, call, args, queuedAt)
