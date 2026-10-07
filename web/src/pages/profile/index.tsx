@@ -406,6 +406,17 @@ function formatGender(value: string) {
   return value || '暂无记录'
 }
 
+/* 物种与后端知识库取值对齐 (cat/dog), 问问检索依赖此字段 */
+function formatSpecies(value?: string) {
+  if (value === 'cat') {
+    return '猫咪'
+  }
+  if (value === 'dog') {
+    return '狗狗'
+  }
+  return '待补充'
+}
+
 export default function Profile() {
   const pets = usePetStore(state => state.pets)
   const currentPetId = usePetStore(state => state.currentPetId)
@@ -1719,8 +1730,12 @@ export default function Profile() {
     const petName = profile?.name || selectedPet?.name || '宠'
     /* 详细介绍: 由档案字段自动生成一句话简介 */
     const bioParts: string[] = []
+    const speciesLabel = formatSpecies(profile?.species)
     if (profile?.breed) {
-      bioParts.push(`是一只${profile.breed}`)
+      bioParts.push(speciesLabel !== '待补充' ? `是一只${speciesLabel}，品种是${profile.breed}` : `是一只${profile.breed}`)
+    }
+    else if (speciesLabel !== '待补充') {
+      bioParts.push(`是一只${speciesLabel}`)
     }
     if (profile?.gender) {
       bioParts.push(`性别${formatGender(profile.gender)}`)
@@ -1763,6 +1778,10 @@ export default function Profile() {
             <View className="identity-fact">
               <Text className="identity-fact-key">性别</Text>
               <Text className="identity-fact-val">{formatGender(profile?.gender || '')}</Text>
+            </View>
+            <View className="identity-fact">
+              <Text className="identity-fact-key">物种</Text>
+              <Text className="identity-fact-val">{formatSpecies(profile?.species)}</Text>
             </View>
             <View className="identity-fact">
               <Text className="identity-fact-key">品种</Text>
