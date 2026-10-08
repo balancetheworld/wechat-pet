@@ -27,6 +27,7 @@ const largeLandingPattern = /play2/i
 /* 构建常量缺失(例如改了 config 没重启编译)时退化为不展示, 避免整个页面报错 */
 const askLandingGIFs = typeof TARO_APP_ASK_LANDING_GIFS === 'string' ? TARO_APP_ASK_LANDING_GIFS : ''
 const askAnswerGIF = typeof TARO_APP_ASK_ANSWER_GIF === 'string' ? TARO_APP_ASK_ANSWER_GIF : ''
+const askIdleGIF = typeof TARO_APP_ASK_IDLE_GIF === 'string' ? TARO_APP_ASK_IDLE_GIF : ''
 
 /* 未发起会话时随机展示一张 GIF: 模块级只求值一次, 本次小程序运行内保持不变 */
 const cdnLandingImages: LandingImage[] = askLandingGIFs.split(',').map(url => url.trim()).filter(Boolean).map(src => ({ src, large: largeLandingPattern.test(src) }))
@@ -47,9 +48,12 @@ const landingImage = landingImages.length ? landingImages[Math.floor(Math.random
 /* 回答态同样只在本地调试时兜底 */
 /* eslint-disable ts/no-require-imports -- 同上 */
 const localAnswerGif = TARO_APP_DEBUG ? require('../../assets/answer.gif') : ''
+/* 静默态: 回答完成/等待输入时, 右下角换成趴气泡摇尾巴的猫 */
+const localIdleGif = TARO_APP_DEBUG ? require('../../assets/cat-idle.gif') : ''
 /* eslint-enable ts/no-require-imports */
 
 const answerGif = askAnswerGIF || localAnswerGif
+const idleGif = askIdleGIF || localIdleGif
 
 const landingGreeting = `哈喽～我是你的宠物助手
 想闲聊、想问养宠的问题，都可以来找我。
@@ -220,8 +224,8 @@ export default function Ask() {
   const busy = phase === 'creating' || phase === 'thinking' || phase === 'reconnecting' || phase === 'replying'
   const hasError = Boolean(error) && (phase === 'input_error' || phase === 'ambiguous' || phase === 'network_error' || phase === 'failed')
   const hasConversation = conversation.length > 0 || hasError
-  /* 会话开始后, 把回答态的猫替换到导航栏位置 */
-  const answerCatImage = hasConversation ? answerGif : ''
+  /* 两层常驻: 回答态层 / 静默态层。过渡完全交给 CSS —— 交叉淡入(A) + 下沉(C) + 落地回弹(D)
+     不再挂一次性过渡素材: GIF 是无限循环的, 挂在上面的每一帧都在循环重播, 切换期间看着就是一直在闪 */
 
   async function handleSend() {
     if (!token) {
@@ -385,8 +389,19 @@ export default function Ask() {
             </View>
           </ScrollView>
         )}
-        {!!answerCatImage && (
-          <Image className="ask-answer-cat" src={answerCatImage} mode="aspectFit" />
+        {hasConversation && !!answerGif && (
+          <Image
+            className={`ask-answer-cat ask-answer-cat--busy${busy ? ' is-on' : ' is-off'}`}
+            src={answerGif}
+            mode="aspectFit"
+          />
+        )}
+        {hasConversation && !!idleGif && (
+          <Image
+            className={`ask-answer-cat ask-answer-cat--idle${busy ? ' is-off' : ' is-on'}`}
+            src={idleGif}
+            mode="aspectFit"
+          />
         )}
       </View>
       <View className="ask-input-bar">
