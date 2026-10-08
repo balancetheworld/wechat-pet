@@ -1,0 +1,11 @@
+# 上传图片的持久化卷。不挂这个卷，Pod 重建后用户上传的宠物照片会全部消失。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pet-uploads
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 20Gi

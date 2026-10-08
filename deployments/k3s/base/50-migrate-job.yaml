@@ -1,0 +1,37 @@
+# 数据库迁移 Job。必须按顺序执行完全部 54 个 migration，API 才能正常工作。
+# 同一镜像标签重复 apply 不会自动重跑；新增 migration 时先删除旧 Job：
+#   kubectl -n <namespace> delete job pet-migrate
+# 再重新 apply。
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pet-migrate
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        app: pet-migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: pet-migrate:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            # POSTGRES_PASSWORD 必须先声明，DATABASE_URL 里的 $(POSTGRES_PASSWORD) 才能展开
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pet-api-secret
+                  key: POSTGRES_PASSWORD
+            - name: DATABASE_URL
+              value: "postgres://pet:$(POSTGRES_PASSWORD)@postgres:5432/pet?sslmode=disable"
+          command:
+            - /migrate
+            - -source
+            - file:///migrations
+            - -database
+            - $(DATABASE_URL)
+            - -verbose
+            - up

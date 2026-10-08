@@ -1,0 +1,13 @@
+# 生产环境差异项。
+# 必须保持 APP_ENV=production：
+#   1. 启用 JWT_SECRET / AppSecret 等的强校验；
+#   2. 订阅消息走 miniprogramState=formal，正式版用户才能收到提醒。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pet-api-config
+data:
+  APP_ENV: "production"
+  # 改成你实际的生产域名，不带结尾斜杠。迁移到腾讯云时这个域名保持不变。
+  PUBLIC_BASE_URL: "https://api.example.com"
+  AI_ENABLED: "false"

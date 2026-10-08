@@ -1,0 +1,6 @@
+resources:
+  - 10-configmap.yaml
+  - 30-postgres.yaml
+  - 40-storage.yaml
+  - 50-migrate-job.yaml
+  - 60-api.yaml

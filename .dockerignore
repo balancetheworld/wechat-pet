@@ -1,0 +1,17 @@
+.git
+.github
+.agents
+.codex
+.spec-workflow
+.vscode
+.workbuddy
+.pnpm-store
+bin
+data
+docs
+web
+.env
+.env.*
+!.env.example
+*.md
+.DS_Store

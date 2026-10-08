@@ -1,0 +1,3 @@
+# 迁移工具镜像：把 migrations 目录打包进去，供 Job 一次性执行
+FROM migrate/migrate:v4.18.1
+COPY migrations /migrations

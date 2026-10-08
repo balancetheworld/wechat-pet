@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pet-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pet-api
+  template:
+    metadata:
+      labels:
+        app: pet-api
+    spec:
+      containers:
+        - name: api
+          image: pet-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: pet-api-config
+            - secretRef:
+                name: pet-api-secret
+          # POSTGRES_PASSWORD 必须在 DATABASE_DSN 之前声明，
+          # 否则 ConfigMap 里的 $(POSTGRES_PASSWORD) 无法展开
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: pet-api-secret
+                  key: POSTGRES_PASSWORD
+          # 实测：单进程常驻内存约 550~600 MB（两份 gse 分词词典各约 275 MB）。
+          # request 低于 512Mi 会让 Pod 因 OOM 反复重启，不要随意调小。
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          volumeMounts:
+            - name: uploads
+              mountPath: /app/data/uploads
+          # 健康检查端点是 /healthz，不带 /api/v1 前缀（internal/httpapi/router.go:45）
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 40
+            periodSeconds: 20
+      volumes:
+        - name: uploads
+          persistentVolumeClaim:
+            claimName: pet-uploads
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pet-api
+spec:
+  type: ClusterIP
+  selector:
+    app: pet-api
+  ports:
+    - port: 8080
+      targetPort: 8080

@@ -1,0 +1,25 @@
+# 生产入口。迁移到腾讯云后本文件失效，改由 Nginx / Traefik 承接。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pet-api
+  annotations:
+    traefik.ingress.kubernetes.io/proxy-body-size: "20m"
+    traefik.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - api.example.com
+      secretName: pet-tls
+  rules:
+    - host: api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pet-api
+                port:
+                  number: 8080

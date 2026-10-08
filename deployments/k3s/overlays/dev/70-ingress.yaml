@@ -1,0 +1,26 @@
+# K3s 默认自带 Traefik Ingress Controller，无需额外安装。
+# TLS 证书需先在 pet-dev 命名空间创建（见 deployments/k3s/README.md）。
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: pet-api
+  annotations:
+    traefik.ingress.kubernetes.io/proxy-body-size: "20m"
+    traefik.ingress.kubernetes.io/proxy-buffering: "off"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - dev-api.example.com
+      secretName: pet-tls
+  rules:
+    - host: dev-api.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: pet-api
+                port:
+                  number: 8080
