@@ -9,6 +9,12 @@ import { navigateBack } from '../../../utils/navigation'
 import './index.scss'
 
 /* ============ 选项常量(沿用 Pet-Manual 模式) ============ */
+/* 物种取值与后端知识库一致 (internal/platform/knowledge: cat/dog), 问问检索按此过滤 */
+const SPECIES_OPTIONS = [
+  { id: 'cat', label: '猫咪' },
+  { id: 'dog', label: '狗狗' },
+]
+
 const GENDER_OPTIONS = [
   { id: 'male', label: '男孩' },
   { id: 'female', label: '女孩' },
@@ -48,6 +54,7 @@ export default function PetEdit() {
   const [formArrival, setFormArrival] = useState(() => todayString())
   const [formHealth, setFormHealth] = useState('healthy')
   const [formBreed, setFormBreed] = useState('')
+  const [formSpecies, setFormSpecies] = useState('cat')
 
   const [loading, setLoading] = useState(isEdit)
   const [submitting, setSubmitting] = useState(false)
@@ -80,6 +87,9 @@ export default function PetEdit() {
           if (profile.breed) {
             setFormBreed(profile.breed)
           }
+          if (profile.species === 'cat' || profile.species === 'dog') {
+            setFormSpecies(profile.species)
+          }
           if (profile.gender === 'male' || profile.gender === 'female' || profile.gender === 'unknown') {
             setFormGender(profile.gender)
           }
@@ -108,6 +118,7 @@ export default function PetEdit() {
             arrival?: string
             health?: string
             breed?: string
+            species?: string
           } | undefined
           if (data) {
             if (data.avatar && !profile?.avatar_asset_id) {
@@ -130,6 +141,9 @@ export default function PetEdit() {
             }
             if (data.breed) {
               setFormBreed(data.breed)
+            }
+            if (data.species === 'cat' || data.species === 'dog') {
+              setFormSpecies(data.species)
             }
           }
         }
@@ -222,6 +236,7 @@ export default function PetEdit() {
         arrival: formArrival,
         health: formHealth,
         breed: breedValue,
+        species: formSpecies,
       }
       try {
         await Taro.setStorage({ key: `pet-extra-${value}`, data: extraData })
@@ -231,11 +246,13 @@ export default function PetEdit() {
       }
 
       if (petID) {
-        /* 全量字段提交: 后端 UPDATE 已支持 breed/gender/sterilized/birthday/home_date
-           (日期空字符串由后端转 NULL); 本地缓存仅作为头像/健康状态等未持久化字段的兜底 */
+        /* 全量字段提交: 后端 UPDATE 已支持 breed/species/gender/sterilized/birthday/home_date
+           (日期空字符串由后端转 NULL); species 为全量覆盖字段, 必须随每次保存一起提交;
+           本地缓存仅作为头像/健康状态等未持久化字段的兜底 */
         await updatePet(petID, {
           name: value,
           breed: breedValue,
+          species: formSpecies,
           gender: formGender,
           sterilized: formNeutered === 'yes',
           birthday: formBirth,
@@ -262,6 +279,7 @@ export default function PetEdit() {
         const created = await createPet({
           name: value,
           breed: breedValue,
+          species: formSpecies,
           gender: formGender,
           sterilized: formNeutered === 'yes',
           birthday: formBirth,
@@ -336,13 +354,29 @@ export default function PetEdit() {
           />
         </View>
 
+        {/* 物种: 问问知识库按 cat/dog 过滤检索, 决定回答内容的匹配度 */}
+        <View className="form-field">
+          <Text className="label">物种 *</Text>
+          <View className="chip-group chip-group-tight">
+            {SPECIES_OPTIONS.map(s => (
+              <Button
+                key={s.id}
+                className={`chip chip-sm${formSpecies === s.id ? ' selected' : ''}`}
+                onClick={() => setFormSpecies(s.id)}
+              >
+                <Text className="span">{s.label}</Text>
+              </Button>
+            ))}
+          </View>
+        </View>
+
         {/* 品种 */}
         <View className="form-field">
           <Text className="label">品种 *</Text>
           <Input
             className={inputCls('breed')}
             maxlength={20}
-            placeholder={inputPh('breed', '如：英国短毛猫')}
+            placeholder={inputPh('breed', formSpecies === 'dog' ? '如：金毛' : '如：英国短毛猫')}
             value={formBreed}
             onInput={event => setFormBreed(event.detail.value)}
             onFocus={focusOn('breed')}

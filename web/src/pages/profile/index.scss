@@ -2054,9 +2054,11 @@
   border-radius: 36rpx;
 }
 
+/* 列表固定高度: 恰好放下 3 行 (3 × 88rpx), 更多记录在卡片内上下滑动查看 */
 .weight-list {
   display: flex;
   flex-direction: column;
+  height: 264rpx;
 }
 
 /* 历史行: 日期 + 最新角标 + 数值 + 删除小叉 */
@@ -2066,8 +2068,6 @@
   align-items: center;
   gap: 12rpx;
   padding: 20rpx 18rpx;
-  margin-bottom: 12rpx;
-  border: 1rpx solid rgba(255, 255, 255, 0.66);
   border-radius: 14rpx;
   background: rgba(255, 255, 255, 0.42);
 }

@@ -34,7 +34,6 @@ const cdnLandingImages: LandingImage[] = askLandingGIFs.split(',').map(url => ur
 /* eslint-disable ts/no-require-imports -- 本地素材只作兜底, 生产构建中该分支常量 false, webpack 会连同大图一起丢弃 */
 const localLandingImages: LandingImage[] = TARO_APP_DEBUG
   ? [
-      { src: require('../../assets/play1.gif'), large: false },
       { src: require('../../assets/play2.gif'), large: true },
       { src: require('../../assets/sleepy.gif'), large: false },
       { src: require('../../assets/answer.gif'), large: false },
