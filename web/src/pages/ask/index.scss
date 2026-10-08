@@ -122,15 +122,52 @@
 
 /* --- AI 生成回答时左下角播放的动图 ---
    贴着会话区左下角, 底部会插到输入框下面一点(输入框 z-index 更高会盖住), 不拦截点击
-   z-index 1: 压在所有静态兄弟节点之上, 但低于会话文字(2), 避免挡住回答内容 */
+   z-index 1: 压在所有静态兄弟节点之上, 但低于会话文字(2), 避免挡住回答内容
+   两层常驻: 回答态层 / 静默态层。过渡 = A 交叉淡入 + C 下沉 + D 落地回弹, 全交给 CSS,
+   不再挂一次性过渡素材(GIF 无限循环, 挂着会反复重播, 看着就是在闪) */
 .ask-answer-cat {
   position: absolute;
   z-index: 1;
-  left: 0;
-  bottom: -48rpx;
-  width: 210rpx;
-  height: 280rpx;
+  left: 6rpx;
   pointer-events: none;
+
+  /* 回答中(answer.gif, 近方形素材): 放大显示 */
+  &--busy {
+    bottom: -12rpx;
+    width: 320rpx;
+    height: 320rpx;
+    /* A: 淡出放慢一档, 和静默态的下落淡入整段交叠, 中间不留空档 */
+    transition: opacity 340ms ease-in-out;
+  }
+
+  /* 静默趴姿猫(3:2 横版, 爪子在图片底边): 比回答态小, 再下沉让爪子搭进输入框上沿 */
+  &--idle {
+    bottom: -36rpx;
+    width: 264rpx;
+    height: 176rpx;
+    transition: opacity 360ms ease-in-out;
+  }
+
+  /* C+D: 落到静默态时从上方 28rpx 处淡入下落, 轻微过冲再回稳, 像轻轻趴下去;
+     回到回答态时 is-on 被摘掉, transform 直接归零, 不会补一段反向动画 */
+  &--idle.is-on {
+    animation: cat-settle 620ms cubic-bezier(0.26, 0.86, 0.34, 1.04) both;
+  }
+
+  &.is-on {
+    opacity: 1;
+  }
+
+  &.is-off {
+    opacity: 0;
+  }
+}
+
+@keyframes cat-settle {
+  0% { transform: translateY(-28rpx); }
+  58% { transform: translateY(4rpx); }
+  78% { transform: translateY(-4rpx); }
+  100% { transform: translateY(0); }
 }
 
 /* --- 预设问题(贴在猫精灵下方,不贴输入框) --- */
