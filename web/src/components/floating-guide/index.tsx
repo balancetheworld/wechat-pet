@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import cat2Image from '../../assets/cat2.png'
 import { routes } from '../../constants/routes'
 import { useAppStore } from '../../stores/app-store'
-import { reLaunch } from '../../utils/navigation'
+import { switchTab } from '../../utils/navigation'
 import './index.scss'
 
 const CALENDAR_HINT = '后续点击右上角的“账户”按钮，可以修改或加入家庭哦'
@@ -24,7 +24,27 @@ export function FloatingGuide() {
   const setGuideStage = useAppStore(state => state.setGuideStage)
   const [text, setText] = useState('')
   const [leaving, setLeaving] = useState(false)
+  const [waitingTap, setWaitingTap] = useState(false)
   const cancelledRef = useRef(false)
+  const tapResolverRef = useRef<(() => void) | null>(null)
+
+  /* 收尾语逐句播放: 打完一句后挂起, 等用户点击任意处再继续下一句 */
+  function waitTap(): Promise<void> {
+    return new Promise<void>((resolve) => {
+      tapResolverRef.current = resolve
+      setWaitingTap(true)
+    })
+  }
+
+  function resolveTap() {
+    const resolve = tapResolverRef.current
+    if (!resolve) {
+      return
+    }
+    tapResolverRef.current = null
+    setWaitingTap(false)
+    resolve()
+  }
 
   const typeText = useCallback(async (value: string, speed = 60) => {
     for (let i = 0; i <= value.length; i += 1) {
@@ -61,14 +81,14 @@ export function FloatingGuide() {
         await typeText(PROFILE_HINT)
       }
       else {
-        /* 收尾语: 连续多句自动播放, 不需要用户点击 */
+        /* 收尾语: 每句打完后等用户点击任意处, 再擦除并继续下一句 */
         for (const line of OUTRO_LINES) {
           await typeText(line)
-          await sleep(650)
-          await eraseText(line)
+          await waitTap()
           if (disposed || cancelledRef.current) {
             return
           }
+          await eraseText(line)
         }
         setLeaving(true)
         await sleep(420)
@@ -88,17 +108,22 @@ export function FloatingGuide() {
     return null
   }
 
-  /* 等待用户点击任意处的阶段: 铺一层透明捕获层 */
-  const showCatcher = guideStage === 'calendar' || guideStage === 'profile'
+  /* 等待用户点击任意处的阶段: 铺一层透明捕获层
+     (前两个板块整段等待; 收尾语只在每句打完后的等待期铺层) */
+  const showCatcher = guideStage === 'calendar' || guideStage === 'profile' || (guideStage === 'outro' && waitingTap)
 
   function handleCatch() {
     if (guideStage === 'calendar') {
-      /* 第 7 轮: 点击任意处后自动跳转到档案页继续第 8 轮 */
+      /* 第 7 轮: 点击任意处后切换到档案页继续第 8 轮
+         (switchTab 保住 tabBar 页面栈, 避免整页销毁重建造成空屏卡顿) */
       setGuideStage('profile')
-      void reLaunch(routes.tabs.profile)
+      void switchTab(routes.tabs.profile)
     }
     else if (guideStage === 'profile') {
       setGuideStage('outro')
+    }
+    else if (guideStage === 'outro') {
+      resolveTap()
     }
   }
 

@@ -255,15 +255,59 @@
   margin: 14rpx 0 0 auto;
   padding: 0 16rpx;
   color: var(--primary-deep);
-  border: 1rpx solid rgba(127, 165, 214, 0.38);
+  border: 0;
   border-radius: 8rpx;
-  background: rgba(255, 254, 251, 0.76);
+  background: none;
   font-size: 22rpx;
   line-height: 50rpx;
 }
 
 .ask-copy-button::after {
   border: 0;
+}
+
+/* 图标版复制按钮: 两个叠加的圆角方框 (后上方浅色 + 前下方实色) */
+.ask-copy-button--icon {
+  width: 56rpx;
+  min-height: 56rpx;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: normal;
+}
+
+.ask-copy-icon {
+  position: relative;
+  width: 30rpx;
+  height: 30rpx;
+}
+
+/* 后面的方框: 左上角, 浅色 */
+.ask-copy-icon::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 22rpx;
+  height: 22rpx;
+  box-sizing: border-box;
+  border: 3rpx solid rgba(127, 165, 214, 0.55);
+  border-radius: 5rpx;
+}
+
+/* 前面的方框: 右下角, 实色 + 不透明底遮住后面方框的交叠线 */
+.ask-copy-icon::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 22rpx;
+  height: 22rpx;
+  box-sizing: border-box;
+  border: 3rpx solid var(--primary-deep);
+  border-radius: 5rpx;
+  background: rgba(255, 254, 251, 1);
 }
 
 .ask-error-report {
@@ -323,6 +367,11 @@
 .ask-answer-group {
   padding: 14rpx 0;
   border-bottom: 1rpx solid rgba(127, 165, 214, 0.2);
+}
+
+/* 最后一段回答不画下边框: 否则蓝线会压在复制键上方 */
+.ask-answer-group:last-child {
+  border-bottom: 0;
 }
 
 .ask-answer-subjects,

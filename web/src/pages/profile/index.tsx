@@ -2816,7 +2816,7 @@ kg
             </View>
             <Button className="close-button" onClick={() => setWeightListOpen(false)}>×</Button>
           </View>
-          <View className="weight-list">
+          <ScrollView className="weight-list" scrollY enhanced>
             {weightRecords.length === 0 && (
               <View className="weight-list-empty">
                 <Text className="p">还没有体重记录，点右下角"修改"后可以记下第一次称重。</Text>
@@ -2848,7 +2848,7 @@ kg
                 </View>
               </View>
             ))}
-          </View>
+          </ScrollView>
         </View>
       </View>
 
@@ -2932,7 +2932,7 @@ kg
             </View>
 
             <Text className="cal-field-label">发生日期</Text>
-            <Picker mode="date" value={growthFormDate} onChange={event => setGrowthFormDate(event.detail.value)}>
+            <Picker mode="date" value={growthFormDate} end={todayString()} onChange={event => setGrowthFormDate(event.detail.value)}>
               <View className="cal-picker-row">
                 <Text>{growthFormDate || '选择日期'}</Text>
                 <Text>选择</Text>
@@ -2980,7 +2980,7 @@ kg
 
             {/* 只填日期: 年份与年龄都由所选日期 + 宠物出生日期自动推导, 不再让用户填/看"几岁"输入框 */}
             <Text className="cal-field-label">生日日期</Text>
-            <Picker mode="date" value={birthdayFormDate} onChange={event => setBirthdayFormDate(event.detail.value)}>
+            <Picker mode="date" value={birthdayFormDate} end={todayString()} onChange={event => setBirthdayFormDate(event.detail.value)}>
               <View className="cal-picker">
                 <Text>{birthdayFormDate || '选择日期'}</Text>
                 <Text>选择</Text>
@@ -3029,7 +3029,7 @@ kg
             <Input className="cal-input" maxlength={30} value={certFormName} placeholder="如：狂犬病免疫证明" onInput={event => setCertFormName(event.detail.value)} />
 
             <Text className="cal-field-label">时间</Text>
-            <Picker mode="date" value={certFormDate} end={certFormDate || undefined} onChange={event => setCertFormDate(event.detail.value)}>
+            <Picker mode="date" value={certFormDate} end={todayString()} onChange={event => setCertFormDate(event.detail.value)}>
               <View className="cal-picker-row">
                 <Text>{certFormDate || '选择日期'}</Text>
                 <Text>选择</Text>
@@ -3099,7 +3099,7 @@ kg
               </View>
               <View className="cal-form-col">
                 <Text className="cal-field-label">测量日期</Text>
-                <Picker mode="date" value={weightFormDate} onChange={event => setWeightFormDate(event.detail.value)}>
+                <Picker mode="date" value={weightFormDate} end={todayString()} onChange={event => setWeightFormDate(event.detail.value)}>
                   <View className="cal-picker-row">
                     <Text>{weightFormDate || '选择日期'}</Text>
                     <Text>选择</Text>

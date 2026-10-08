@@ -128,7 +128,7 @@ function DeltaResult({ delta }: { delta: string }) {
   return (
     <View className="ask-copy-result">
       <RichText className="ask-markdown ask-delta" nodes={renderMarkdown(delta)} />
-      <Button className="ask-copy-button" onClick={() => void copyText(delta)} aria-label="复制回答">复制</Button>
+      <Button className="ask-copy-button ask-copy-button--icon" onClick={() => void copyText(delta)} aria-label="复制回答"><View className="ask-copy-icon" /></Button>
     </View>
   )
 }
@@ -219,7 +219,7 @@ export default function AskEventView({ event, input = '', events = emptyEvents, 
     return (
       <View className="ask-copy-result">
         <FactResult data={data} />
-        <Button className="ask-copy-button" onClick={() => void copyText(content)} aria-label="复制回答">复制</Button>
+        <Button className="ask-copy-button ask-copy-button--icon" onClick={() => void copyText(content)} aria-label="复制回答"><View className="ask-copy-icon" /></Button>
       </View>
     )
   }
@@ -228,7 +228,7 @@ export default function AskEventView({ event, input = '', events = emptyEvents, 
     return (
       <View className="ask-copy-result">
         <FamilyPetsResult data={data} />
-        <Button className="ask-copy-button" onClick={() => void copyText(`家里的宠物（${data.count}只）：${data.pets.map(pet => pet.pet_name).join('、')}`)} aria-label="复制回答">复制</Button>
+        <Button className="ask-copy-button ask-copy-button--icon" onClick={() => void copyText(`家里的宠物（${data.count}只）：${data.pets.map(pet => pet.pet_name).join('、')}`)} aria-label="复制回答"><View className="ask-copy-icon" /></Button>
       </View>
     )
   }
@@ -237,7 +237,7 @@ export default function AskEventView({ event, input = '', events = emptyEvents, 
     return (
       <View className="ask-message ask-message--assistant">
         <RichText className="ask-markdown" nodes={renderMarkdown(data.question)} />
-        <Button className="ask-copy-button" onClick={() => void copyText(data.question)} aria-label="复制回答">复制</Button>
+        <Button className="ask-copy-button ask-copy-button--icon" onClick={() => void copyText(data.question)} aria-label="复制回答"><View className="ask-copy-icon" /></Button>
       </View>
     )
   }
@@ -246,7 +246,7 @@ export default function AskEventView({ event, input = '', events = emptyEvents, 
     return (
       <View className="ask-message ask-message--assistant">
         <AssistantResult data={data} petNames={petNames} />
-        <Button className="ask-copy-button" onClick={() => void copyText(data.answer)} aria-label="复制回答">复制</Button>
+        <Button className="ask-copy-button ask-copy-button--icon" onClick={() => void copyText(data.answer)} aria-label="复制回答"><View className="ask-copy-icon" /></Button>
       </View>
     )
   }
@@ -257,7 +257,7 @@ export default function AskEventView({ event, input = '', events = emptyEvents, 
         <Text className="ask-risk-level">需要立即处理</Text>
         <Text className="ask-result-title">{data.message}</Text>
         <Text className="ask-risk-action">{data.action}</Text>
-        <Button className="ask-copy-button" onClick={() => void copyText(`${data.message}\n${data.action}`)} aria-label="复制回答">复制</Button>
+        <Button className="ask-copy-button ask-copy-button--icon" onClick={() => void copyText(`${data.message}\n${data.action}`)} aria-label="复制回答"><View className="ask-copy-icon" /></Button>
       </View>
     )
   }
@@ -267,7 +267,7 @@ export default function AskEventView({ event, input = '', events = emptyEvents, 
     return (
       <View className="ask-copy-result">
         <AnalysisResult data={data} />
-        <Button className="ask-copy-button" onClick={() => void copyText(content)} aria-label="复制回答">复制</Button>
+        <Button className="ask-copy-button ask-copy-button--icon" onClick={() => void copyText(content)} aria-label="复制回答"><View className="ask-copy-icon" /></Button>
       </View>
     )
   }

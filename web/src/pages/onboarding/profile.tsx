@@ -12,7 +12,7 @@ import { applyJoinFamily, createFamily } from '../../services/family'
 import { updateProfile, uploadAvatar } from '../../services/user'
 import { useAuthStore } from '../../stores/auth-store'
 import { useFamilyStore } from '../../stores/family-store'
-import { navigateTo, reLaunch, switchTab } from '../../utils/navigation'
+import { navigateTo, reLaunch } from '../../utils/navigation'
 import './profile.scss'
 
 type ChooseAvatarEvent = Parameters<NonNullable<ButtonProps['onChooseAvatar']>>[0]
@@ -277,10 +277,6 @@ export default function ProfileOnboarding() {
     setFamilyCode('')
   }
 
-  function handleSkip() {
-    void switchTab(routes.tabs.calendar)
-  }
-
   async function handleJoinFamily() {
     const value = familyCode.trim().toUpperCase()
     if (value.length < 4 || value.length > 32) {
@@ -319,12 +315,6 @@ export default function ProfileOnboarding() {
           onClick={handleHelloClick}
         >
           你好
-        </Button>
-      )}
-
-      {helloMounted && (
-        <Button className="profile-onboarding__skip" onClick={handleSkip}>
-          跳过
         </Button>
       )}
 
@@ -395,12 +385,6 @@ export default function ProfileOnboarding() {
             加入家庭
           </Button>
         </View>
-      )}
-
-      {familyStep === 'choice' && (
-        <Button className="profile-onboarding__skip" onClick={handleSkip}>
-          跳过
-        </Button>
       )}
 
       {familyStep === 'create' && (
